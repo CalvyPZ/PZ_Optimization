@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- decompiled/ is the source root (package tree). projectzomboid.jar supplies
+     the bundled third-party libs (trove, lwjgl, joml, ...) so every type resolves;
+     the source folder wins over the jar for the game's own classes, which is the
+     same shadowing order the game's classpath uses.
+     src/overrides holds our copies of the classes we shadow, so those files are
+     excluded from decompiled/ to avoid duplicate-type errors; src/pzopt holds
+     the new helper classes. -->
+<classpath>
+	<classpathentry kind="src" path="src/overrides"/>
+	<classpathentry kind="src" path="src/pzopt"/>
+	<classpathentry kind="src" path="decompiled" excluding="zombie/iso/IsoChunk.java|zombie/iso/WorldStreamer.java"/>
+	<classpathentry kind="lib" path="/games/steamapps/common/ProjectZomboid/projectzomboid.jar"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="output" path=".jdtls-out"/>
+</classpath>

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Decompile the overridden game classes from the current projectzomboid.jar
+# with Vineflower into build/vineflower/, so after a game update the fresh
+# output can be diffed against src/overrides/ and our changes re-applied.
+#
+# Vineflower (not CFR) is used for the overrides because its output for these
+# classes recompiles with a single fix; CFR's needs several (loop-variable
+# scoping, un-rendered StringConcatFactory calls). decompiled/ stays CFR for
+# reading. Get the jar from https://github.com/Vineflower/vineflower/releases.
+set -euo pipefail
+
+PZ_DIR="${PZ_DIR:-/games/steamapps/common/ProjectZomboid}"
+JAR="$PZ_DIR/projectzomboid.jar"
+VF_JAR="${VF_JAR:-$HOME/.local/share/java/vineflower.jar}"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="$REPO/build/vineflower"
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer)
+
+[[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
+[[ -f "$VF_JAR" ]] || { echo "vineflower not found: $VF_JAR" >&2; exit 1; }
+
+rm -rf "$OUT"
+mkdir -p "$OUT/classes" "$OUT/src"
+patterns=()
+for c in "${OVERRIDES[@]}"; do patterns+=("$c.class" "$c\$*.class"); done
+( cd "$OUT/classes" && unzip -q -o "$JAR" "${patterns[@]}" )
+java -jar "$VF_JAR" --silent=1 -jrt=1 --indent-string='   ' "$OUT/classes" "$OUT/src" >/dev/null
+
+echo "decompiled into $OUT/src; diff against src/overrides:"
+for c in "${OVERRIDES[@]}"; do
+  echo "  diff -u $OUT/src/$c.java src/overrides/$c.java"
+done

@@ -1,0 +1,152 @@
+package pzopt;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import zombie.characters.animals.pathfind.AnimalPathfind;
+import zombie.core.ThreadGroups;
+import zombie.iso.IsoChunk;
+
+/**
+ * Bounded worker pool for the pooled part of a chunk's recalc pass
+ * (IsoChunk.recalcPooled: everything after the RecalcProperties loop).
+ *
+ * The streamer thread keeps the queue, the disk read and loop 1, then calls
+ * {@link #submit}. Workers run the pass; an {@link OrderedPublisher} hands
+ * finished chunks to the game thread (IsoChunk.loadGridSquare) in submission
+ * order. A chunk whose pass threw is not published: it is queued for the
+ * streamer thread, which re-runs the full stock pass on it ({@link #runRetries})
+ * and publishes the result, so the world never sees a half-recalculated chunk.
+ */
+public final class RecalcPool {
+   /** Bookkeeping carried from submit to publish. */
+   public static final class Task {
+      final IsoChunk chunk;
+      final Stats.Timing timing;
+      OrderedPublisher.Entry<Task> entry;
+
+      Task(IsoChunk chunk, Stats.Timing timing) {
+         this.chunk = chunk;
+         this.timing = timing;
+      }
+   }
+
+   private static final int WIDTH = Config.effectiveWorkers();
+   private static volatile ExecutorService executor;
+   private static final AtomicInteger threadIndex = new AtomicInteger();
+   private static final ConcurrentLinkedQueue<Task> retries = new ConcurrentLinkedQueue<>();
+   private static final OrderedPublisher<Task> publisher = new OrderedPublisher<>(RecalcPool::publish, RecalcPool::failed);
+
+   private RecalcPool() {
+   }
+
+   /** True when the pass should be handed to workers rather than run inline. */
+   public static boolean active() {
+      return WIDTH > 1;
+   }
+
+   public static int width() {
+      return WIDTH;
+   }
+
+   private static ExecutorService executor() {
+      ExecutorService e = executor;
+      if (e == null) {
+         synchronized (RecalcPool.class) {
+            e = executor;
+            if (e == null) {
+               AnimalPathfind.getInstance(); // lazy singleton reached from RecalcProperties; initialise it here, once
+               e = Executors.newFixedThreadPool(WIDTH, r -> {
+                  Thread t = new Thread(ThreadGroups.Workers, r, Guard.WORKER_PREFIX + threadIndex.getAndIncrement());
+                  t.setDaemon(true);
+                  t.setPriority(Thread.NORM_PRIORITY);
+                  return t;
+               });
+               executor = e;
+               Log.info("recalc pool started with " + WIDTH + " workers");
+            }
+         }
+      }
+      return e;
+   }
+
+   /** Streamer thread: loop 1 is done; run the rest on a worker and publish in order. */
+   public static void submit(IsoChunk chunk, Stats.Timing timing) {
+      Task task = new Task(chunk, timing);
+      task.entry = publisher.submit(task);
+      executor().execute(() -> run(task));
+   }
+
+   private static void run(Task task) {
+      Throwable failure = null;
+      try {
+         task.timing.recalcStartNs = System.nanoTime();
+         task.timing.thread = Thread.currentThread().getName();
+         task.chunk.recalcPooled();
+         task.timing.recalcEndNs = System.nanoTime();
+      } catch (Throwable t) {
+         failure = t;
+      }
+      publisher.complete(task.entry, failure);
+   }
+
+   private static void publish(OrderedPublisher.Entry<Task> e) {
+      Task task = e.item;
+      Parity.capture(task.chunk);
+      IsoChunk.loadGridSquare.add(task.chunk);
+      task.timing.publishNs = System.nanoTime();
+      Stats.done(task.chunk, task.timing);
+   }
+
+   private static void failed(OrderedPublisher.Entry<Task> e) {
+      Task task = e.item;
+      Log.error("recalc of chunk " + task.chunk.wx + "," + task.chunk.wy + " failed on " + Thread.currentThread().getName()
+            + ": " + e.failure + "; will retry the full pass on the streamer thread");
+      retries.add(task);
+      StreamerWake.signal();
+   }
+
+   /** Streamer thread, each loop: re-run the stock pass for failed chunks and publish them. */
+   public static void runRetries() {
+      Task task;
+      while ((task = retries.poll()) != null) {
+         try {
+            task.timing.recalcStartNs = System.nanoTime();
+            task.timing.thread = Thread.currentThread().getName() + "(retry)";
+            task.chunk.loadInWorldStreamerThread();
+            task.timing.recalcEndNs = System.nanoTime();
+         } catch (Exception ex) {
+            // same as stock: log and publish what we have rather than losing the chunk
+            zombie.core.logger.ExceptionLogger.logException(ex);
+            Log.error("retry of chunk " + task.chunk.wx + "," + task.chunk.wy + " failed too; publishing as stock would");
+         }
+         publish(task.entry);
+         publisher.resolve(task.entry);
+      }
+   }
+
+   public static int inFlight() {
+      return publisher.inFlight() + retries.size();
+   }
+
+   /** Streamer thread on stop: wait for every submitted chunk to be published. */
+   public static void drain() {
+      long deadline = System.currentTimeMillis() + 30_000L;
+      while (inFlight() > 0 && System.currentTimeMillis() < deadline) {
+         runRetries();
+         try {
+            Thread.sleep(2L);
+         } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return;
+         }
+      }
+      if (inFlight() > 0) {
+         Log.error("recalc pool drain timed out with " + inFlight() + " chunks in flight");
+      }
+   }
+
+   /** Test hook: simulate a worker throwing for the given chunk coordinates (dev builds only). */
+   public static volatile String failChunk = System.getProperty("pzopt.failChunk", HarnessFlags.get("fail_chunk", ""));
+}

@@ -1,0 +1,21 @@
+# Decompiled game source (24 MB, copyrighted). Regenerate with scripts/decompile.sh.
+/decompiled/
+
+# jdtls / Eclipse JDT workspace state
+/.jdtls-out/
+/.settings/org.eclipse.core.resources.prefs
+
+# build output of scripts/build.sh
+/build/
+
+# harness run outputs (logs, captures)
+/harness/runs/
+
+# harness run outputs (logs, captures)
+/harness/runs/
+
+# CodeGraph index (regenerate with `codegraph index`)
+/.codegraph/
+
+# Decompiled game classes with our edits (see docs/override-edits.md); regenerate with scripts/regen-overrides.sh
+/src/overrides/

@@ -1,0 +1,3 @@
+name=pzopt harness
+id=pzopt-harness
+description=Test driver for PZ_Optimization: auto-continues the latest save when harness/run.sh asks it to. Not a gameplay mod.

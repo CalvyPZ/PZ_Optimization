@@ -1,0 +1,24 @@
+baseline: base1-20260914-232513 and base2-20260914-232829 (noise floor = their spread, min absolute floor per metric)
+
+metric                                     stock   noise | bench-wake-w1-20260915 | bench-pool-w4-nowake-2 | bench-both-w2-20260915 | bench-both-w4-20260915 | bench-both-w8-20260915 | bench-killswitch-20260
+chunk latency p50 (enqueue→publish)        166.5     4.4 |     20.0    better 88% |    174.3  within noise |      9.7    better 94% |      9.3    better 94% |      9.1    better 95% |    175.4      WORSE 5%
+chunk latency p90                          310.1    17.3 |    183.5    better 41% |    292.7  within noise |    103.2    better 67% |     84.1    better 73% |     86.9    better 72% |    337.4  within noise
+chunk latency p99                         1024.0    36.7 |    810.7    better 21% |    706.7    better 31% |    555.6    better 46% |    516.9    better 50% |    502.9    better 51% |    922.6    better 10%
+chunks/s                                    45.8     1.2 |     46.4  within noise |     46.5  within noise |     46.5  within noise |     46.5  within noise |     46.5  within noise |     46.3  within noise
+recalc per chunk mean                        1.3     0.1 |      1.2  within noise |      1.6     WORSE 25% |      1.4  within noise |      1.7     WORSE 29% |      2.0     WORSE 54% |      1.3  within noise
+streamer busy                                8.4     0.5 |      7.8  within noise |      9.8     WORSE 16% |      8.5  within noise |     10.1     WORSE 20% |     11.6     WORSE 38% |      7.9  within noise
+frame mean                                   6.9     0.2 |      6.7  within noise |      6.6  within noise |      6.5  within noise |      6.6  within noise |      6.6  within noise |      6.5  within noise
+frame p99                                   17.8     0.6 |     16.7     better 6% |     17.1  within noise |     16.9  within noise |     17.2  within noise |     17.4  within noise |     17.1  within noise
+frame p99.9                                 25.2     2.0 |     23.5  within noise |     26.0  within noise |     23.6  within noise |     26.3  within noise |     25.7  within noise |     24.7  within noise
+frame max                                   51.1    23.0 |     48.7  within noise |    212.1    WORSE 315% |     51.4  within noise |     44.5  within noise |     44.2  within noise |    182.2    WORSE 257%
+frames >33ms                                 4.5     3.0 |      1.0  within noise |      4.0  within noise |      4.0  within noise |      5.0  within noise |      4.0  within noise |      3.0  within noise
+MangoHud p99                                18.4     0.7 |                      - |     17.1  within noise |                      - |     16.8     better 8% |     16.9     better 8% |                      -
+MangoHud p99.9                              29.6     4.7 |                      - |     26.7  within noise |                      - |     31.5  within noise |     30.4  within noise |                      -
+
+settings per run:
+  bench-wake-w1-20260915-105648: instrument=true workers=1 wake=true
+  bench-pool-w4-nowake-20260915-110307: instrument=true workers=4 wake=false
+  bench-both-w2-20260915-110606: instrument=true workers=2 wake=true
+  bench-both-w4-20260915-111155: instrument=true workers=4 wake=true
+  bench-both-w8-20260915-111532: instrument=true workers=8 wake=true
+  bench-killswitch-20260915-111934: instrument=true parallel=false wake=false

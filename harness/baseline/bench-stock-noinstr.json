@@ -1,0 +1,17 @@
+{
+ "run": "noinstr1-20260914-233147",
+ "mangohud": {
+  "count": 14842,
+  "us": {
+   "mean": 6736.483277186363,
+   "p50": 6064.4,
+   "p90": 10006.06,
+   "p99": 18499.93900000001,
+   "p99_9": 31507.610700000085,
+   "max": 153815.0
+  },
+  "over_33ms": 13,
+  "windowed": true
+ },
+ "props": "instrument=false\nparallel=false"
+}
