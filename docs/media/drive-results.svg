@@ -1,0 +1,141 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='1042' viewBox='0 0 1200 1042' role='img' aria-label='Stock versus optimized frame time, GPU load and chunk latency at 60 and 120 km/h'>
+<rect width='1200' height='1042' fill='#fcfcfb'/>
+<line x1='200.0' y1='100' x2='200.0' y2='516' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='440.0' y1='100' x2='440.0' y2='516' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='680.0' y1='100' x2='680.0' y2='516' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='920.0' y1='100' x2='920.0' y2='516' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='1160.0' y1='100' x2='1160.0' y2='516' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='200.0' y1='580' x2='200.0' y2='672' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='440.0' y1='580' x2='440.0' y2='672' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='680.0' y1='580' x2='680.0' y2='672' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='920.0' y1='580' x2='920.0' y2='672' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='1160.0' y1='580' x2='1160.0' y2='672' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='200.0' y1='736' x2='200.0' y2='936' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='440.0' y1='736' x2='440.0' y2='936' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='680.0' y1='736' x2='680.0' y2='936' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='920.0' y1='736' x2='920.0' y2='936' stroke='#e6e5e1' stroke-width='1'/>
+<line x1='1160.0' y1='736' x2='1160.0' y2='936' stroke='#e6e5e1' stroke-width='1'/>
+<text x='200' y='34' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='20' font-weight='600' fill='#0b0b0b'>Project Zomboid B42, 1,200 tiles east of Rosewood at max zoom</text>
+<text x='200' y='54' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='13' fill='#52514e'>Route-window statistics from harness/analyze.py, 5120x2160, native Linux, NVIDIA GL, RTX 4090 / 9800X3D, 2026-09-19</text>
+<rect x='970' y='24' width='12' height='12' rx='2' fill='#2a78d6'/>
+<text x='988' y='35' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='13' fill='#52514e'>stock</text>
+<rect x='1070' y='24' width='12' height='12' rx='2' fill='#eb6834'/>
+<text x='1088' y='35' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='13' fill='#52514e'>optimized</text>
+<text x='200' y='94' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='14' font-weight='600' fill='#0b0b0b'>Frame time, ms (lower is better)</text>
+<text x='188' y='123.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame mean</text>
+<text x='188' y='137.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='104' width='281.1' height='14' fill='#2a78d6'/>
+<text x='487.1' y='115' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>8.2</text>
+<rect x='200' y='120' width='144.0' height='14' fill='#eb6834'/>
+<text x='350.0' y='131' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>4.2</text>
+<text x='390.0' y='129' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>2.0× lower</text>
+<text x='188' y='177.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame mean</text>
+<text x='188' y='191.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='158' width='363.4' height='14' fill='#2a78d6'/>
+<text x='569.4' y='169' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>10.6</text>
+<rect x='200' y='174' width='219.4' height='14' fill='#eb6834'/>
+<text x='425.4' y='185' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>6.4</text>
+<text x='465.4' y='183' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>1.7× lower</text>
+<text x='188' y='231.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame p90</text>
+<text x='188' y='245.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='212' width='493.7' height='14' fill='#2a78d6'/>
+<text x='699.7' y='223' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>14.4</text>
+<rect x='200' y='228' width='144.0' height='14' fill='#eb6834'/>
+<text x='350.0' y='239' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>4.2</text>
+<text x='390.0' y='237' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>3.4× lower</text>
+<text x='188' y='285.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame p90</text>
+<text x='188' y='299.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='266' width='517.7' height='14' fill='#2a78d6'/>
+<text x='723.7' y='277' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>15.1</text>
+<rect x='200' y='282' width='288.0' height='14' fill='#eb6834'/>
+<text x='494.0' y='293' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>8.4</text>
+<text x='534.0' y='291' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>1.8× lower</text>
+<text x='188' y='339.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame p99</text>
+<text x='188' y='353.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='320' width='627.4' height='14' fill='#2a78d6'/>
+<text x='833.4' y='331' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>18.3</text>
+<rect x='200' y='336' width='185.1' height='14' fill='#eb6834'/>
+<text x='391.1' y='347' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>5.4</text>
+<text x='431.1' y='345' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>3.4× lower</text>
+<text x='188' y='393.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame p99</text>
+<text x='188' y='407.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='374' width='689.1' height='14' fill='#2a78d6'/>
+<text x='895.1' y='385' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>20.1</text>
+<rect x='200' y='390' width='380.6' height='14' fill='#eb6834'/>
+<text x='586.6' y='401' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>11.1</text>
+<text x='626.6' y='399' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>1.8× lower</text>
+<text x='188' y='447.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame p99.9</text>
+<text x='188' y='461.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='428' width='792.0' height='14' fill='#2a78d6'/>
+<text x='998.0' y='439' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>23.1</text>
+<rect x='200' y='444' width='630.9' height='14' fill='#eb6834'/>
+<text x='836.9' y='455' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>18.4</text>
+<text x='188' y='501.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>frame p99.9</text>
+<text x='188' y='515.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='482' width='867.4' height='14' fill='#2a78d6'/>
+<text x='1073.4' y='493' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>25.3</text>
+<rect x='200' y='498' width='654.9' height='14' fill='#eb6834'/>
+<text x='860.9' y='509' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>19.1</text>
+<text x='200.0' y='530' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>0</text>
+<text x='440.0' y='530' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>7</text>
+<text x='680.0' y='530' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>14</text>
+<text x='920.0' y='530' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>21</text>
+<text x='1160.0' y='530' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>28</text>
+<text x='200' y='574' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='14' font-weight='600' fill='#0b0b0b'>GPU busy, % of the route</text>
+<text x='188' y='603.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>gpu busy</text>
+<text x='188' y='617.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='584' width='883.2' height='14' fill='#2a78d6'/>
+<text x='1089.2' y='595' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>92</text>
+<rect x='200' y='600' width='518.4' height='14' fill='#eb6834'/>
+<text x='724.4' y='611' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>54</text>
+<text x='764.4' y='609' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>1.7× lower</text>
+<text x='188' y='657.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>gpu busy</text>
+<text x='188' y='671.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='638' width='787.2' height='14' fill='#2a78d6'/>
+<text x='993.2' y='649' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>82</text>
+<rect x='200' y='654' width='451.2' height='14' fill='#eb6834'/>
+<text x='657.2' y='665' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>47</text>
+<text x='697.2' y='663' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>1.7× lower</text>
+<text x='200.0' y='686' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>0</text>
+<text x='440.0' y='686' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>25</text>
+<text x='680.0' y='686' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>50</text>
+<text x='920.0' y='686' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>75</text>
+<text x='1160.0' y='686' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>100</text>
+<text x='200' y='730' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='14' font-weight='600' fill='#0b0b0b'>Chunk latency, ms from request to ready</text>
+<text x='188' y='759.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>chunk p50</text>
+<text x='188' y='773.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='740' width='432.3' height='14' fill='#2a78d6'/>
+<text x='638.3' y='751' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>153</text>
+<rect x='200' y='756' width='11.6' height='14' fill='#eb6834'/>
+<text x='217.6' y='767' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>4.1</text>
+<text x='257.6' y='765' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>37.3× lower</text>
+<text x='188' y='813.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>chunk p50</text>
+<text x='188' y='827.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='794' width='385.1' height='14' fill='#2a78d6'/>
+<text x='591.1' y='805' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>136</text>
+<rect x='200' y='810' width='11.9' height='14' fill='#eb6834'/>
+<text x='217.9' y='821' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>4.2</text>
+<text x='257.9' y='819' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>32.5× lower</text>
+<text x='188' y='867.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>chunk p99</text>
+<text x='188' y='881.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>60 km/h</text>
+<rect x='200' y='848' width='835.5' height='14' fill='#2a78d6'/>
+<text x='1041.5' y='859' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>296</text>
+<rect x='200' y='864' width='59.6' height='14' fill='#eb6834'/>
+<text x='265.6' y='875' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>21.1</text>
+<text x='305.6' y='873' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>14.0× lower</text>
+<text x='188' y='921.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' text-anchor='end' fill='#0b0b0b'>chunk p99</text>
+<text x='188' y='935.0' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='end' fill='#8a8983'>120 km/h</text>
+<rect x='200' y='902' width='901.3' height='14' fill='#2a78d6'/>
+<text x='1107.3' y='913' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>319</text>
+<rect x='200' y='918' width='52.5' height='14' fill='#eb6834'/>
+<text x='258.5' y='929' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='12' fill='#0b0b0b'>18.6</text>
+<text x='298.5' y='927' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#52514e'>17.2× lower</text>
+<text x='200.0' y='950' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>0</text>
+<text x='440.0' y='950' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>85</text>
+<text x='680.0' y='950' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>170</text>
+<text x='920.0' y='950' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>255</text>
+<text x='1160.0' y='950' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' text-anchor='middle' fill='#8a8983'>340</text>
+<text x='200' y='990' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#8a8983'>60 km/h: show-stock-1-20260919-000959 (stock) vs show-opt-1-20260919-001316 (optimized)</text>
+<text x='200' y='1006' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#8a8983'>120 km/h: show120-stock-2-20260919-005559 (stock) vs show120-opt-1-20260919-005848 (optimized)</text>
+<text x='200' y='1022' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='11' fill='#8a8983'>Optimized = Config.java defaults; stock = every override switched off. Frame times from the in-game sampler, GPU from sysmon, chunk latency = streamer queue wait.</text>
+</svg>
