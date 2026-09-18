@@ -13,7 +13,7 @@
 # JRE loads is never newer than it can read.
 set -euo pipefail
 
-PZ_DIR="${PZ_DIR:-/games/steamapps/common/ProjectZomboid}"
+source "$(dirname "${BASH_SOURCE[0]}")/pz-env.sh"
 JAR="$PZ_DIR/projectzomboid.jar"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$REPO/src"
@@ -22,7 +22,7 @@ OUT="$BUILD/classes"
 RELEASE="${RELEASE:-25}"   # java.class.version 69 in the shipped jar
 
 # Game classes we shadow. Every inner class of these is shadowed too.
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer)
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 command -v javac >/dev/null || { echo "javac not on PATH" >&2; exit 1; }
@@ -38,7 +38,7 @@ javac --release "$RELEASE" -nowarn -Xlint:-options -parameters -g \
 # Extract the stock copies of the overridden classes for comparison.
 patterns=()
 for c in "${OVERRIDES[@]}"; do patterns+=("$c.class" "$c\$*.class"); done
-( cd "$BUILD/stock" && unzip -q -o "$JAR" "${patterns[@]}" )
+( cd "$BUILD/stock" && for pat in "${patterns[@]}"; do unzip -q -o "$JAR" "$pat" || [[ $? -eq 11 ]]; done )  # 11 = pattern matched nothing (a class without inner classes)
 
 # Every class file the jar has for an override must exist in our output too,
 # otherwise the loose top-level class would load against the jar's inner class.

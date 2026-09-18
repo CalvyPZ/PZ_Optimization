@@ -2,7 +2,10 @@
 
 Performance work on Project Zomboid itself — the Java game, not a Lua mod.
 
-Build 42, install at `/games/steamapps/common/ProjectZomboid` (Proton layout).
+Build 42. Since 2026-09-18 the **native Linux** depot is installed:
+`/games/steamapps/common/ProjectZomboid/projectzomboid/` (jar, `ProjectZomboid64`,
+`ProjectZomboid64.json`), user dir `~/Zomboid`. The Windows/Proton layout is
+still supported by `scripts/pz-env.sh` (detected from the launcher binary).
 
 ## Why this is possible without patching the jar
 
@@ -77,8 +80,14 @@ Optional, for the game's Lua side (`media/lua`, 1,395 files) —
 | `scripts/pzopt.sh` | `install` / `uninstall` / `reinstall` / `status` / `check` against the game directory; never touches the jar; records what it wrote in `pzopt-installed.txt` |
 | `scripts/test.sh` | Unit tests in `tests/` (no game needed) |
 | `scripts/accept.sh` | build → reinstall → parity gate |
-| `harness/run.sh` | One hands-off game run: bench save reset from a template, auto-continue, scripted route, auto-quit, logs collected to `harness/runs/` |
+| `harness/run.sh` | One hands-off game run: bench save reset from a template, auto-continue, scripted route, auto-quit, logs collected to `harness/runs/`. Needs the Steam launch options set to `harness/steam-launch.sh %command%` (env/MangoHud injection; no-op outside a run). `--record` saves a screen recording of the run; `--mode drive` spawns a vehicle on the nearest road and drives it with cruise control |
+| `harness/steam-launch.sh`, `harness/sysmon.sh` | Steam launch wrapper (reads `~/Zomboid/pzopt-launch.env` written per run); CPU/GPU utilization sampler (nvidia-smi + /proc) |
+| `scripts/pz-env.sh` | Detects the install layout (native `…/projectzomboid/` + `~/Zomboid`, or Windows/Proton) for every script |
 | `harness/analyze.py`, `compare.py`, `parity.py`, `simulate.py` | Summaries, before/after comparison with noise floor, parity diff, streamer-loop model |
+| `harness/attribute.py`, `sections.py` | JFR game-thread attribution per frame (`--jfr` runs); GameProfiler section report (`--game-profiler` runs) |
+| `harness/dashboard.py` | Builds `docs/benchmark-progress.html` (+ `.json`) from every run directory: status vs the driving target, frame-tail / chunk-latency / utilization charts, plan progress, full table |
+| `docs/plan-driving-frame-time.md` | Current plan and performance target for driving frame time (2026-09-18 review) |
+| `config/mangohud-benchmark.conf` | Full MangoHud telemetry profile for benchmark CSV logs |
 | `harness/baseline/` | Stock numbers and the stock parity capture the gate compares against |
 | `tools/StaticAudit.java` | Bytecode reachability audit of static fields (`docs/recalc-static-audit.md`) |
 | `docs/` | Audit and findings |
@@ -87,6 +96,23 @@ Runtime settings live in `pzopt.properties` in the game directory (`parallel`,
 `workers`, `wake`, `instrument`, `dev`; see `Config.java`). The overrides
 disable themselves (stock behaviour, clear log line) when the game revision
 differs from the one they were built for.
+
+### Full MangoHud benchmark reporting
+
+Use the repository profile for a benchmark run so the CSV includes frame
+timing, CPU/GPU load and clocks, temperatures, power, memory, VRAM, process
+memory, throttling, and runtime metadata:
+
+```sh
+harness/run.sh --label stock-full-mh --mode bench --quit-after 90 \
+  --mangohud 90 --mangohud-config config/mangohud-benchmark.conf
+python3 harness/analyze.py harness/runs/stock-full-mh-*
+```
+
+`--mangohud-config` temporarily edits only the selected profile to set the
+run duration and output directory, then restores it on exit. The captured CSV
+is copied into the run directory as `mangohud.csv`; the normal analyzer still
+uses its `frametime` and `elapsed` columns for route-window statistics.
 
 ## The grid computation
 

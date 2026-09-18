@@ -14,7 +14,7 @@
 # exactly that and nothing else, even after a game update.
 set -euo pipefail
 
-PZ_DIR="${PZ_DIR:-/games/steamapps/common/ProjectZomboid}"
+source "$(dirname "${BASH_SOURCE[0]}")/pz-env.sh"
 JAR="$PZ_DIR/projectzomboid.jar"
 LAUNCHER_JSON="${LAUNCHER_JSON:-$PZ_DIR/ProjectZomboid64.json}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

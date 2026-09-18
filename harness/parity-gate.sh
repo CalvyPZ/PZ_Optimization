@@ -12,7 +12,7 @@
 # template (chunks the game generates on the fly are random).
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-ZOMBOID="${ZOMBOID:-/games/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid}"
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/pz-env.sh"
 TEMPLATE_MAP="$ZOMBOID/Saves/Sandbox/pzopt-bench-template/map"
 BASELINE="$REPO/harness/baseline/parity-stock.out"
 ROUTE="${PARITY_ROUTE:-E:200,S:200}"

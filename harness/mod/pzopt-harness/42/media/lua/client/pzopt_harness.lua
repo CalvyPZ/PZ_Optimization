@@ -1,12 +1,19 @@
 -- pzopt harness: hands-off game runs for PZ_Optimization.
 --
--- harness/run.sh writes ~/Zomboid/Lua/pzopt-harness.txt (getFileReader resolves under Lua/) (key=value lines) before
--- launching the game. If the file names a mode, this script presses
--- "Continue" on the main menu so latestSave.ini loads without any clicking,
--- and, when quit_after is set, quits that many seconds after the world is up.
--- Once acted on, "consumed=1" is appended so a return to the main menu does
--- not loop; the Java side (pzopt.Harness) still reads the other keys. Everything else the harness does lives in Java (pzopt.*), driven
--- from the overridden WorldStreamer on the game thread.
+-- harness/run.sh writes ~/Zomboid/Lua/pzopt-harness.txt (getFileReader resolves
+-- under Lua/) as key=value lines before launching the game. If the file names a
+-- mode, this script continues latestSave.ini from the main menu's own tick as
+-- soon as the menu accepts input (no click, no fixed wait) and, when quit_after is set, quits that many
+-- seconds after the world is up. Everything else the harness does lives in
+-- Java (pzopt.*), driven from the overridden WorldStreamer on the game thread.
+--
+-- Protocol on the flag file (it is the only state that survives: this script
+-- is reloaded when the game resets Lua for the save's mod set, and the menu
+-- fires OnMainMenuEnter more than once at start-up):
+--   consumed=1   appended here once Continue has been triggered in this process
+--   started=1    appended by pzopt.Harness once the world was up; back at the
+--                menu with it set means the run is over -> quit to desktop
+-- Without the file this script does nothing.
 
 local FLAG_FILE = "pzopt-harness.txt"
 
@@ -30,56 +37,60 @@ local function readFlags()
     return flags
 end
 
-local function consumeFlags()
-    local w = getFileWriter(FLAG_FILE, true, false)
+local function appendFlag(line)
+    -- true append: pzopt.Harness may already have added started=1 (the game auto-loads the
+    -- save before the menu delay elapses), and rewriting from a stale copy would drop it
+    local w = getFileWriter(FLAG_FILE, true, true)
     if not w then return end
-    for _, line in ipairs(rawLines) do w:write(line .. "\n") end
-    w:write("consumed=1\n")
+    w:write(line .. "\n")
     w:close()
 end
 
 local pending = nil
-local delayTicks = 0
+local quitAtMs = nil
 
 local function onMainMenuEnter()
     local flags = readFlags()
     if not flags or not flags.mode then return end
-    if flags.consumed then
-        -- back at the menu after a harness run: end the process so run.sh returns
+    if flags.started then
         print("[pzopt-harness] run finished, quitting to desktop")
         getCore():quit()
         return
     end
+    if flags.consumed then return end -- Continue already triggered by this process (Lua was reset)
     print("[pzopt-harness] mode=" .. tostring(flags.mode) .. " quit_after=" .. tostring(flags.quit_after))
     pending = flags
-    delayTicks = 90 -- let the menu finish building before pressing Continue
 end
 
-local quitAtMs = nil
-
-local function onTickEvenPaused()
+-- OnFETick is the only per-frame event the main menu fires (OnTickEvenPaused is in-world only,
+-- which is why earlier versions of this file never pressed Continue by themselves)
+local function onFETick()
     if pending then
-        delayTicks = delayTicks - 1
-        if delayTicks > 0 then return end
+        local ms = MainScreen.instance
+        -- MainScreen ignores menu actions while its own start-up delay runs; wait for that, nothing more
+        if not ms or (ms.delay and ms.delay > 0) then return end
         local flags = pending
         pending = nil
-        consumeFlags()
-        if getPlayer() or (MainScreen.instance and MainScreen.instance.inGame) then
-            print("[pzopt-harness] a world is already loading; not pressing Continue")
+        appendFlag("consumed=1")
+        -- quit_after counts from here whether we continue or the game is already loading the save
+        if flags.quit_after then
+            local secs = tonumber(flags.quit_after)
+            if secs then quitAtMs = getTimestampMs() + secs * 1000 end
+        end
+        if getPlayer() or ms.inGame then
+            print("[pzopt-harness] a world is already loading; not continuing")
             return
         end
         if not MainScreen.latestSaveWorld then
             print("[pzopt-harness] no latest save to continue")
             return
         end
-        print("[pzopt-harness] continuing latest save " .. tostring(MainScreen.latestSaveWorld))
-        if flags.quit_after then
-            local secs = tonumber(flags.quit_after)
-            if secs then quitAtMs = getTimestampMs() + secs * 1000 end
-        end
+        print("[pzopt-harness] continuing latest save " .. tostring(MainScreen.latestSaveWorld) .. " (" .. tostring(MainScreen.latestSaveGameMode) .. ")")
         MainScreen.continueLatestSave(MainScreen.latestSaveGameMode, MainScreen.latestSaveWorld)
-        return
     end
+end
+
+local function onTickEvenPaused()
     if quitAtMs and getTimestampMs() >= quitAtMs then
         quitAtMs = nil
         print("[pzopt-harness] quit_after reached, quitting")
@@ -88,4 +99,5 @@ local function onTickEvenPaused()
 end
 
 Events.OnMainMenuEnter.Add(onMainMenuEnter)
+Events.OnFETick.Add(onFETick)
 Events.OnTickEvenPaused.Add(onTickEvenPaused)

@@ -26,6 +26,11 @@ public final class Overrides {
    public static void onClassLoaded(String className) {
       Log.info("loaded override " + className + " (target revision " + BuildInfo.targetRevision() + ", "
             + (ENABLED ? "active" : "DISABLED: build mismatch") + ")");
+      try {
+         AutoStart.start(); // no-op unless the harness flag file names a mode
+      } catch (Throwable t) {
+         Log.warn("harness: auto-start not armed: " + t);
+      }
    }
 
    /** True when the running game is the build the overrides were compiled against. */

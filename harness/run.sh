@@ -2,7 +2,27 @@
 # Launch one hands-off game run and collect its log.
 #
 #   harness/run.sh --label <name> [--quit-after <secs>] [--mode <mode>] [--source-save <Mode/Name>]
-#                  [--flag k=v]... [--prop k=v]...
+#                  [--flag k=v]... [--prop k=v]... [--mangohud secs]
+#                  [--mangohud-config path]
+#                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
+#                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]...
+#                  [--lead secs] [--route-seconds secs] [--launcher auto|steam|direct] [--option key=value]...
+#
+# --launcher direct starts the native game itself (projectzomboid.sh, -Dzomboid.steam=0) instead of
+# asking the running Steam client; auto (default) does that whenever Steam is not running or not
+# logged in (a logged-out client silently ignores -applaunch). Steam mode needs the launch options set to
+#   <repo>/harness/steam-launch.sh %command%
+# (see that file): it is how MANGOHUD=1 and the renderer variables reach the game.
+#   --renderer zink  Mesa Zink (GL over the NVIDIA Vulkan driver) instead of NVIDIA's GL;
+#                    recorded in run.opts and in console.txt's "OpenGL version" line
+#   --env K=V        any other variable for the game process (repeatable)
+#
+# Profiling / A-B options (each restores what it touched on exit):
+#   --jfr            record a JFR flight recording of the run (settings=profile, dumped on exit)
+#                    by adding -XX:StartFlightRecording to the launcher JSON's vmArgs; collected as pzopt.jfr
+#   --jfr-period N   execution-sample period in ms for --jfr (default: the profile setting's 10 ms)
+#   --gc g1          launch with -XX:+UseG1GC instead of the JSON's -XX:+UseZGC
+#   --no-dashboard   run without the PZDashboard mod (removed from the bench save's mods.txt and default.txt)
 #
 # What it does:
 #   1. installs the pzopt-harness Lua mod into ~/Zomboid/mods (flag file goes to ~/Zomboid/Lua/) and enables it
@@ -19,15 +39,20 @@
 # The player's real saves are never loaded or written by a harness run.
 set -euo pipefail
 
-ZOMBOID="${ZOMBOID:-/games/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid}"
 APPID=108600
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+source "$REPO/scripts/pz-env.sh"   # PZ_DIR, ZOMBOID, PZ_LAYOUT, PZ_DIR_JVM
+LAYOUT="$PZ_LAYOUT"
+if [[ "$LAYOUT" == native ]]; then GAME_WRAPPER="${GAME_WRAPPER:-$PZ_DIR/../projectzomboid.sh}"; else GAME_WRAPPER="${GAME_WRAPPER:-$PZ_DIR/ProjectZomboid64.exe}"; fi
 MOD_SRC="$REPO/harness/mod/pzopt-harness"
 MOD_ID=pzopt-harness
 BENCH_SAVE="Sandbox/pzopt-bench"
 RUNS="$REPO/harness/runs"
+FLAG_FILE="$ZOMBOID/Lua/pzopt-harness.txt"
+NATIVE_FLAG_FILE="${NATIVE_ZOMBOID:-$HOME/Zomboid}/Lua/pzopt-harness.txt"
 
-label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""
+label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
+record=0; jfr=0; jfr_period=""; game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=75; route_seconds=""; launcher="auto"; game_options=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --label) label="$2"; shift 2 ;;
@@ -37,106 +62,367 @@ while [[ $# -gt 0 ]]; do
     --flag) extra_flags+=("$2"); shift 2 ;;   # extra key=value for pzopt-harness.txt
     --prop) props+=("$2"); shift 2 ;;         # key=value for the game dir's pzopt.properties (see pzopt.Config)
     --mangohud) mangohud_secs="$2"; shift 2 ;; # external frame-time log via MangoHud for N seconds from launch
+    --mangohud-config) mangohud_config="$2"; shift 2 ;; # config file used for this MangoHud run
+    --jfr) jfr=1; shift ;;
+    --jfr-period) jfr_period="$2"; shift 2 ;;
+    --game-profiler) game_profiler=1; shift ;;
+    --gc) gc="$2"; shift 2 ;;
+    --no-dashboard) no_dashboard=1; shift ;;
+    --refresh-template) refresh_template=1; shift ;; # rebuild the --source-save template from the source save
+    --retries) retries="$2"; shift 2 ;;              # relaunches after a start-up crash (default 2)
+    --renderer) renderer="$2"; shift 2 ;;
+    --lead) lead="$2"; shift 2 ;;                    # seconds from launch to the route start (world load + settle must fit)
+    --route-seconds) route_seconds="$2"; shift 2 ;;  # expected route length (bench: tiles/speed = 100; drive: max_seconds)
+    --env) game_env+=("$2"); shift 2 ;;
+    --record) record=1; shift ;;
+    --launcher) launcher="$2"; shift 2 ;;                # auto|steam|direct (see the header)
+    --option) game_options+=("$2"); shift 2 ;;           # key=value written into ~/Zomboid/options.ini for the run (restored on exit)                     # screen recording of the run (gpu-screen-recorder, first monitor) -> <run>/recording.mp4
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+if [[ -z "$route_seconds" ]]; then
+  if [[ "$mode" == drive ]]; then route_seconds=90; else route_seconds=100; fi
+fi
 [[ -n "$label" ]] || { echo "usage: $0 --label <name> [--quit-after secs] [--mode m] [--source-save Mode/Name] [--flag k=v]..." >&2; exit 2; }
 [[ -d "$ZOMBOID" ]] || { echo "Zomboid user dir not found: $ZOMBOID" >&2; exit 1; }
+[[ -e "$GAME_WRAPPER" ]] || { echo "game launcher not found: $GAME_WRAPPER" >&2; exit 1; }
+echo "layout=$LAYOUT install=$PZ_DIR user-dir=$ZOMBOID"
 if pgrep -f '[P]rojectZomboid64' >/dev/null; then echo "the game is already running" >&2; exit 1; fi
+steam_logged_in() {
+  pgrep -x steam >/dev/null || return 1
+  local log="$HOME/.local/share/Steam/logs/connection_log.txt"
+  [[ -f "$log" ]] || return 1
+  grep -a -o '\[Logged O[nf]*' "$log" | tail -1 | grep -q 'Logged On'
+}
+case "$launcher" in
+  auto) if steam_logged_in; then launcher=steam; else launcher=direct; echo "Steam is not running or not logged in: launching the game directly (--launcher direct)"; fi ;;
+  steam|direct) ;;
+  *) echo "unknown --launcher $launcher" >&2; exit 2 ;;
+esac
+# a locked desktop session never gives the game a display (it sits at "Creating display" forever)
+if command -v loginctl >/dev/null; then
+  sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3=="'"$USER"'" && $4=="seat0" {print $1; exit}')
+  if [[ -n "$sess" ]] && loginctl show-session "$sess" -p LockedHint 2>/dev/null | grep -q '=yes'; then
+    echo "the desktop session is locked; unlock it before a run (the game cannot create its window)" >&2; exit 1
+  fi
+fi
 
 # 1. harness mod
 rm -rf "$ZOMBOID/mods/$MOD_ID"
 cp -r "$MOD_SRC" "$ZOMBOID/mods/$MOD_ID"
 enable_mod() { # $1 = mods.txt path
-  # files are CRLF (written by the Windows build under Proton)
+  # files written by the Windows build under Proton are CRLF; the native build writes LF
   grep -q "mod = $MOD_ID," "$1" || sed -i "0,/^mods\r$/{n;s/^{\r$/{\r\n    mod = $MOD_ID,\r/}" "$1"
+  grep -q "mod = $MOD_ID," "$1" || sed -i "0,/^mods$/{n;s/^{$/{\n    mod = $MOD_ID,/}" "$1"
   grep -q "mod = $MOD_ID," "$1" || { echo "could not enable $MOD_ID in $1" >&2; exit 1; }
 }
 [[ -f "$ZOMBOID/mods/default.txt.pzopt-orig" ]] || cp "$ZOMBOID/mods/default.txt" "$ZOMBOID/mods/default.txt.pzopt-orig"
 enable_mod "$ZOMBOID/mods/default.txt"
+DASH_ID=PZDashboard
+disable_dashboard() { sed -i "/^    mod = $DASH_ID,\r\{0,1\}\$/d" "$1"; grep -q "mod = $DASH_ID," "$1" && { echo "could not remove $DASH_ID from $1" >&2; exit 1; }; return 0; }
+if (( no_dashboard )); then
+  cp "$ZOMBOID/mods/default.txt" "$ZOMBOID/mods/default.txt.pzopt-dash"
+  disable_dashboard "$ZOMBOID/mods/default.txt"
+fi
 
 # 2. bench save: a pristine template is made once from the source save, and
 #    the actual bench save is recreated from it before every run, so each run
 #    loads byte-identical chunk data regardless of what earlier runs wrote.
-TEMPLATE="$ZOMBOID/Saves/${BENCH_SAVE}-template"
-if [[ ! -d "$TEMPLATE" ]]; then
-  if [[ -z "$source_save" ]]; then
+if [[ -n "$source_save" ]]; then
+  # An explicit source gets its own template, keyed by the source name, and a
+  # bench save in the same game-mode directory (latestSave.ini carries the mode).
+  # Templates are only rebuilt on request, so a driving fixture and the teleport
+  # route can coexist without silently replacing each other.
+  [[ -d "$ZOMBOID/Saves/$source_save" ]] || { echo "source save not found: $ZOMBOID/Saves/$source_save" >&2; exit 1; }
+  BENCH_SAVE="$(dirname "$source_save")/pzopt-bench"
+  TEMPLATE="$ZOMBOID/Saves/$(dirname "$source_save")/pzopt-template-$(basename "$source_save")"
+  if (( refresh_template )); then rm -rf "$TEMPLATE"; fi
+  if [[ ! -d "$TEMPLATE" ]]; then
+    echo "creating bench save template $(basename "$TEMPLATE") from $source_save ($(du -sh "$ZOMBOID/Saves/$source_save" | cut -f1))"
+    cp -r "$ZOMBOID/Saves/$source_save" "$TEMPLATE"
+    enable_mod "$TEMPLATE/mods.txt"
+  fi
+else
+  TEMPLATE="$ZOMBOID/Saves/${BENCH_SAVE}-template"
+  if [[ ! -d "$TEMPLATE" ]]; then
     # latestSave.ini: line 1 = save name, line 2 = game mode
     source_save="$(sed -n 2p "$ZOMBOID/latestSave.ini" | tr -d '\r')/$(sed -n 1p "$ZOMBOID/latestSave.ini" | tr -d '\r')"
+    [[ -d "$ZOMBOID/Saves/$source_save" ]] || { echo "source save not found: $ZOMBOID/Saves/$source_save" >&2; exit 1; }
+    echo "creating bench save template from $source_save ($(du -sh "$ZOMBOID/Saves/$source_save" | cut -f1))"
+    cp -r "$ZOMBOID/Saves/$source_save" "$TEMPLATE"
+    enable_mod "$TEMPLATE/mods.txt"
   fi
-  [[ -d "$ZOMBOID/Saves/$source_save" ]] || { echo "source save not found: $ZOMBOID/Saves/$source_save" >&2; exit 1; }
-  echo "creating bench save template from $source_save ($(du -sh "$ZOMBOID/Saves/$source_save" | cut -f1))"
-  cp -r "$ZOMBOID/Saves/$source_save" "$TEMPLATE"
-  enable_mod "$TEMPLATE/mods.txt"
 fi
+echo "bench save: $BENCH_SAVE (template $(basename "$TEMPLATE"))"
 rm -rf "$ZOMBOID/Saves/$BENCH_SAVE"
 cp -r "$TEMPLATE" "$ZOMBOID/Saves/$BENCH_SAVE"
+(( no_dashboard )) && disable_dashboard "$ZOMBOID/Saves/$BENCH_SAVE/mods.txt"  # the save is rebuilt from the template every run; nothing to restore
 
 # 3. point the game at the bench save and write the flag file
+LAUNCH_ENV="$ZOMBOID/pzopt-launch.env"   # read by harness/steam-launch.sh (the Steam launch option)
+write_launch_env() {
+  {
+    [[ -n "$mangohud_secs" ]] && echo "PZOPT_MANGOHUD=1"
+    case "$renderer" in
+      zink) echo "MESA_LOADER_DRIVER_OVERRIDE=zink"; echo "__GLX_VENDOR_LIBRARY_NAME=mesa"; echo "__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json" ;;
+      nvidia) ;;
+      *) echo "unknown --renderer $renderer" >&2; exit 2 ;;
+    esac
+    for e in "${game_env[@]}"; do echo "$e"; done
+  } > "$LAUNCH_ENV"
+}
+restore_harness_flag() {
+  rm -f "$FLAG_FILE" "$FLAG_FILE.pzopt-orig" "$NATIVE_FLAG_FILE" "$NATIVE_FLAG_FILE.pzopt-orig" "$LAUNCH_ENV"
+}
+# The flag file is runner-owned state. Remove leftovers from an interrupted
+# run before writing a new request; never allow an old benchmark to restart.
+restore_harness_flag
 cp "$ZOMBOID/latestSave.ini" "$ZOMBOID/latestSave.ini.pzopt-orig"
-trap 'restore' EXIT
-printf '%s\r\n%s\r\n' "$(basename "$BENCH_SAVE")" "$(dirname "$BENCH_SAVE")" > "$ZOMBOID/latestSave.ini"
-{
-  echo "mode=$mode"
-  [[ -n "$quit_after" ]] && echo "quit_after=$quit_after"
-  for f in "${extra_flags[@]}"; do echo "$f"; done
-} > "$ZOMBOID/Lua/pzopt-harness.txt"   # Lua getFileReader resolves under Zomboid/Lua/
-rm -f "$ZOMBOID"/pzopt-*.out
-
-# runtime settings for this run; the previous pzopt.properties comes back afterwards
-PZ_DIR="${PZ_DIR:-/games/steamapps/common/ProjectZomboid}"
-if [[ -f "$PZ_DIR/pzopt.properties" ]]; then cp "$PZ_DIR/pzopt.properties" "$PZ_DIR/pzopt.properties.pzopt-orig"; fi
+restore_mangohud() {
+  if [[ -f "$HOME/.config/MangoHud/MangoHud.conf.pzopt-orig" ]]; then mv -f "$HOME/.config/MangoHud/MangoHud.conf.pzopt-orig" "$HOME/.config/MangoHud/MangoHud.conf"; fi
+  return 0
+}
+restore_launcher() { [[ -f "$PZ_DIR/ProjectZomboid64.json.pzopt-orig" ]] && mv -f "$PZ_DIR/ProjectZomboid64.json.pzopt-orig" "$PZ_DIR/ProjectZomboid64.json"; return 0; }
+restore_game_profiler() { [[ -f "$ZOMBOID/debug-options.ini.pzopt-orig" ]] && mv -f "$ZOMBOID/debug-options.ini.pzopt-orig" "$ZOMBOID/debug-options.ini"; return 0; }
+restore_game_options() { [[ -f "$ZOMBOID/options.ini.pzopt-orig" ]] && mv -f "$ZOMBOID/options.ini.pzopt-orig" "$ZOMBOID/options.ini"; return 0; }
 restore() {
+  # runs under set -e from the EXIT trap: every step must succeed or be guarded, or the rest is skipped.
+  # Defined (with every helper it calls) before the trap is armed, so an early exit restores everything.
+  set +e
+  [[ -n "${sysmon_pid:-}" ]] && kill "$sysmon_pid" 2>/dev/null
+  [[ -n "${rec_pid:-}" ]] && kill -INT "$rec_pid" 2>/dev/null
+  restore_harness_flag
   restore_mangohud
+  restore_launcher
+  [[ -f "$ZOMBOID/mods/default.txt.pzopt-dash" ]] && mv -f "$ZOMBOID/mods/default.txt.pzopt-dash" "$ZOMBOID/mods/default.txt"
   mv -f "$ZOMBOID/latestSave.ini.pzopt-orig" "$ZOMBOID/latestSave.ini" 2>/dev/null || true
   if [[ -f "$PZ_DIR/pzopt.properties.pzopt-orig" ]]; then mv -f "$PZ_DIR/pzopt.properties.pzopt-orig" "$PZ_DIR/pzopt.properties"; else rm -f "$PZ_DIR/pzopt.properties"; fi
+  restore_game_profiler
+  restore_game_options
 }
+trap 'restore' EXIT
+printf '%s\r\n%s\r\n' "$(basename "$BENCH_SAVE")" "$(dirname "$BENCH_SAVE")" > "$ZOMBOID/latestSave.ini"
+write_flags() {
+  {
+    echo "mode=$mode"
+    echo "dashboard=$([[ $no_dashboard -eq 1 ]] && echo disabled || echo enabled)"
+    [[ -n "$quit_after" ]] && echo "quit_after=$quit_after"
+    [[ -n "${route_start_epoch:-}" ]] && echo "route_start_epoch=$route_start_epoch"
+    [[ -n "${mangohud_end_epoch:-}" ]] && echo "mangohud_end_epoch=$mangohud_end_epoch"
+    for f in "${extra_flags[@]}"; do echo "$f"; done
+  } > "$FLAG_FILE"   # Lua getFileReader resolves under Zomboid/Lua/
+}
+write_flags
+
+# runtime settings for this run; the previous pzopt.properties comes back afterwards
+if [[ -f "$PZ_DIR/pzopt.properties" ]]; then cp "$PZ_DIR/pzopt.properties" "$PZ_DIR/pzopt.properties.pzopt-orig"; fi
 printf '%s\n' "${props[@]}" > "$PZ_DIR/pzopt.properties"
 cp "$PZ_DIR/pzopt.properties" "$RUNS/.last-props" 2>/dev/null || true
 
-# external frame-time log: MangoHud is injected by the Steam launch options
-# (MANGOHUD=1); its global config gets autostart/duration keys for this run.
-MH_CONF="$HOME/.config/MangoHud/MangoHud.conf"
+# --option key=value: game options (~/Zomboid/options.ini, the game's Display/UI settings) for this run only;
+# the file is restored byte-for-byte on exit (the game rewrites it when it quits, so the backup wins).
+if (( ${#game_options[@]} )); then
+  [[ -f "$ZOMBOID/options.ini" ]] || { echo "options.ini not found in $ZOMBOID" >&2; exit 1; }
+  cp "$ZOMBOID/options.ini" "$ZOMBOID/options.ini.pzopt-orig"
+  for kv in "${game_options[@]}"; do
+    k="${kv%%=*}"; v="${kv#*=}"
+    if grep -q "^$k=" "$ZOMBOID/options.ini"; then sed -i "s|^$k=.*|$k=$v|" "$ZOMBOID/options.ini"; else printf '%s=%s\n' "$k" "$v" >> "$ZOMBOID/options.ini"; fi
+  done
+  echo "game options for this run: ${game_options[*]}"
+fi
+
+# GameProfiler writes its frame recording only when the debug option is enabled.
+# Keep the user's file byte-for-byte restorable, just like the other run knobs.
+DEBUG_OPTIONS="$ZOMBOID/debug-options.ini"
+if (( game_profiler )); then
+  [[ -f "$DEBUG_OPTIONS" ]] || printf 'Version=1\n' > "$DEBUG_OPTIONS"
+  cp "$DEBUG_OPTIONS" "$DEBUG_OPTIONS.pzopt-orig"
+  grep -q '^GameProfiler.Enabled=true$' "$DEBUG_OPTIONS" || printf '\nGameProfiler.Enabled=true\n' >> "$DEBUG_OPTIONS"
+fi
+
+# external frame-time + utilization log. MangoHud is injected by the Steam
+# launch options (MANGOHUD=1); env vars from here never reach a game started
+# through the running Steam client, and the only config file MangoHud reliably
+# reads for the native build is the user's ~/.config/MangoHud/MangoHud.conf.
+# So for the run that file is replaced by the selected profile plus the
+# autostart/duration keys, and put back byte-for-byte on exit.
+# MangoHud writes the CSV only when log_duration elapses while the game is
+# still running, so the route is put on a fixed schedule: pzopt.Harness starts
+# it at launch + --lead seconds (route_start_epoch flag; the world has ~lead-15 s
+# to load) and the log runs from lead-3 to lead + --route-seconds + 5. The game
+# quits at the route end or when the log has closed, whichever is later.
+if [[ -z "$mangohud_secs" && "$mode" != verify ]]; then mangohud_secs=$((route_seconds + 8)); fi
+[[ -n "$mangohud_config" ]] || mangohud_config="config/mangohud-benchmark.conf"
+MH_PROFILE="$mangohud_config"
+[[ "$MH_PROFILE" = /* ]] || MH_PROFILE="$REPO/$MH_PROFILE"
+MH_USER_CONF="$HOME/.config/MangoHud/MangoHud.conf"
 MH_OUT="$HOME/Documents/mangohud/benchmarks"
 if [[ -n "$mangohud_secs" ]]; then
-  [[ -f "$MH_CONF" ]] || { echo "MangoHud config not found: $MH_CONF" >&2; exit 1; }
-  cp "$MH_CONF" "$MH_CONF.pzopt-orig"
-  sed -i '/^log_duration=/d;/^autostart_log=/d;/^output_folder=/d;/^log_interval=/d' "$MH_CONF"
-  printf 'output_folder=%s/\nautostart_log=2\nlog_duration=%s\nlog_interval=0\n' "$MH_OUT" "$mangohud_secs" >> "$MH_CONF"
-  mkdir -p "$MH_OUT"
+  [[ -f "$MH_PROFILE" ]] || { echo "MangoHud config not found: $MH_PROFILE" >&2; exit 1; }
+  mkdir -p "$(dirname "$MH_USER_CONF")" "$MH_OUT"
+  [[ -f "$MH_USER_CONF" ]] && cp "$MH_USER_CONF" "$MH_USER_CONF.pzopt-orig"
+  { grep -v '^log_duration=\|^autostart_log=\|^output_folder=\|^log_interval=' "$MH_PROFILE"
+    printf 'output_folder=%s/\nautostart_log=%s\nlog_duration=%s\nlog_interval=0\n' "$MH_OUT" "$((lead - 3))" "$mangohud_secs"; } > "$MH_USER_CONF"
 fi
-restore_mangohud() { [[ -f "$MH_CONF.pzopt-orig" ]] && mv -f "$MH_CONF.pzopt-orig" "$MH_CONF"; return 0; }
 
-# 4. launch and wait
+# launcher JSON (vmArgs) edits for --jfr / --gc: the original comes back on exit
+# (if a run dies mid-way, ProjectZomboid64.json.pzopt-orig is the copy to restore by hand).
+# Paths inside the JVM are Wine paths: the install dir is S:/common/ProjectZomboid (see the gc.log line).
+LAUNCHER="$PZ_DIR/ProjectZomboid64.json"
+JFR_OUT="$PZ_DIR/pzopt.jfr"
+# The launcher is always edited for a run: a gc log (-Xlog:gc) is added when the
+# JSON has none, so harness/analyze.py can count collector events in the route window.
+{
+  cp "$LAUNCHER" "$LAUNCHER.pzopt-orig"
+  rm -f "$JFR_OUT"
+  python3 - "$LAUNCHER" "$jfr" "$jfr_period" "$gc" "$PZ_DIR_JVM/pzopt.jfr" "$PZ_DIR_JVM/gc.log" "$launcher" <<'PY'
+import json, sys
+path, jfr, period, gc, jfr_file, gc_log, launcher = sys.argv[1:]
+j = json.load(open(path))
+if launcher == "direct":
+    # no Steam client to talk to: the game must not try to initialise steam_api
+    j["vmArgs"] = ["-Dzomboid.steam=0" if a == "-Dzomboid.steam=1" else a for a in j["vmArgs"]]
+if not any(a.startswith("-Xlog:gc") for a in j["vmArgs"]):
+    j["vmArgs"].append(f"-Xlog:gc:file={gc_log}:time,uptime:filecount=3,filesize=20M")
+if jfr == "1":
+    opt = f"-XX:StartFlightRecording=settings=profile,filename={jfr_file},dumponexit=true"
+    if period:
+        opt += f",jdk.ExecutionSample#period={period}ms"
+    j["vmArgs"].append(opt)
+if gc:
+    want = {"g1": "-XX:+UseG1GC", "zgc": "-XX:+UseZGC"}[gc]
+    def swap(args):
+        return [want if a in ("-XX:+UseZGC", "-XX:+UseG1GC") else a for a in args]
+    j["vmArgs"] = swap(j["vmArgs"])
+    for v in j.get("windows", {}).values():
+        v["vmArgs"] = swap(v["vmArgs"])
+    if want not in j["vmArgs"] and not any(want in v["vmArgs"] for v in j.get("windows", {}).values()):
+        j["vmArgs"].append(want)
+json.dump(j, open(path, "w"), indent="\t")
+PY
+  echo "launcher vmArgs for this run: $(python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(" ".join(a for a in j["vmArgs"]+[x for v in j.get("windows",{}).values() for x in v["vmArgs"]] if "GC" in a or "Flight" in a or "Xm" in a or "Xlog" in a))' "$LAUNCHER")"
+}
+
+# 4. launch and wait. The native build sometimes dies in the GL driver while
+#    creating the display (SIGSEGV in libnvidia-glcore, hs_err_pid*.log in the
+#    install dir) before any harness code runs; such a start-up crash is retried
+#    --retries times, a crash after the world was up is reported as a crash.
 out="$RUNS/$label-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
-launch_epoch=$(date +%s)
-echo "launching app $APPID (mode=$mode quit_after=${quit_after:-none}); output -> $out"
-start=$(date +%s)
-steam -applaunch $APPID >/dev/null 2>&1 &
-for _ in $(seq 1 120); do pgrep -f '[P]rojectZomboid64' >/dev/null && break; sleep 1; done
-pgrep -f '[P]rojectZomboid64' >/dev/null || { echo "game process did not appear within 120s" >&2; exit 1; }
-echo "game running (pid $(pgrep -f '[P]rojectZomboid64' | head -1)); waiting for exit"
-# the Proton process tree is replaced a few times during startup; only treat
-# the game as gone after several consecutive checks find nothing
-gone=0
-while (( gone < 5 )); do
-  if pgrep -f '[P]rojectZomboid64' >/dev/null; then gone=0; else gone=$((gone+1)); fi
+attempt=0
+crashed=0
+while :; do
+  attempt=$((attempt+1))
+  rm -f "$ZOMBOID"/pzopt-*.out "$ZOMBOID/console.txt"
+  restore_harness_flag; write_flags; write_launch_env
+  launch_epoch=$(date +%s)
+  route_start_epoch=$((launch_epoch + lead))
+  if [[ -n "$mangohud_secs" ]]; then mangohud_end_epoch=$((launch_epoch + lead - 3 + mangohud_secs + 1)); fi
+  write_flags
+  echo "launching app $APPID (mode=$mode quit_after=${quit_after:-none}, attempt $attempt); output -> $out"
+  start=$(date +%s)
+  # machine-level CPU/GPU utilization for the whole run (harness/sysmon.sh), windowed by the analyzer
+  "$REPO/harness/sysmon.sh" "$out/sysmon.csv" 0.5 &
+  sysmon_pid=$!
+  rec_pid=""
+  if (( record )); then
+    # whole monitor (window capture is X11-only), scaled to half the 5120x2160 desktop, GPU encoder;
+    # stopped with SIGINT once the game has exited
+    rec_mon=$(gpu-screen-recorder --list-monitors 2>/dev/null | head -1 | cut -d'|' -f1)
+    gpu-screen-recorder -w "${rec_mon:-DP-1}" -s 2560x1080 -f 60 -q very_high -k auto -cursor no -o "$out/recording.mp4" > "$out/recording.log" 2>&1 &
+    rec_pid=$!
+  fi
+  if [[ "$launcher" == direct ]]; then
+    # same variables the Steam wrapper would apply, on the host instead of inside the Steam runtime container
+    (
+      set -a; . "$LAUNCH_ENV"; set +a
+      # The game reaches GL through glvnd and LWJGL resolves glXSwapBuffers with dlsym, so MangoHud's OpenGL
+      # library alone never hooks on the host (no CSV, no HUD in every direct run before 2026-09-19), and its
+      # dlsym shim deadlocks the Java launcher at start-up (mh-direct-check). What made it work under Steam was
+      # the Steam overlay library in the same preload chain: it interposes dlsym/glX itself and chains to the
+      # next hook, so it is preloaded here too when present.
+      if [[ "${PZOPT_MANGOHUD:-0}" == 1 && -f /usr/lib/mangohud/libMangoHud_opengl.so ]]; then
+        overlay="$HOME/.local/share/Steam/ubuntu12_64/gameoverlayrenderer.so"
+        export MANGOHUD=1 LD_PRELOAD="${overlay:+$( [[ -f "$overlay" ]] && echo "$overlay:" )}/usr/lib/mangohud/libMangoHud_opengl.so"
+      fi
+      cd "$PZ_DIR/.." && exec setsid "$GAME_WRAPPER" </dev/null >"$out/launcher-stdout.txt" 2>&1
+    ) &
+  else
+    steam -applaunch $APPID >/dev/null 2>&1 &
+  fi
+  game_pid=""
+  for _ in $(seq 1 120); do
+    game_pid=$(pgrep -f '[P]rojectZomboid64' | head -1 || true)
+    [[ -n "$game_pid" ]] && break
+    sleep 1
+  done
+  [[ -n "$game_pid" ]] || { echo "game process did not appear within 120s" >&2; exit 1; }
+  echo "game running (pid $game_pid); waiting for exit"
+  # start-up watchdog: a launch that never gets as far as writing console.txt (a preload deadlock, a driver hang)
+  # is killed by PID after 120 s instead of stalling the run forever
+  ( for _ in $(seq 1 60); do sleep 2; [[ -f "$ZOMBOID/console.txt" ]] && exit 0; kill -0 "$game_pid" 2>/dev/null || exit 0; done
+    echo "start-up watchdog: no console.txt after 120 s, killing pid $game_pid" >&2; kill "$game_pid" 2>/dev/null; sleep 5; kill -9 "$game_pid" 2>/dev/null ) &
+  watchdog_pid=$!
+  # the Proton process tree is replaced a few times during startup; only treat
+  # the game as gone after several consecutive checks find nothing
+  gone=0
+  while (( gone < 5 )); do
+    if pgrep -f '[P]rojectZomboid64' >/dev/null; then gone=0; else gone=$((gone+1)); fi
+    sleep 2
+  done
+  end=$(date +%s)
+  kill "$watchdog_pid" 2>/dev/null || true; wait "$watchdog_pid" 2>/dev/null || true
+  kill "$sysmon_pid" 2>/dev/null; wait "$sysmon_pid" 2>/dev/null || true
+  if [[ -n "$rec_pid" ]]; then kill -INT "$rec_pid" 2>/dev/null; wait "$rec_pid" 2>/dev/null || true; echo "recording: $out/recording.mp4 ($(du -h "$out/recording.mp4" 2>/dev/null | cut -f1))"; fi
   sleep 2
+  crashed=0
+  for h in "$PZ_DIR"/hs_err_pid*.log "$ZOMBOID"/hs_err_pid*.log; do
+    [[ -f "$h" && "$(stat -c %Y "$h")" -ge "$launch_epoch" ]] || continue
+    crashed=1
+    mv -f "$h" "$out/$(basename "$h" .log)-attempt$attempt.log"
+    echo "CRASH: $(sed -n 's/^# Problematic frame:.*//;/^# C  \[/p' "$out/$(basename "$h" .log)-attempt$attempt.log" | head -1)" >&2
+  done
+  rm -f "$PZ_DIR"/core.[0-9]*
+  if (( crashed )) && ! grep -a -q 'harness: world ready' "$ZOMBOID/console.txt" 2>/dev/null && (( attempt <= retries )); then
+    echo "start-up crash after $((end-start))s; retrying" >&2
+    cp "$ZOMBOID/console.txt" "$out/console-attempt$attempt.txt" 2>/dev/null || true
+    continue
+  fi
+  break
 done
-end=$(date +%s)
-sleep 2
 
 # 5. collect
+[[ -f "$ZOMBOID/console.txt" ]] || { echo "fresh game produced no console.txt" >&2; exit 1; }
 cp "$ZOMBOID/console.txt" "$out/console.txt"
 cp "$ZOMBOID"/pzopt-*.out "$out/" 2>/dev/null || true
 cp "$PZ_DIR/pzopt.properties" "$out/pzopt.properties"
+cp "$LAUNCHER" "$out/ProjectZomboid64.json"
+{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=$lead"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
+# gc.log rolls over (filecount=3); keep the segments that were written during this run
+for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
+  [[ -f "$g" ]] || continue
+  if [[ "$(stat -c %Y "$g")" -ge "$launch_epoch" ]]; then cp "$g" "$out/$(basename "$g")"; fi
+done
+if (( jfr )); then
+  if [[ -f "$JFR_OUT" ]]; then mv "$JFR_OUT" "$out/pzopt.jfr"; echo "jfr recording: $out/pzopt.jfr ($(du -h "$out/pzopt.jfr" | cut -f1))"; else echo "no JFR recording found at $JFR_OUT" >&2; fi
+fi
+if (( game_profiler )); then
+  if [[ -d "$ZOMBOID/Recording" ]]; then
+    mkdir -p "$out/profiler"
+    cp -a "$ZOMBOID/Recording/." "$out/profiler/"
+  else
+    echo "GameProfiler recording directory not found: $ZOMBOID/Recording" >&2
+  fi
+fi
+if [[ -n "$mangohud_secs" && "$launcher" == steam ]] && ! grep -a -q 'harness: MangoHud is loaded' "$out/console.txt"; then
+  echo "MangoHud was not loaded into the game: set the Steam launch options to '$REPO/harness/steam-launch.sh %command%' (see harness/steam-launch.sh)" >&2
+fi
 if [[ -n "$mangohud_secs" ]]; then
   # newest MangoHud csv written since launch
   mh=$(find "$MH_OUT" -name '*.csv' -newermt "@$launch_epoch" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
   if [[ -n "$mh" ]]; then cp "$mh" "$out/mangohud.csv"; basename "$mh" > "$out/mangohud.name"; echo "mangohud log: $mh"; else echo "no MangoHud log found in $MH_OUT" >&2; fi
 fi
-echo "run took $((end-start))s; log at $out/console.txt"
+echo "run took $((end-start))s (attempt $attempt$( (( crashed )) && echo ', CRASHED')); log at $out/console.txt"
 echo "--- [pzopt] lines:"
 grep -a -F '[pzopt' "$out/console.txt" | head -40 || true
 echo "--- errors:"

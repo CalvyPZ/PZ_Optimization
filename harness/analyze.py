@@ -24,6 +24,12 @@ def pct(sorted_vals, p):
 def summarize(run, skip_seconds=20):
     run = Path(run)
     out = {"run": run.name}
+    bench_meta = run / "pzopt-bench.out"
+    if bench_meta.exists():
+        out["scenario"] = dict(
+            line.split("=", 1) for line in bench_meta.read_text().splitlines() if "=" in line
+        )
+        out["valid"] = out["scenario"].get("route_status", "complete") == "complete"
     chunks = []
     marks = {}
     p = run / "pzopt-chunks.out"
@@ -107,45 +113,235 @@ def summarize(run, skip_seconds=20):
     mh = run / "mangohud.csv"
     bench = run / "pzopt-bench.out"
     if mh.exists():
-        lines = mh.read_text().splitlines()
-        hdr_i = next((i for i, l in enumerate(lines) if l.startswith("fps,")), None)
-        if hdr_i is not None:
-            hdr = lines[hdr_i].split(",")
-            ft_i, el_i = hdr.index("frametime"), hdr.index("elapsed")
-            rows = []
-            for l in lines[hdr_i + 1:]:
-                parts = l.split(",")
-                if len(parts) > max(ft_i, el_i):
-                    try:
-                        rows.append((float(parts[el_i]) / 1e9, float(parts[ft_i])))
-                    except ValueError:
-                        pass
-            # file name carries the log start time to the second: ProjectZomboid64_YYYY-MM-DD_HH-MM-SS.csv
-            import datetime, re
-            m = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})", mh.name) if not (run / "mangohud.name").exists() else None
-            name = (run / "mangohud.name").read_text().strip() if (run / "mangohud.name").exists() else ""
-            m = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})", name) or m
-            t_start = None
-            if m:
-                t_start = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}", "%Y-%m-%d %H:%M:%S").timestamp()
-            sel = rows
-            if t_start is not None and bench.exists():
-                kv = dict(l.split("=", 1) for l in bench.read_text().splitlines() if "=" in l)
-                if "route_start_epoch_ms" in kv:
-                    a = int(kv["route_start_epoch_ms"]) / 1000 - t_start
-                    b = int(kv["route_end_epoch_ms"]) / 1000 - t_start
-                    sel = [r for r in rows if a <= r[0] <= b]
-            ft = sorted(r[1] * 1000 for r in sel)  # -> microseconds
-            if ft:
-                out["mangohud"] = {
-                    "count": len(ft),
-                    "us": {"mean": statistics.fmean(ft), "p50": pct(ft, 50), "p90": pct(ft, 90), "p99": pct(ft, 99), "p99_9": pct(ft, 99.9), "max": ft[-1]},
-                    "over_33ms": sum(1 for x in ft if x > 33333),
-                    "windowed": sel is not rows,
-                }
+        m = mangohud_summary(mh, run / "mangohud.name", bench)
+        if m:
+            out["mangohud"] = m
+    sysmon = run / "sysmon.csv"
+    if sysmon.exists() and bench.exists():
+        sm = sysmon_summary(sysmon, bench)
+        if sm:
+            out["sysmon"] = sm
+    threads = run / "pzopt-threads.out"
+    if threads.exists():
+        out["threads"] = thread_summary(threads)
+    console = run / "console.txt"
+    if console.exists():
+        out["environment"] = environment(console)
     props = run / "pzopt.properties"
     if props.exists():
         out["props"] = props.read_text().strip()
+    gc = gc_summary(run)
+    if gc:
+        out["gc"] = gc
+    opts = run / "run.opts"
+    if opts.exists():
+        out["opts"] = dict(l.split("=", 1) for l in opts.read_text().splitlines() if "=" in l)
+    return out
+
+
+# MangoHud columns are per frame. frametime is in ms, elapsed in ns since the
+# log started; cpu_load / gpu_load are percentages (cpu_load is of all threads,
+# so 100/16 = 6.25 % per fully busy core on this machine).
+FPS_TARGET = 240.0
+FRAME_BUDGET_US = 1e6 / FPS_TARGET
+
+
+def mangohud_summary(mh, name_file, bench):
+    """Frame-time distribution AND utilization from the MangoHud CSV, restricted to
+    the route window using the wall-clock stamps pzopt-bench.out records."""
+    lines = mh.read_text().splitlines()
+    hdr_i = next((i for i, l in enumerate(lines) if l.startswith("fps,")), None)
+    if hdr_i is None:
+        return None
+    hdr = lines[hdr_i].split(",")
+    cols = {k: hdr.index(k) for k in hdr}
+    ft_i, el_i = cols["frametime"], cols["elapsed"]
+    rows = []
+    for l in lines[hdr_i + 1:]:
+        parts = l.split(",")
+        if len(parts) >= len(hdr):
+            try:
+                rows.append((float(parts[el_i]) / 1e9, float(parts[ft_i]), parts))
+            except ValueError:
+                pass
+    # file name carries the log start time to the second: ProjectZomboid64_YYYY-MM-DD_HH-MM-SS.csv
+    import datetime, re
+    name = name_file.read_text().strip() if name_file.exists() else mh.name
+    m = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})", name)
+    t_start = None
+    if m:
+        t_start = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}", "%Y-%m-%d %H:%M:%S").timestamp()
+    sel = rows
+    if t_start is not None and bench.exists():
+        kv = dict(l.split("=", 1) for l in bench.read_text().splitlines() if "=" in l)
+        if "route_start_epoch_ms" in kv:
+            a = int(kv["route_start_epoch_ms"]) / 1000 - t_start
+            b = int(kv["route_end_epoch_ms"]) / 1000 - t_start
+            sel = [r for r in rows if a <= r[0] <= b]
+    if not sel:
+        return None
+    ft_seq = [r[1] * 1000 for r in sel]  # microseconds, in time order
+    ft = sorted(ft_seq)
+    out = {
+        "count": len(ft),
+        "seconds": sum(ft) / 1e6,
+        "us": {"mean": statistics.fmean(ft), "p50": pct(ft, 50), "p90": pct(ft, 90), "p99": pct(ft, 99), "p99_9": pct(ft, 99.9), "max": ft[-1]},
+        "over_33ms": sum(1 for x in ft if x > 33333),
+        "windowed": sel is not rows,
+        # consistency: how far the frame-to-frame time moves, and how much of the
+        # route ran below the 240 fps cap (a frame at the cap is ~4.2 ms)
+        "stdev_us": statistics.pstdev(ft),
+        "jitter_us": statistics.fmean(abs(b - a) for a, b in zip(ft_seq, ft_seq[1:])) if len(ft_seq) > 1 else 0,
+        "under_cap_share": sum(1 for x in ft if x > FRAME_BUDGET_US * 1.1) / len(ft),
+        "fps_1pct_low": 1e6 / pct(ft, 99) if pct(ft, 99) else 0,
+    }
+    # utilization columns, when the profile logged them
+    util = {}
+    for k in ("cpu_load", "gpu_load", "gpu_core_clock", "gpu_mem_clock", "cpu_mhz", "gpu_power", "cpu_power", "gpu_temp", "cpu_temp", "gpu_vram_used", "ram_used", "process_rss"):
+        if k not in cols:
+            continue
+        vals = []
+        for r in sel:
+            try:
+                vals.append(float(r[2][cols[k]]))
+            except (ValueError, IndexError):
+                pass
+        # MangoHud cannot read the GPU on the native GL path (gpu_load 0, idle clocks, cpu_power 0):
+        # a column that never moves is dropped rather than reported as "0 %"; sysmon.csv is the GPU source
+        if vals and max(vals) > 0:
+            vs = sorted(vals)
+            util[k] = {"mean": statistics.fmean(vals), "p10": pct(vs, 10), "p90": pct(vs, 90), "max": vs[-1]}
+    if util:
+        out["util"] = util
+    return out
+
+
+def sysmon_summary(path, bench):
+    """harness/sysmon.sh samples inside the route window: machine CPU %, busiest core %,
+    GPU % / clocks / power, and the game process's CPU (100 = one core)."""
+    kv = dict(l.split("=", 1) for l in bench.read_text().splitlines() if "=" in l)
+    if "route_start_epoch_ms" not in kv:
+        return None
+    a, b = int(kv["route_start_epoch_ms"]), int(kv["route_end_epoch_ms"])
+    lines = path.read_text().splitlines()
+    if len(lines) < 2:
+        return None
+    hdr = lines[0].split(",")
+    cols = {k: [] for k in hdr[1:]}
+    for l in lines[1:]:
+        parts = l.split(",")
+        if len(parts) != len(hdr):
+            continue
+        try:
+            t = int(parts[0])
+        except ValueError:
+            continue
+        if not (a <= t <= b):
+            continue
+        for k, v in zip(hdr[1:], parts[1:]):
+            try:
+                cols[k].append(float(v))
+            except ValueError:
+                pass
+    out = {}
+    for k, vals in cols.items():
+        if vals:
+            vs = sorted(vals)
+            out[k] = {"mean": statistics.fmean(vals), "p10": pct(vs, 10), "p90": pct(vs, 90), "max": vs[-1], "n": len(vals)}
+    return out or None
+
+
+def thread_summary(path):
+    """pzopt-threads.out: per-thread CPU over the route, written by pzopt.Harness."""
+    out = {"threads": []}
+    for line in path.read_text().splitlines():
+        if line.startswith("#"):
+            for kv in line[1:].split():
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    try:
+                        out[k] = float(v)
+                    except ValueError:
+                        out[k] = v
+            continue
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0] != "thread":
+            out["threads"].append({"name": parts[0], "cpu_ms": int(parts[1]), "share": float(parts[2])})
+    return out
+
+
+def environment(console):
+    """Renderer / JVM / display facts from console.txt that make runs comparable or not."""
+    env = {}
+    keys = {"OpenGL version:": "opengl", "Desktop resolution": "desktop", "java.vm.vendor=": "jvm_vendor", "java.vm.version=": "jvm_version",
+            "revision=": "revision", "GPU:": "gpu", "Launching with": "launch"}
+    with console.open(errors="replace") as f:
+        for line in f:
+            if len(env) == len(keys):
+                break
+            for needle, k in keys.items():
+                if k not in env and needle in line:
+                    env[k] = line.split("> ", 1)[-1].strip()[:160]
+    return env
+
+
+def gc_summary(run):
+    """Collector events inside the route window, from the run's gc.log (-Xlog:gc, info level).
+
+    G1 logs every stop-the-world pause with its duration; ZGC at this level logs
+    its (mostly concurrent) cycles, so for ZGC the wall time is not pause time —
+    the stop-the-world pauses then come from the JFR recording (samples.tsv,
+    jdk.GCPhasePause) when the run was profiled.
+    """
+    import datetime, re
+    run = Path(run)
+    log = run / "gc.log"
+    bench = run / "pzopt-bench.out"
+    if not log.exists() or not bench.exists():
+        return None
+    kv = dict(l.split("=", 1) for l in bench.read_text().splitlines() if "=" in l)
+    if "route_start_epoch_ms" not in kv:
+        return None
+    a, b = int(kv["route_start_epoch_ms"]) / 1000, int(kv["route_end_epoch_ms"]) / 1000
+    collector = None
+    events, pauses = [], []
+    pat = re.compile(r"^\[(\S+?)\]\[[\d.]+s\] GC\((\d+)\) (.*?) ([\d.]+)(ms|s)$")
+    for line in log.read_text().splitlines():
+        if "Using" in line and "Garbage Collector" in line:
+            collector = "G1" if "G1" in line else "ZGC" if "Z Garbage" in line else line.split("Using ")[1]
+            continue
+        m = pat.match(line)
+        if not m:
+            continue
+        t_end = datetime.datetime.fromisoformat(m.group(1)).timestamp()
+        ms = float(m.group(4)) * (1000 if m.group(5) == "s" else 1)
+        desc = m.group(3)
+        if not (a <= t_end <= b):
+            continue
+        events.append((t_end, desc, ms))
+        if desc.startswith("Pause"):
+            pauses.append((t_end, desc, ms))
+    out = {"collector": collector, "events_in_route": len(events), "wall_ms_in_route": sum(e[2] for e in events),
+           "max_event_ms": max([e[2] for e in events], default=0)}
+    if collector == "G1":
+        out["pauses_in_route"] = len(pauses)
+        out["pause_ms_in_route"] = sum(p[2] for p in pauses)
+        out["max_pause_ms"] = max([p[2] for p in pauses], default=0)
+    tsv = run / "samples.tsv"
+    if tsv.exists():
+        stw, stalls = [], []
+        with tsv.open() as f:
+            for line in f:
+                if line.startswith("pause\t") or line.startswith("stall\t"):
+                    kind, name, t, us = line.rstrip("\n").split("\t")
+                    t = int(t) / 1e9
+                    if a <= t <= b:
+                        (stw if kind == "pause" else stalls).append(int(us) / 1000)
+        out["jfr_stw_pauses_in_route"] = len(stw)
+        out["jfr_stw_pause_ms_in_route"] = sum(stw)
+        out["jfr_max_stw_pause_ms"] = max(stw, default=0)
+        out["jfr_alloc_stalls_in_route"] = len(stalls)
+        out["jfr_alloc_stall_ms_in_route"] = sum(stalls)
     return out
 
 
@@ -172,8 +368,43 @@ def print_summary(s):
     m = s.get("mangohud")
     if m:
         u = m["us"]
-        print(f"mangohud: {m['count']} frames{' (route window)' if m['windowed'] else ''}")
+        print(f"mangohud: {m['count']} frames over {m['seconds']:.0f}s{' (route window)' if m['windowed'] else ''}, {m['count'] / m['seconds']:.1f} fps mean")
         print(f"  frame  mean {fmt_us(u['mean'])}  p50 {fmt_us(u['p50'])}  p90 {fmt_us(u['p90'])}  p99 {fmt_us(u['p99'])}  p99.9 {fmt_us(u['p99_9'])}  max {fmt_us(u['max'])}  >33ms: {m['over_33ms']}")
+        print(f"  consistency: stdev {fmt_us(m['stdev_us'])}  frame-to-frame jitter {fmt_us(m['jitter_us'])}  1%-low {m['fps_1pct_low']:.0f} fps  frames below the {FPS_TARGET:.0f} fps cap: {m['under_cap_share'] * 100:.1f}%")
+        ut = m.get("util")
+        if ut:
+            def f(k, unit="", scale=1):
+                d = ut.get(k)
+                return f"{k} {d['mean'] * scale:.0f}{unit} (p10 {d['p10'] * scale:.0f}, p90 {d['p90'] * scale:.0f})" if d else None
+            parts = [x for x in (f("cpu_load", "%"), f("gpu_load", "%"), f("gpu_core_clock", "MHz"), f("cpu_mhz", "MHz"), f("gpu_power", "W"), f("cpu_power", "W")) if x]
+            print("  utilization: " + "; ".join(parts))
+    sm = s.get("sysmon")
+    if sm:
+        def f(k, unit=""):
+            d = sm.get(k)
+            return f"{k} {d['mean']:.0f}{unit} (p10 {d['p10']:.0f}, p90 {d['p90']:.0f})" if d else None
+        parts = [x for x in (f("cpu_pct", "%"), f("cpu_busiest_core_pct", "%"), f("game_cpu_pct", "% of a core"), f("gpu_pct", "%"), f("gpu_sm_mhz", "MHz"), f("gpu_w", "W")) if x]
+        print(f"machine (sysmon, {sm[next(iter(sm))]['n']} samples in the route window): " + "; ".join(parts))
+    t = s.get("threads")
+    if t and t["threads"]:
+        cores = int(t.get("cores", 0))
+        proc = t.get("process_share")
+        head = f"threads over the route (cpu / wall): process {proc * 100:.0f}% of one core" + (f" = {proc / cores * 100:.0f}% of {cores} cores" if cores and proc else "") if proc else "threads over the route (cpu / wall)"
+        print(head)
+        for th in t["threads"][:8]:
+            print(f"  {th['share'] * 100:6.1f}%  {th['name']}")
+    e = s.get("environment")
+    if e:
+        print("environment: " + "; ".join(f"{k}={v}" for k, v in e.items() if k in ("opengl", "desktop", "jvm_vendor", "revision")))
+    g = s.get("gc")
+    if g:
+        line = f"gc ({g['collector']}): {g['events_in_route']} events in the route window, {g['wall_ms_in_route']:.0f} ms wall (max {g['max_event_ms']:.0f} ms)"
+        if "pauses_in_route" in g:
+            line += f"; {g['pauses_in_route']} pauses totalling {g['pause_ms_in_route']:.1f} ms (max {g['max_pause_ms']:.1f} ms)"
+        if "jfr_stw_pauses_in_route" in g:
+            line += (f"; JFR: {g['jfr_stw_pauses_in_route']} STW pauses {g['jfr_stw_pause_ms_in_route']:.2f} ms (max {g['jfr_max_stw_pause_ms']:.2f} ms), "
+                     f"{g['jfr_alloc_stalls_in_route']} allocation stalls {g['jfr_alloc_stall_ms_in_route']:.1f} ms")
+        print(line)
 
 
 if __name__ == "__main__":

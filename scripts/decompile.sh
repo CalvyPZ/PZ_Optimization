@@ -8,7 +8,7 @@
 # temp dir (CFR writes a summary.txt per run), then the disjoint trees are merged.
 set -euo pipefail
 
-PZ_DIR="${PZ_DIR:-/games/steamapps/common/ProjectZomboid}"
+source "$(dirname "${BASH_SOURCE[0]}")/pz-env.sh"
 JAR="$PZ_DIR/projectzomboid.jar"
 CFR_JAR="${CFR_JAR:-$HOME/.local/share/java/cfr.jar}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

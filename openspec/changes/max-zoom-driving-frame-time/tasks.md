@@ -1,15 +1,15 @@
 ## 1. Real-driving benchmark fixture
 
-- [ ] 1.1 Inspect the available saves and select or create a fixed vehicle fixture with a stable driver, route origin, vehicle, and surrounding chunks; verify the fixture loads repeatedly with the player still driving
-- [ ] 1.2 Add a separate harness driving mode that follows vehicle movement or a recorded input replay without calling `ensureNotInVehicle()` or `teleportTo()`; verify the route log identifies vehicle movement and rejects an invalid non-driving setup
-- [ ] 1.3 Force the effective zoom to the configured maximum before the route and record zoom, offscreen dimensions, pan-camera setting, chunk-map width, resolution, renderer/backend, and dashboard state; verify the metadata is present in successful and rejected run directories
+- [~] 1.1 (Apocalypse/2026-09-18_12-18-03 has the player on foot; drive mode now spawns Base.OffRoad under the player — first valid run pending) Inspect the available saves and select or create a fixed vehicle fixture with a stable driver, route origin, vehicle, and surrounding chunks; verify the fixture loads repeatedly with the player still driving
+- [~] 1.2 (implemented; drive-1-20260918-180741 exercised the reject path; vehicle spawn added) Add a separate harness driving mode that follows vehicle movement or a recorded input replay without calling `ensureNotInVehicle()` or `teleportTo()`; verify the route log identifies vehicle movement and rejects an invalid non-driving setup
+- [~] 1.3 (implemented, unverified) Force the effective zoom to the configured maximum before the route and record zoom, offscreen dimensions, pan-camera setting, chunk-map width, resolution, renderer/backend, and dashboard state; verify the metadata is present in successful and rejected run directories
 
 ## 2. Frame attribution and baseline
 
 - [ ] 2.1 Enable and parse the game's GameProfiler output for the driving route, preserving per-frame render and logic sections; verify section frame IDs align with the in-game frame log without relying on JFR timing
 - [ ] 2.2 Add lightweight development counters for visible chunks, dirty render levels, translucent source/list sizes, cutaway invalidations, lighting updates, vehicle physics updates, and Lua/dashboard activity; verify counters are bounded to the route window and add negligible overhead in a control run
 - [ ] 2.3 Run repeated A/B baselines at 100% and maximum zoom, with driving camera pan on and off, and with PZDashboard enabled and disabled; verify p99, p99.9, spike counts, MangoHud values, and the noise floor are reported for every comparable variant
-- [ ] 2.4 Decide from the baseline whether translucent list construction is a dominant contributor; record the decision and its evidence in the attribution report, and leave the cache disabled if it is not
+- [~] 2.4 (JFR attribution on the teleport route at zoom 2.5 ranks renderTranslucent first — docs/plan-driving-frame-time.md §1.2; driving confirmation pending) Decide from the baseline whether translucent list construction is a dominant contributor; record the decision and its evidence in the attribution report, and leave the cache disabled if it is not
 
 ## 3. Renderer cache implementation
 

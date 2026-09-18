@@ -19,3 +19,9 @@
 
 # Decompiled game classes with our edits (see docs/override-edits.md); regenerate with scripts/regen-overrides.sh
 /src/overrides/
+
+# Claude Code worktrees
+/.claude/worktrees/
+
+# Python bytecode
+__pycache__/

@@ -34,4 +34,18 @@ public final class HarnessFlags {
    public static String get(String key, String def) {
       return props.getProperty(key, def);
    }
+
+   /** Append started=1 to the flag file: the Lua mod quits the process on the next return to the main menu. */
+   static void markStarted() {
+      File f = new File(ZomboidFileSystem.instance.getCacheDir() + File.separator + "Lua" + File.separator + "pzopt-harness.txt");
+      try (java.io.FileWriter w = new java.io.FileWriter(f, true)) {
+         w.write("started=1\n");
+      } catch (IOException e) {
+         Log.warn("harness: could not mark " + f + " started: " + e);
+      }
+   }
+
+   static void setRejectReason(String reason) {
+      props.setProperty("reject_reason", reason);
+   }
 }

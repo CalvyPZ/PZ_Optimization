@@ -23,6 +23,15 @@ import zombie.iso.IsoChunk;
  *     recalcTime  = loadInWorldStreamerThread
  *     publishWait = recalc end -> chunk handed to the game thread queue
  * pzopt-frames.out: one frame duration in microseconds per line, game thread.
+ *   Each flushed block of frames is preceded by "# anchor <epochUs> <startUs> <frameId>":
+ *   the wall-clock time (microseconds since the Unix epoch) at which the
+ *   block's first frame started, the same instant as microseconds since
+ *   Stats init (the clock the "# route-start/route-end <us> <frameId>" markers
+ *   use), and the game's frame counter for that frame (IsoCamera.frameState.frameCount,
+ *   which the game's own GameProfiler recording is keyed by).
+ *   Durations within a block are exact against the block start (no rounding
+ *   drift), so frame i starts at epochUs + sum(durations before i). This is
+ *   what lets a JFR sample be assigned to a frame (harness/attribute.py).
  */
 public final class Stats {
    public static final boolean ENABLED = Config.INSTRUMENT;
@@ -32,6 +41,9 @@ public final class Stats {
    private static final ArrayList<String> chunkLines = new ArrayList<>();
    private static int[] frameUs = new int[4096];
    private static int frameCount = 0;
+   private static long blockStartNs = 0L; // nanoTime at which the first pending frame started
+   private static long blockCumUs = 0L;   // microseconds from blockStartNs already accounted to pending frames
+   private static int blockFrameId = 0;   // game frame counter of the first pending frame
    private static long lastFrameNs = 0L;
    private static int lastFrameId = Integer.MIN_VALUE;
    private static long lastFlushNs = System.nanoTime();
@@ -97,7 +109,7 @@ public final class Stats {
       synchronized (lock) {
          maybeFlush(true);
          chunkLines.add("# " + label + " " + us(System.nanoTime() - T0));
-         markers.add("# " + label + " " + us(System.nanoTime() - T0));
+         markers.add("# " + label + " " + us(System.nanoTime() - T0) + " " + lastFrameId);
          maybeFlush(true);
       }
    }
@@ -125,7 +137,14 @@ public final class Stats {
             if (frameCount == frameUs.length) {
                frameUs = java.util.Arrays.copyOf(frameUs, frameUs.length * 2);
             }
-            frameUs[frameCount++] = (int)Math.min(Integer.MAX_VALUE, (now - lastFrameNs) / 1000L);
+            if (frameCount == 0) {
+               blockStartNs = lastFrameNs;
+               blockCumUs = 0L;
+               blockFrameId = lastFrameId;
+            }
+            long cumUs = (now - blockStartNs) / 1000L;
+            frameUs[frameCount++] = (int)Math.min(Integer.MAX_VALUE, cumUs - blockCumUs);
+            blockCumUs = cumUs;
          }
          lastFrameId = frameId;
          lastFrameNs = now;
@@ -153,6 +172,8 @@ public final class Stats {
          return;
       }
       lastFlushNs = now;
+      // wall clock read next to the monotonic one (before any file I/O) so the anchor pairs the two clocks tightly
+      java.time.Instant inst = frameCount > 0 ? java.time.Instant.now() : null;
       File dir = new File(ZomboidFileSystem.instance.getCacheDir());
       try {
          if (!chunkLines.isEmpty()) {
@@ -175,6 +196,11 @@ public final class Stats {
                   w.write('\n');
                }
                markers.clear();
+               if (inst != null) {
+                  // the block start is projected back from the wall-clock read on the monotonic clock
+                  long epochUs = inst.getEpochSecond() * 1_000_000L + inst.getNano() / 1000L - (now - blockStartNs) / 1000L;
+                  w.write("# anchor " + epochUs + " " + us(blockStartNs - T0) + " " + blockFrameId + "\n");
+               }
                for (int i = 0; i < frameCount; i++) {
                   w.write(Integer.toString(frameUs[i]));
                   w.write('\n');

@@ -9,12 +9,12 @@
 # reading. Get the jar from https://github.com/Vineflower/vineflower/releases.
 set -euo pipefail
 
-PZ_DIR="${PZ_DIR:-/games/steamapps/common/ProjectZomboid}"
+source "$(dirname "${BASH_SOURCE[0]}")/pz-env.sh"
 JAR="$PZ_DIR/projectzomboid.jar"
 VF_JAR="${VF_JAR:-$HOME/.local/share/java/vineflower.jar}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$REPO/build/vineflower"
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer)
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 [[ -f "$VF_JAR" ]] || { echo "vineflower not found: $VF_JAR" >&2; exit 1; }
@@ -23,7 +23,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/src"
 patterns=()
 for c in "${OVERRIDES[@]}"; do patterns+=("$c.class" "$c\$*.class"); done
-( cd "$OUT/classes" && unzip -q -o "$JAR" "${patterns[@]}" )
+( cd "$OUT/classes" && for pat in "${patterns[@]}"; do unzip -q -o "$JAR" "$pat" || [[ $? -eq 11 ]]; done )  # 11 = pattern matched nothing (a class without inner classes)
 java -jar "$VF_JAR" --silent=1 -jrt=1 --indent-string='   ' "$OUT/classes" "$OUT/src" >/dev/null
 
 echo "decompiled into $OUT/src; diff against src/overrides:"

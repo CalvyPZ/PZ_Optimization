@@ -1,0 +1,317 @@
+{
+ "run": "native-stock-3-20260918-173527",
+ "scenario": {
+  "mode": "bench",
+  "route": "E:400,S:500,W:400,N:500",
+  "speed": "18.0",
+  "start": "8002,11204",
+  "route_status": "complete",
+  "route_reason": "",
+  "vehicle": "none",
+  "movement_source": "teleport-control",
+  "vehicle_distance": "0.0",
+  "zoom": "2.5",
+  "max_zoom": "2.5",
+  "offscreen_width": "12800",
+  "offscreen_height": "5400",
+  "pan_camera": "false",
+  "chunk_map_width": "19",
+  "resolution": "5120x2160",
+  "renderer_backend": "OpenGL",
+  "renderer_opengl33": "true",
+  "dashboard": "enabled",
+  "route_start_epoch_ms": "1789745765180",
+  "route_end_epoch_ms": "1789745865180",
+  "route_seconds": "100.00022",
+  "chunks_loaded": "4276",
+  "chunks_per_second": "42.759907",
+  "settings": "parallel=false workers=4 (effective 1, cores 16) wake=false (effective false) instrument=true dev=false translucentCache=false"
+ },
+ "valid": true,
+ "route_seconds": 99.997602,
+ "chunks": {
+  "count": 4293,
+  "threads": {
+   "World Streamer": 4293
+  },
+  "load_us": {
+   "mean": 422.80526438388074,
+   "p50": 196.0,
+   "p90": 1366.4000000000005,
+   "p99": 2270.4799999999996,
+   "max": 19710,
+   "total_s": 1.815103
+  },
+  "recalc_us": {
+   "mean": 1190.025623107384,
+   "p50": 930.0,
+   "p90": 1901.8000000000002,
+   "p99": 4736.679999999997,
+   "max": 16864,
+   "total_s": 5.10878
+  },
+  "queue_wait_us": {
+   "mean": 156294.36431399954,
+   "p50": 155874.0,
+   "p90": 268701.0,
+   "p99": 302129.39999999997,
+   "max": 348227
+  },
+  "recalc_wait_us": {
+   "mean": 0.0,
+   "p50": 0.0,
+   "p99": 0.0,
+   "max": 0
+  },
+  "recalc_share_of_streamer_time": 0.7378489786728054,
+  "per_second": 42.93102948608708
+ },
+ "frames": {
+  "count": 16263,
+  "seconds": 99.999972,
+  "fps_mean": 162.63004553641275,
+  "us": {
+   "mean": 6148.925290536801,
+   "p50": 4693.0,
+   "p90": 10587.8,
+   "p99": 19083.43999999997,
+   "p99_9": 29095.14200000031,
+   "max": 43357
+  },
+  "over_33ms": 7,
+  "over_50ms": 0,
+  "over_100ms": 0
+ },
+ "sysmon": {
+  "cpu_pct": {
+   "mean": 20.734895833333333,
+   "p10": 16.810000000000002,
+   "p90": 24.090000000000003,
+   "max": 37.1,
+   "n": 192
+  },
+  "cpu_busiest_core_pct": {
+   "mean": 50.47760416666667,
+   "p10": 34.6,
+   "p90": 69.08000000000001,
+   "max": 100.0,
+   "n": 192
+  },
+  "gpu_pct": {
+   "mean": 80.50520833333333,
+   "p10": 52.1,
+   "p90": 100.0,
+   "max": 100.0,
+   "n": 192
+  },
+  "gpu_sm_mhz": {
+   "mean": 2932.109375,
+   "p10": 2925.0,
+   "p90": 2940.0,
+   "max": 2940.0,
+   "n": 192
+  },
+  "gpu_mem_mhz": {
+   "mean": 10951.0,
+   "p10": 10951.0,
+   "p90": 10951.0,
+   "max": 10951.0,
+   "n": 192
+  },
+  "gpu_w": {
+   "mean": 173.36536458333333,
+   "p10": 150.98499999999999,
+   "p90": 191.87400000000002,
+   "max": 199.54,
+   "n": 192
+  },
+  "gpu_c": {
+   "mean": 46.765625,
+   "p10": 45.0,
+   "p90": 48.0,
+   "max": 50.0,
+   "n": 192
+  },
+  "vram_mib": {
+   "mean": 11610.859375,
+   "p10": 11333.0,
+   "p90": 12128.0,
+   "max": 12130.0,
+   "n": 192
+  },
+  "game_cpu_pct": {
+   "mean": 301.8645833333333,
+   "p10": 238.0,
+   "p90": 355.8,
+   "max": 584.0,
+   "n": 192
+  }
+ },
+ "threads": {
+  "threads": [
+   {
+    "name": "MainThread",
+    "cpu_ms": 83554,
+    "share": 0.836
+   },
+   {
+    "name": "main",
+    "cpu_ms": 65495,
+    "share": 0.655
+   },
+   {
+    "name": "Lighting Thread",
+    "cpu_ms": 26128,
+    "share": 0.261
+   },
+   {
+    "name": "World Streamer",
+    "cpu_ms": 9281,
+    "share": 0.093
+   },
+   {
+    "name": "Thread-2",
+    "cpu_ms": 1483,
+    "share": 0.015
+   },
+   {
+    "name": "WorldReuser",
+    "cpu_ms": 374,
+    "share": 0.004
+   },
+   {
+    "name": "MapCollisionDataJNI",
+    "cpu_ms": 371,
+    "share": 0.004
+   },
+   {
+    "name": "pool-2-thread-6",
+    "cpu_ms": 131,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-5",
+    "cpu_ms": 129,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-7",
+    "cpu_ms": 127,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-4",
+    "cpu_ms": 127,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-2",
+    "cpu_ms": 127,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-3",
+    "cpu_ms": 126,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-1",
+    "cpu_ms": 125,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-8",
+    "cpu_ms": 124,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-1",
+    "cpu_ms": 113,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-2",
+    "cpu_ms": 110,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-3",
+    "cpu_ms": 108,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-4",
+    "cpu_ms": 103,
+    "share": 0.001
+   },
+   {
+    "name": "PathfindNativeThread",
+    "cpu_ms": 76,
+    "share": 0.001
+   },
+   {
+    "name": "IsoRegionWorker",
+    "cpu_ms": 26,
+    "share": 0.0
+   },
+   {
+    "name": "Reference Handler",
+    "cpu_ms": 8,
+    "share": 0.0
+   },
+   {
+    "name": "JNA Cleaner",
+    "cpu_ms": 0,
+    "share": 0.0
+   },
+   {
+    "name": "Common-Cleaner",
+    "cpu_ms": 0,
+    "share": 0.0
+   },
+   {
+    "name": "Finalizer",
+    "cpu_ms": 0,
+    "share": 0.0
+   }
+  ],
+  "route_seconds": 100.00022,
+  "cores": 16.0,
+  "process_cpu_ms": 290810.0,
+  "process_share": 2.9080935657719875,
+  "live_threads_cpu_ms": 188256.0
+ },
+ "environment": {
+  "gpu": "GPU: AD102 [GeForce RTX 4090], vendor: NVIDIA Corporation (0x10de), video memory: 32800 Mb, driver: unknown",
+  "jvm_vendor": "java.vm.vendor=Azul Systems, Inc.",
+  "jvm_version": "java.vm.version=25.0.1+8-LTS",
+  "revision": "revision=b0bbce05d5 pzbullet=1.0.0.28",
+  "opengl": "OpenGL version: 4.6.0 NVIDIA 615.71.09",
+  "desktop": "Desktop resolution 5120x2160"
+ },
+ "props": "parallel=false\nwake=false\ninstrument=true",
+ "gc": {
+  "collector": "ZGC",
+  "events_in_route": 8,
+  "wall_ms_in_route": 2920.0,
+  "max_event_ms": 1551.0
+ },
+ "opts": {
+  "layout": "native",
+  "mode": "bench",
+  "crashed": "0",
+  "attempts": "1",
+  "jfr": "0",
+  "jfr_period": "",
+  "game_profiler": "0",
+  "gc": "default",
+  "no_dashboard": "0",
+  "mangohud_secs": "200",
+  "renderer": "nvidia",
+  "game_env": "",
+  "mangohud_config": "config/mangohud-benchmark.conf",
+  "launch_epoch": "1789745727",
+  "run_seconds": "303",
+  "flags": ""
+ }
+}
