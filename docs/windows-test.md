@@ -39,10 +39,10 @@ in the default place (Steam, right-click the game, Manage, Browse local files).
 
 ```powershell
 $PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
-Get-Content "$PZ\ProjectZomboid64.json" | Select-String classpath
+Get-Content "$PZ\ProjectZomboid64.json" | Select-String -Context 0,3 classpath
 ```
 
-The classpath line must list `"."` **before** `"projectzomboid.jar"`. If it does
+The classpath block must list `"."` **before** `"projectzomboid.jar"`. If it does
 not, stop: loose class files would never load on this depot.
 
 Confirm the folders the zip will create do not already exist (they should not on
@@ -251,6 +251,39 @@ run-win.ps1 now splits on commas itself).
 
 Not yet done from the list above: the manual drive at max zoom, walking through buildings,
 quit-to-menu-and-Continue, and the visible-fps reading with the in-game limiter at Uncapped.
+
+### Zoom 2.5 (same evening, after Diego added the 250 % zoom level)
+
+Same machine, cap and route; options.ini `zoomLevels2x` now starts at 250, so `zoom=max`
+gives 2.5 and the zoom-out buffer is 12800x5400, the Linux configuration. Two stock runs
+for the noise floor. Summaries in `harness/baseline/windows/z25/`.
+
+| Run | fps mean | frame mean | p50 | p90 | p99 | p99.9 | max | >33 ms |
+|---|---|---|---|---|---|---|---|---|
+| `win-bench-z25-stock-20260919-224824` | 122.4 | 8.2 ms | 6.7 | 14.3 | 26.1 | 36.5 | 52.3 | 32 |
+| `win-bench-z25-stock-20260919-225229` | 121.7 | 8.2 ms | 6.6 | 14.6 | 27.0 | 38.3 | 47.3 | 30 |
+| `win-bench-z25-opt-20260919-224518` | 194.0 | 5.2 ms | 4.1 | 9.4 | 18.5 | 26.6 | 49.8 | 8 |
+
+Noise floor between the two stock runs: 0.7 fps, 0.9 ms at p99, 1.8 ms at p99.9. The
+optimized deltas (+72 fps, −7.6 ms p99, −10 ms p99.9, 30 → 8 frames over 33 ms) are far above
+twice that. Both stock runs have the same cluster of 25–30 frames over 33 ms between 56 s and
+90 s of the route (the W and N legs through the built-up area); the optimized run has eight
+spread over the whole route. Chunk queue wait: stock 184 / 180 ms mean, optimized 31.5 ms.
+
+| Run | machine CPU | busiest core | game process | main thread | GPU load | GPU W |
+|---|---|---|---|---|---|---|
+| stock 1 / 2 | 28 / 30 % | 74 / 72 % | 270 / 275 % of a core | 88 % of wall | 68 / 65 % (p90 99 / 100) | 127 / 120 |
+| optimized | 26 % | 73 % | 270 % of a core | 93 % of wall | 52 % (p90 65) | 142 |
+
+Same verdict as at zoom 2.0: the optimized build is bound by the game thread (93 % of wall)
+with the GPU at half load and the machine at a quarter; stock spends more GPU per frame on the
+per-frame tree/translucent pass and touches 100 % GPU in its p90 while producing 122 fps.
+
+Against Linux native at zoom 2.5 and the 240 cap (route mean 6.2 → 4.4 ms, p99 19.3 → 8.3 ms):
+Windows stock is slower (8.2 ms mean, 26.1 ms p99) and Windows optimized lands at 5.2 ms mean,
+18.5 ms p99. The p99 gap to Linux (8.3 vs 18.5 ms) is the open Windows question; the driver
+(616.92 vs the Linux 580 series), the 500 cap and the absence of MangoHud's frame pacing are
+the candidates, and the 500-cap-vs-240-cap comparison is the first thing to run.
 
 ## What to bring back to Linux
 

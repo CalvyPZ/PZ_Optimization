@@ -1,0 +1,338 @@
+{
+ "run": "win-bench-z25-opt-20260919-224518",
+ "scenario": {
+  "mode": "bench",
+  "route": "E:400,S:500,W:400,N:500",
+  "speed": "18.0",
+  "start": "8002,11204",
+  "route_status": "complete",
+  "route_reason": "",
+  "vehicle": "none",
+  "vehicle_spawned": "false",
+  "movement_source": "teleport-control",
+  "vehicle_distance": "0.0",
+  "cruise_kmh": "0.0",
+  "zoom": "2.5",
+  "max_zoom": "2.5",
+  "auto_zoom_option": "false",
+  "offscreen_width": "12800",
+  "offscreen_height": "5400",
+  "pan_camera": "false",
+  "chunk_map_width": "19",
+  "resolution": "5120x2160",
+  "renderer_backend": "OpenGL",
+  "renderer_opengl33": "true",
+  "dashboard": "disabled",
+  "route_start_epoch_ms": "1789850781360",
+  "route_end_epoch_ms": "1789850881363",
+  "route_seconds": "100.00288",
+  "chunks_loaded": "4294",
+  "chunks_per_second": "42.938766",
+  "settings": "parallel=true workers=4 (effective 4, cores 16) wake=true (effective true) instrument=true dev=false translucentCache=false hotsaveIntervalSec=30 persistentVbo=false treesInChunkTexture=true windowsInChunkTexture=true translucentTilesInChunkTexture=false bakeBudget=8 lightingBudget=8 lightingRebakeMs=0 cutawayFast=true cutawayRadius=0 gridStackInterval=0 fileThreads=8 fileInflight=32 textureBufferMb=50 parallelDepthMaps=true loaderCpuFixes=true loadWorkers=8 scriptParserFast=true fmodAsync=true noLoadFade=true bootPump=true earlyModels=true luaPrecompile=true preloadAnimSets=true animClipCache=true packIndex=true itemParamSwitch=true bootFileThreads=10 shaderCache=true"
+ },
+ "valid": true,
+ "route_seconds": 100.000861,
+ "chunks": {
+  "count": 4294,
+  "threads": {
+   "pzopt-recalc-4": 1074,
+   "pzopt-recalc-6": 1072,
+   "pzopt-recalc-5": 1076,
+   "pzopt-recalc-3": 1072
+  },
+  "load_us": {
+   "mean": 2880.6064275733584,
+   "p50": 2990.0,
+   "p90": 4016.499999999999,
+   "p99": 8001.559999999998,
+   "max": 73630,
+   "total_s": 12.369324
+  },
+  "recalc_us": {
+   "mean": 1411.5822077317187,
+   "p50": 1005.5,
+   "p90": 2194.7,
+   "p99": 7842.189999999879,
+   "max": 37598,
+   "total_s": 6.061334
+  },
+  "queue_wait_us": {
+   "mean": 31506.10759198882,
+   "p50": 29261.5,
+   "p90": 58752.899999999994,
+   "p99": 108413.87999999971,
+   "max": 188654
+  },
+  "recalc_wait_us": {
+   "mean": 60.72403353516535,
+   "p50": 36.0,
+   "p99": 286.41999999999825,
+   "max": 13794
+  },
+  "recalc_share_of_streamer_time": 0.3288723603899546,
+  "per_second": 42.9396302897832
+ },
+ "frames": {
+  "count": 19404,
+  "seconds": 100.000866,
+  "fps_mean": 194.038319628152,
+  "us": {
+   "mean": 5153.621212121212,
+   "p50": 4127.5,
+   "p90": 9379.7,
+   "p99": 18470.46000000002,
+   "p99_9": 26569.81700000041,
+   "max": 49843
+  },
+  "over_33ms": 8,
+  "over_50ms": 0,
+  "over_100ms": 0
+ },
+ "sysmon": {
+  "cpu_pct": {
+   "mean": 25.54126984126984,
+   "p10": 18.5,
+   "p90": 31.52,
+   "max": 48.9,
+   "n": 63
+  },
+  "cpu_busiest_core_pct": {
+   "mean": 73.2904761904762,
+   "p10": 61.66,
+   "p90": 84.22,
+   "max": 89.2,
+   "n": 63
+  },
+  "gpu_pct": {
+   "mean": 51.84126984126984,
+   "p10": 37.4,
+   "p90": 65.0,
+   "max": 93.0,
+   "n": 63
+  },
+  "gpu_sm_mhz": {
+   "mean": 2758.3333333333335,
+   "p10": 2760.0,
+   "p90": 2760.0,
+   "max": 2760.0,
+   "n": 63
+  },
+  "gpu_mem_mhz": {
+   "mean": 10501.0,
+   "p10": 10501.0,
+   "p90": 10501.0,
+   "max": 10501.0,
+   "n": 63
+  },
+  "gpu_w": {
+   "mean": 141.99761904761905,
+   "p10": 113.91799999999999,
+   "p90": 187.09999999999997,
+   "max": 230.09,
+   "n": 63
+  },
+  "gpu_c": {
+   "mean": 42.61904761904762,
+   "p10": 42.0,
+   "p90": 44.0,
+   "max": 46.0,
+   "n": 63
+  },
+  "vram_mib": {
+   "mean": 11660.190476190477,
+   "p10": 11419.0,
+   "p90": 12109.0,
+   "max": 12112.0,
+   "n": 63
+  },
+  "game_cpu_pct": {
+   "mean": 269.75873015873015,
+   "p10": 227.72,
+   "p90": 311.03999999999996,
+   "max": 671.1,
+   "n": 63
+  }
+ },
+ "threads": {
+  "threads": [
+   {
+    "name": "main",
+    "cpu_ms": 93015,
+    "share": 0.93
+   },
+   {
+    "name": "MainThread",
+    "cpu_ms": 78546,
+    "share": 0.785
+   },
+   {
+    "name": "Lighting Thread",
+    "cpu_ms": 27468,
+    "share": 0.275
+   },
+   {
+    "name": "World Streamer",
+    "cpu_ms": 3984,
+    "share": 0.04
+   },
+   {
+    "name": "MapCollisionDataJNI",
+    "cpu_ms": 1921,
+    "share": 0.019
+   },
+   {
+    "name": "Thread-2",
+    "cpu_ms": 1718,
+    "share": 0.017
+   },
+   {
+    "name": "pzopt-recalc-6",
+    "cpu_ms": 1687,
+    "share": 0.017
+   },
+   {
+    "name": "pzopt-recalc-4",
+    "cpu_ms": 1546,
+    "share": 0.015
+   },
+   {
+    "name": "pzopt-recalc-5",
+    "cpu_ms": 1484,
+    "share": 0.015
+   },
+   {
+    "name": "pzopt-recalc-3",
+    "cpu_ms": 1406,
+    "share": 0.014
+   },
+   {
+    "name": "WorldReuser",
+    "cpu_ms": 531,
+    "share": 0.005
+   },
+   {
+    "name": "pool-2-thread-6",
+    "cpu_ms": 281,
+    "share": 0.003
+   },
+   {
+    "name": "pool-2-thread-2",
+    "cpu_ms": 203,
+    "share": 0.002
+   },
+   {
+    "name": "pool-2-thread-8",
+    "cpu_ms": 203,
+    "share": 0.002
+   },
+   {
+    "name": "pool-2-thread-7",
+    "cpu_ms": 187,
+    "share": 0.002
+   },
+   {
+    "name": "pool-2-thread-1",
+    "cpu_ms": 171,
+    "share": 0.002
+   },
+   {
+    "name": "pool-1-thread-5",
+    "cpu_ms": 140,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-3",
+    "cpu_ms": 140,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-1",
+    "cpu_ms": 125,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-3",
+    "cpu_ms": 125,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-5",
+    "cpu_ms": 125,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-4",
+    "cpu_ms": 109,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-10",
+    "cpu_ms": 109,
+    "share": 0.001
+   },
+   {
+    "name": "pool-2-thread-4",
+    "cpu_ms": 109,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-7",
+    "cpu_ms": 93,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-8",
+    "cpu_ms": 78,
+    "share": 0.001
+   },
+   {
+    "name": "pool-1-thread-9",
+    "cpu_ms": 78,
+    "share": 0.001
+   },
+   {
+    "name": "PathfindNativeThread",
+    "cpu_ms": 78,
+    "share": 0.001
+   },
+   {
+    "name": "IsoRegionWorker",
+    "cpu_ms": 31,
+    "share": 0.0
+   }
+  ],
+  "route_seconds": 100.00288,
+  "cores": 16.0,
+  "process_cpu_ms": 273406.0,
+  "process_share": 2.733983862921423,
+  "live_threads_cpu_ms": 215703.0
+ },
+ "environment": {
+  "gpu": "GPU: NVIDIA GeForce RTX 4090, vendor: NVIDIA, video memory: 24564 Mb, driver: 32.0.16.1692",
+  "jvm_vendor": "java.vm.vendor=Azul Systems, Inc.",
+  "jvm_version": "java.vm.version=25.0.1+8-LTS",
+  "revision": "revision=b0bbce05d5 pzbullet=1.0.0.28",
+  "opengl": "OpenGL version: 4.6.0 NVIDIA 616.92",
+  "desktop": "Desktop resolution 5120x2160"
+ },
+ "props": "instrument=true",
+ "opts": {
+  "layout": "windows",
+  "mode": "bench",
+  "crashed": "0",
+  "attempts": "1",
+  "jfr": "0",
+  "game_profiler": "0",
+  "gc": "default",
+  "no_dashboard": "1",
+  "mangohud_secs": "",
+  "lead": "dynamic",
+  "route_seconds": "100",
+  "renderer": "nvidia",
+  "record": "0",
+  "launcher": "steam",
+  "launch_epoch": "1789850755",
+  "run_seconds": "141",
+  "flags": "zoom=max"
+ }
+}
