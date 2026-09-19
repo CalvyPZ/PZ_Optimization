@@ -22,15 +22,46 @@ public final class Overrides {
    private Overrides() {
    }
 
+   private static final List<String> deferredMarkers = new java.util.ArrayList<>();
+
+   /**
+    * For classes whose static initializer runs while the game's log cannot format a line yet: IsoMetaGrid is
+    * constructed inside IsoWorld's own static initializer, and DebugLog reads IsoWorld.instance (still null) for
+    * the frame number of every line. The marker is printed by the next onClassLoaded call.
+    */
+   public static void onClassLoadedQuiet(String className) {
+      synchronized (deferredMarkers) {
+         deferredMarkers.add(className);
+      }
+   }
+
    /** Called from the static initializer of each overridden class. */
    public static void onClassLoaded(String className) {
+      synchronized (deferredMarkers) {
+         for (String deferred : deferredMarkers) {
+            Log.info("loaded override " + deferred + " (target revision " + BuildInfo.targetRevision() + ", "
+                  + (ENABLED ? "active" : "DISABLED: build mismatch") + ", logged late)");
+         }
+         deferredMarkers.clear();
+      }
       Log.info("loaded override " + className + " (target revision " + BuildInfo.targetRevision() + ", "
             + (ENABLED ? "active" : "DISABLED: build mismatch") + ")");
+      // FileSystemImpl loads inside GameWindow's static initializer, before the game's log and file system exist;
+      // the harness hooks wait for a later override (they are armed again on every class load until they take)
+      if (!Log.gameLogReady()) {
+         return;
+      }
       try {
          AutoStart.start(); // no-op unless the harness flag file names a mode
       } catch (Throwable t) {
          Log.warn("harness: auto-start not armed: " + t);
       }
+      try {
+         LoadTrace.install(); // no-op unless instrument=true or a harness run
+      } catch (Throwable t) {
+         Log.warn("load trace not installed: " + t);
+      }
+
    }
 
    /** True when the running game is the build the overrides were compiled against. */

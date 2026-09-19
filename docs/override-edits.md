@@ -223,6 +223,78 @@ The class is otherwise verbatim Vineflower output (revision
 `src/shims/zombie/gameStates/TISLogoState.java` (logo screens skipped), this
 is what gets a run from launch to the main menu with no splash screens.
 
+## zombie.fileSystem.FileSystemImpl (added 2026-09-19, game load)
+
+Vineflower output needs one fix: in `updateAsyncTransactions` the decompiler
+typed the reused local as `boolean priority` (`= (boolean)1`, later
+`= (boolean)(16 - inProgress.size())`); the first assignment is dropped and the
+second becomes `int canAdd`. Edits (`// pzopt:`):
+
+1. **Load marker** in a `static {}` block; a new `private final int maxInFlight`.
+2. **Pool size.** The constructor's `numThreads` (stock: 2 on ≤ 4 cores, else 4)
+   becomes `pzopt.Config.FILE_THREADS` and `maxInFlight` becomes
+   `pzopt.Config.FILE_INFLIGHT` when the overrides are enabled (stock 4 / 16
+   otherwise); one log line reports both.
+3. **In-flight cap.** The two literal `16`s in `updateAsyncTransactions` (how
+   many in-progress items are checked per frame, and how many pending tasks may
+   be submitted at once) read `maxInFlight`.
+
+## zombie.tileDepth.TileDepthTextures (added 2026-09-19, game load)
+
+Pristine Vineflower output compiles. Edits:
+
+1. **Load marker** in a `static {}` block.
+2. `tilesets` becomes a `ConcurrentHashMap` (same private field, same uses) and
+   a `claimedTilesets` concurrent key set is added.
+3. **Concurrent load tasks.** `LoadTask.call`, when
+   `pzopt.Config.PARALLEL_DEPTH_MAPS` is set and the overrides are enabled,
+   skips the stock `synchronized (this.textures)` block: if the tileset is not
+   in the map and this task is the first to claim its name it calls
+   `createTileset(tilesetName, true)` directly. Everything `createTileset` does
+   is per tileset (cached row count, its own `PNGDecoder`, its own tiles, GPU
+   uploads queued on the render thread), so the 218 tasks decode concurrently
+   instead of one at a time. Stock path otherwise.
+
+## zombie.core.textures.TextureIDAssetManager (added 2026-09-19, game load)
+
+Pristine Vineflower output compiles. Edits: load marker, and `waitFileTask`'s
+literal `52428800L` (50 MB of decoded textures waiting for the render thread
+before the decoders sleep in 20 ms steps) becomes `WAIT_BYTES` =
+`pzopt.Config.TEXTURE_BUFFER_MB` MB when the overrides are enabled.
+
+## zombie.MapCollisionData (added 2026-09-19, game load)
+
+Pristine Vineflower output compiles. Edits, all under
+`pzopt.Config.LOADER_CPU_FIXES && pzopt.Overrides.enabled()`:
+
+1. **Load marker** in a `static {}` block.
+2. **Lot header once per cell.** A private static
+   `pzoptZombieIntensity(lotHeader, chunkX, chunkY, cache, cached)` is a copy
+   of `LotHeader.getZombieIntensityForChunk` whose
+   `mapFiles.getLotHeader(cellX, cellY)` result is cached per map-files index
+   in two arrays allocated per cell in `init`; the 32×32 chunk loop calls it
+   instead of the static. Same loop bounds, same `bgHasCell300` test, same
+   returned byte; only the per-chunk thread-local/`String.format`/`HashMap`
+   lookups go.
+
+## zombie.iso.IsoMetaGrid (added 2026-09-19, game load)
+
+Pristine Vineflower output compiles (`MetaGridLoaderThread` comes along as an
+inner class). Edits:
+
+1. **Load marker** via `pzopt.Overrides.onClassLoadedQuiet` in a `static {}`
+   block: `IsoMetaGrid` is constructed inside `IsoWorld`'s own static
+   initializer, and `DebugLog` reads `IsoWorld.instance` (still null) for
+   the frame number of every line, so logging there kills the game at boot
+   (`ExceptionInInitializerError` in `IsoWorld.<clinit>`, nothing in
+   console.txt). The marker is printed by the next override that loads.
+2. **`checkVehiclesZones` dedupe.** Under the same guard the O(n²) scan is
+   replaced by one pass with a `HashSet<Long>` keyed on
+   `(getX(), getY(), w, h)`: a zone whose key was seen is removed, so the
+   first zone of each key survives exactly as in stock (stock removes the
+   later index). The stock debug string is only built when
+   `DebugType.Vehicle.isEnabled()`; one `[pzopt]` line reports the counts.
+
 ## org.lwjglx.opengl.Display and org.lwjglx.input.Mouse (added 2026-09-19)
 
 These two are The Indie Stone's LWJGL 2 compatibility shim over GLFW 3.4 (the

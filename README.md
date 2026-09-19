@@ -132,6 +132,26 @@ instead of baking them into the cached chunk textures like walls and floors.
     episodes on a 100 s route). The override runs it at most every N seconds;
     0 restores stock.
 
+### Game load after Continue (`FileSystemImpl`, `TileDepthTextures`, `TextureIDAssetManager`, `MapCollisionData`, `IsoMetaGrid`)
+
+11. **File pool sized to the machine** (`fileThreads`, `fileInflight`). The
+    game's async file system decodes every texture, model, animation (3,990
+    `.X` files) and depth map on 4 threads with 16 tasks in flight; the loader
+    thread then waits ~3.5 s for them. Now half the cores and 4× in flight
+    (more than that slows the game's own 8 meta-grid loader threads).
+12. **Depth maps decode concurrently** (`parallelDepthMaps`). Stock runs all
+    218 tileset loads one at a time under one lock (2 s of one thread).
+13. **Loader-thread fixes** (`loaderCpuFixes`): `checkVehiclesZones` (called 11×
+    per load over 9,690 zones, O(n²) plus a debug string per duplicate) and
+    `MapCollisionData.init` (lot header looked up per chunk instead of per
+    cell), same results.
+14. **Wider recalc pool while loading** (`loadWorkers`), within noise here.
+
+Continue → world ready on the bench save: 10.1 → 6.5 s (`docs/plan-game-load.md`,
+`harness/loadtime.py`, runs `load-*`). Note that `textureBufferMb` stays at the
+stock 50 MB: 256 MB let uploads pile up on the render thread and produced a
+5 s frame a few seconds into the world.
+
 ### What is left
 
 The p99.9 in the table above (18 ms) is not this repo's code: it is a Lua
@@ -154,9 +174,12 @@ install directory precedes the jar, so a loose `.class` file under it
 by deleting the file; the jar's checksum never changes. The jar is compiled
 but not obfuscated (class-file version 69, Java 25).
 
-Five game classes are shadowed: `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`,
+Shadowed game classes: `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`,
 `zombie.iso.ChunkSaveWorker`, `zombie.core.VBO.GLVertexBufferObject`,
-`zombie.iso.fboRenderChunk.FBORenderCell`. They are rebuilt from the installed
+`zombie.iso.fboRenderChunk.FBORenderCell`, `zombie.GameWindow`, and for the game
+load `zombie.fileSystem.FileSystemImpl`, `zombie.tileDepth.TileDepthTextures`,
+`zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`,
+`zombie.iso.IsoMetaGrid` (plus the two `org.lwjglx` window-shim classes). They are rebuilt from the installed
 jar with Vineflower (`scripts/regen-overrides.sh`) plus the edits listed in
 `docs/override-edits.md`, each marked `// pzopt:`. The decompiled game code is
 **not committed**; only the new `pzopt.*` helper classes and the prose

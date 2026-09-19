@@ -42,7 +42,9 @@ final class AutoStart {
       boolean pressed = false;
       while (true) {
          try {
-            Thread.sleep(100L);
+            // 20 ms polls until the loading state is seen, so the "loading screen up" line in the load
+            // trace (pzopt-loadtrace.out) stamps the Continue press to that precision; 100 ms after
+            Thread.sleep(pressed ? 100L : 20L);
             GameState cur = GameWindow.states == null ? null : GameWindow.states.current;
             if (cur instanceof GameLoadingState) {
                forceDone.setBoolean(cur, true);

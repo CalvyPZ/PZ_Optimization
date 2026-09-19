@@ -2,7 +2,9 @@ package pzopt;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import zombie.characters.animals.pathfind.AnimalPathfind;
 import zombie.core.ThreadGroups;
@@ -33,7 +35,9 @@ public final class RecalcPool {
    }
 
    private static final int WIDTH = Config.effectiveWorkers();
-   private static volatile ExecutorService executor;
+   /** Width while a world loads (the initial chunk map is hundreds of chunks with nothing else to do): loadWorkers. */
+   private static final int LOAD_WIDTH = WIDTH > 1 ? Math.max(WIDTH, Config.LOAD_WORKERS) : 1;
+   private static volatile ThreadPoolExecutor executor;
    private static final AtomicInteger threadIndex = new AtomicInteger();
    private static final ConcurrentLinkedQueue<Task> retries = new ConcurrentLinkedQueue<>();
    private static final OrderedPublisher<Task> publisher = new OrderedPublisher<>(RecalcPool::publish, RecalcPool::failed);
@@ -51,24 +55,47 @@ public final class RecalcPool {
    }
 
    private static ExecutorService executor() {
-      ExecutorService e = executor;
+      ThreadPoolExecutor e = executor;
       if (e == null) {
          synchronized (RecalcPool.class) {
             e = executor;
             if (e == null) {
                AnimalPathfind.getInstance(); // lazy singleton reached from RecalcProperties; initialise it here, once
-               e = Executors.newFixedThreadPool(WIDTH, r -> {
+               int width = loading() ? LOAD_WIDTH : WIDTH;
+               e = new ThreadPoolExecutor(width, width, 10L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
                   Thread t = new Thread(ThreadGroups.Workers, r, Guard.WORKER_PREFIX + threadIndex.getAndIncrement());
                   t.setDaemon(true);
                   t.setPriority(Thread.NORM_PRIORITY);
                   return t;
                });
+               e.allowCoreThreadTimeOut(true); // the extra load-time threads go away 10 s after the load
                executor = e;
-               Log.info("recalc pool started with " + WIDTH + " workers");
+               Log.info("recalc pool started with " + width + " workers (" + WIDTH + " in play, " + LOAD_WIDTH + " while loading)");
+            }
+         }
+      }
+      // grow for a world load, shrink back for play; a fixed queue, so idle threads simply time out
+      int want = loading() ? LOAD_WIDTH : WIDTH;
+      if (e.getCorePoolSize() != want) {
+         synchronized (RecalcPool.class) {
+            if (e.getCorePoolSize() != want) {
+               if (want > e.getMaximumPoolSize()) {
+                  e.setMaximumPoolSize(want);
+                  e.setCorePoolSize(want);
+               } else {
+                  e.setCorePoolSize(want);
+                  e.setMaximumPoolSize(want);
+               }
+               Log.info("recalc pool width " + want + (want == LOAD_WIDTH && want != WIDTH ? " (world loading)" : ""));
             }
          }
       }
       return e;
+   }
+
+   /** True while GameLoadingState's loader thread exists (set in enter(), cleared in exit()). */
+   private static boolean loading() {
+      return LOAD_WIDTH != WIDTH && zombie.gameStates.GameLoadingState.loader != null;
    }
 
    /** Streamer thread: loop 1 is done; run the rest on a worker and publish in order. */

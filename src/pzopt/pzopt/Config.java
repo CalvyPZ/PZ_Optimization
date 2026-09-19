@@ -35,6 +35,24 @@ import java.util.Properties;
  *   cutawayFast     true/false   replay stored occluder masks for clean chunk levels instead of re-testing every square (default true)
  *   cutawayRadius   int          cutaway wall visits only consider chunks within this many chunks of the camera (0 = all on screen)
  *   gridStackInterval int        frames between buildings-in-front scans while the camera square and facing are unchanged (0 = every frame)
+ *
+ * Game load (docs/plan-game-load.md):
+ *   fileThreads     int          worker threads of the game's async file system (texture decode, model and animation
+ *                            import, depth maps); stock is 2 on <= 4 cores, else 4 (default: max(4, cores / 2): with cores - 2
+ *                            the game's own 8 meta-grid loader threads ran 2.5x slower and the load was 0.65 s longer, load-s3 vs load-s3f8)
+ *   fileInflight    int          file tasks handed to those threads at once (stock 16; default 4 * fileThreads)
+ *   textureBufferMb int          decoded-texture bytes that may wait for the render thread before the decoders pause
+ *                            (stock 50; default 50: 256 MB let ~200 MB of uploads pile up on the render thread and
+ *                            gave a 5 s frame a few seconds into the world, run load-s1-155507)
+ *   parallelDepthMaps true/false  the 218 depth-map tilesets decode concurrently instead of one at a time under
+ *                            one lock (default true)
+ *   loaderCpuFixes  true/false   algorithmic fixes on the loader thread with identical results: MapCollisionData.init
+ *                            resolves lot headers once per cell, IsoMetaGrid.checkVehiclesZones dedupes with a hash
+ *                            set (default true)
+ *   loadWorkers     int          recalc pool width while a world is loading (GameLoadingState.loader alive): the 361
+ *                            chunks of the initial chunk map recalc on this many threads, then the pool shrinks back
+ *                            to `workers` (default max(workers, cores / 2); clamped like workers; cores - 2 tripled the per-chunk
+ *                            recalc time through contention and gained nothing, load-s3)
  */
 public final class Config {
    private static final Properties props = load();
@@ -55,6 +73,12 @@ public final class Config {
    public static final boolean CUTAWAY_FAST = bool("cutawayFast", true);
    public static final int CUTAWAY_RADIUS = integer("cutawayRadius", 0);
    public static final int GRID_STACK_INTERVAL = integer("gridStackInterval", 0);
+   public static final int FILE_THREADS = Math.max(1, integer("fileThreads", Math.max(4, Runtime.getRuntime().availableProcessors() / 2)));
+   public static final int FILE_INFLIGHT = Math.max(1, integer("fileInflight", 4 * FILE_THREADS));
+   public static final int TEXTURE_BUFFER_MB = Math.max(1, integer("textureBufferMb", 50));
+   public static final boolean PARALLEL_DEPTH_MAPS = bool("parallelDepthMaps", true);
+   public static final boolean LOADER_CPU_FIXES = bool("loaderCpuFixes", true);
+   public static final int LOAD_WORKERS = clampWorkers(integer("loadWorkers", Math.max(WORKERS, Runtime.getRuntime().availableProcessors() / 2)));
 
    private Config() {
    }
@@ -114,6 +138,7 @@ public final class Config {
    public static String describe() {
       return "parallel=" + PARALLEL + " workers=" + WORKERS + " (effective " + effectiveWorkers() + ", cores "
             + Runtime.getRuntime().availableProcessors() + ") wake=" + WAKE + " (effective " + effectiveWake() + ") instrument=" + INSTRUMENT + " dev=" + DEV
-            + " translucentCache=" + TRANSLUCENT_CACHE + " hotsaveIntervalSec=" + HOTSAVE_INTERVAL_SEC + " persistentVbo=" + PERSISTENT_VBO + " treesInChunkTexture=" + TREES_IN_CHUNK_TEXTURE + " windowsInChunkTexture=" + WINDOWS_IN_CHUNK_TEXTURE + " translucentTilesInChunkTexture=" + TRANSLUCENT_TILES_IN_CHUNK_TEXTURE + " bakeBudget=" + BAKE_BUDGET + " lightingBudget=" + LIGHTING_BUDGET + " lightingRebakeMs=" + LIGHTING_REBAKE_MS + " cutawayFast=" + CUTAWAY_FAST + " cutawayRadius=" + CUTAWAY_RADIUS + " gridStackInterval=" + GRID_STACK_INTERVAL;
+            + " translucentCache=" + TRANSLUCENT_CACHE + " hotsaveIntervalSec=" + HOTSAVE_INTERVAL_SEC + " persistentVbo=" + PERSISTENT_VBO + " treesInChunkTexture=" + TREES_IN_CHUNK_TEXTURE + " windowsInChunkTexture=" + WINDOWS_IN_CHUNK_TEXTURE + " translucentTilesInChunkTexture=" + TRANSLUCENT_TILES_IN_CHUNK_TEXTURE + " bakeBudget=" + BAKE_BUDGET + " lightingBudget=" + LIGHTING_BUDGET + " lightingRebakeMs=" + LIGHTING_REBAKE_MS + " cutawayFast=" + CUTAWAY_FAST + " cutawayRadius=" + CUTAWAY_RADIUS + " gridStackInterval=" + GRID_STACK_INTERVAL
+            + " fileThreads=" + FILE_THREADS + " fileInflight=" + FILE_INFLIGHT + " textureBufferMb=" + TEXTURE_BUFFER_MB + " parallelDepthMaps=" + PARALLEL_DEPTH_MAPS + " loaderCpuFixes=" + LOADER_CPU_FIXES + " loadWorkers=" + LOAD_WORKERS;
    }
 }

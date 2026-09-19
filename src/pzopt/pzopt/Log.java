@@ -15,7 +15,7 @@ public final class Log {
    private Log() {
    }
 
-   private static boolean gameLogReady() {
+   static boolean gameLogReady() {
       return System.out instanceof DebugLogStream;
    }
 
