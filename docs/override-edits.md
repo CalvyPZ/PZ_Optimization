@@ -198,11 +198,27 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
 
 ## zombie.GameWindow
 
-One edit, in the boot sequence (`init`, between `Translator.loadFiles()` and
+Two edits. In the boot sequence (`init`, between `Translator.loadFiles()` and
 `LuaManager.init()`): the call to `doEpilepsyWarningText()` is wrapped in
 `if (!pzopt.Overrides.enabled())`, so the photosensitivity warning frame is
 not drawn at start-up while the build guard is active. The method itself is
-unchanged. The class is otherwise verbatim Vineflower output (revision
+unchanged.
+
+In `mainThreadStep` (added 2026-09-19): the frame-rate cap is removed. Stock
+runs `frameStep()` only when the `accumulator` has reached
+`1 s / PerformanceSettings.getLockFPS()` (the `frameRate=` value from
+options.ini, 240 at most), and the game's own "uncapped" option is dead code
+because `Core.loadOptions` resets `uncappedFPS` to false and the lock to 60
+whenever it is set. The override's condition is now
+`isFramerateUncapped() || pzopt.Overrides.enabled()`, so with the build guard
+active every main-loop iteration is a frame; the stock limiter still runs
+when the guard is off. Nothing else consults the cap for timing
+(`GameTime` uses measured deltas); the only other reader is Lua's
+`getAverageFPS`, which clamps the displayed number to the lock value, so the
+in-game FPS readout may show 240 while MangoHud shows the real rate. The
+harness metric "frames below 240 fps cap" (`harness/analyze.py`
+`FPS_TARGET`) keeps its meaning as the share of frames slower than 4.17 ms.
+The class is otherwise verbatim Vineflower output (revision
 `b0bbce05d5`), which recompiles without fixes. Together with the committed
 `src/shims/zombie/gameStates/TISLogoState.java` (logo screens skipped), this
 is what gets a run from launch to the main menu with no splash screens.
