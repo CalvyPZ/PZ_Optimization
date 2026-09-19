@@ -1,0 +1,29 @@
+name: Question
+description: Ask how something works, whether a setting applies to you, or how to read a result.
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the README first. It explains each optimization, every Config flag and the install steps. Add the platform label (`linux`, `windows`, `handheld`) after opening if the question is platform-specific.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform (if relevant)
+      options:
+        - Not platform-specific
+        - Linux
+        - Windows
+        - Handheld (Steam Deck / other)
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you tried, what you read, and anything about your setup that matters (game build, GPU, renderer, mods).

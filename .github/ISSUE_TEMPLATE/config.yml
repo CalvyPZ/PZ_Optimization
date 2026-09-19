@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Install and usage guide
+    url: https://github.com/DiegoVillalobosFlores/PZ_Optimization#readme
+    about: Read the README first. It covers installation, every Config flag, and how to go back to stock.

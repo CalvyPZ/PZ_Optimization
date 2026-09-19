@@ -1,0 +1,50 @@
+name: Suggestion
+description: Propose an optimization, a new Config flag, a benchmark to add, or a change to the docs.
+title: "[Suggestion] "
+labels: ["suggestion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Project goal: consistent frame time, with CPU and GPU used to the max whenever the game is not pegged at the frame cap. Suggestions that come with a measurement (frame-time p99 / p99.9, CPU and GPU load) are the easiest to act on.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rendering / frame time
+        - Chunk streaming / loading
+        - Boot and save-load time
+        - Benchmark harness / analysis
+        - Documentation / install
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform (if specific)
+      options:
+        - All platforms
+        - Linux
+        - Windows
+        - Handheld (Steam Deck / other)
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The symptom you see today (stutter while driving, long load, wasted GPU headroom, unclear docs, ...).
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would change and, if you know, where in the game code it lives.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Profiles, MangoHud logs, frame-time numbers, screenshots, or links to prior art.

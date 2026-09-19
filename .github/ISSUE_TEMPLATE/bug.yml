@@ -1,0 +1,98 @@
+name: Bug report
+description: Something crashes, renders wrong, or performs worse with the overrides installed.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please confirm the problem goes away with the overrides removed (stock game) before filing. Add the matching platform label (`linux`, `windows`, `handheld`) after opening the issue if you can.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where does the bug happen?
+      options:
+        - Linux (native)
+        - Linux (Proton)
+        - Windows
+        - Handheld (Steam Deck / other)
+        - Other (describe below)
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: What kind of bug?
+      options:
+        - Crash or failure to launch
+        - Visual glitch (black tiles, missing trees, wrong lighting, etc.)
+        - Performance regression (worse than stock)
+        - Save / load problem
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Load the save ...
+        2. Drive / walk to ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: game-version
+    attributes:
+      label: Project Zomboid build
+      description: From the main menu, bottom-left corner (for example 42.20).
+    validations:
+      required: true
+  - type: input
+    id: pzopt-version
+    attributes:
+      label: PZ_Optimization version
+      description: Release tag or commit hash of the class zip you installed.
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: System
+      description: CPU, GPU and driver, RAM, OS and version, display resolution and refresh rate, renderer (NVIDIA GL / Mesa / Zink / Proton) and whether Steam Deck is docked.
+      placeholder: |
+        CPU: 
+        GPU / driver: 
+        RAM: 
+        OS: 
+        Resolution / refresh: 
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config flags and mods
+      description: Any `--prop` / Config changes from the defaults, plus mods enabled (or "vanilla, no mods").
+  - type: dropdown
+    id: stock-check
+    attributes:
+      label: Does it happen on stock (overrides removed)?
+      options:
+        - "No, only with the overrides installed"
+        - "Yes, stock has it too"
+        - "Not checked"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Attach `console.txt` from the Zomboid user folder (`~/Zomboid` on Linux, `%USERPROFILE%\Zomboid` on Windows) and any screenshots. Drag files into this box.
