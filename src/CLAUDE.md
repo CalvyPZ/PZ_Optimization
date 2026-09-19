@@ -6,7 +6,10 @@ Three source roots, compiled together by `scripts/build.sh`:
   shadow, with our edits applied. Shadowed list is `OVERRIDES` in `scripts/build.sh`:
   IsoChunk, WorldStreamer, ChunkSaveWorker, GLVertexBufferObject, FBORenderCell, GameWindow,
   TISLogoState, org.lwjglx Display and Mouse, FileSystemImpl, TileDepthTextures,
-  TextureIDAssetManager, MapCollisionData, IsoMetaGrid. Inner classes are shadowed too.
+  TextureIDAssetManager, MapCollisionData, IsoMetaGrid, and since the boot/load work
+  (2026-09-19 evening, `docs/plan-instant-load.md`): ScriptParser, IsoMetaCell,
+  BuildingRoomsEditor, GameLoadingState, se.krka LuaCompiler, AnimationSet,
+  AnimationAssetManager, TexturePackDevice, scripting.objects.Item. Inner classes are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md`; never commit or quote the
   game source.** Missing on a fresh clone: regenerate with `scripts/regen-overrides.sh` and
   re-apply the documented edits.
@@ -24,6 +27,7 @@ Three source roots, compiled together by `scripts/build.sh`:
 | `Stats` | `pzopt-frames.out` / `pzopt-chunks.out` samplers |
 | `Parity` | per-square recalc capture for the parity gate |
 | `LoadTrace` | stamps console lines with epoch ms into `pzopt-loadtrace.out` |
+| `BootAsync` / `BootPump` / `LuaPrecompiler` / `AnimClipCache` + `CachedAnimationTask` / `PackIndex` / `ScriptText` / `LotHeaders` / `FileTaskStats` / `ScriptDump` | boot and load work (2026-09-19 evening): FMOD init and animation-set parse on boot threads, file-pool pump during init, parallel Lua precompile cache, animation clip and texture-pack index caches under `~/Zomboid/pzopt/`, linear script text passes, per-cell lot-header memo, file-task timing, item field dump for equivalence checks |
 | `Overrides` / `Guard` / `BuildInfo` / `Log` | install checks, build stamp, logging |
 
 Design notes carried from memory:

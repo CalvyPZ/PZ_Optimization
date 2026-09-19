@@ -160,6 +160,9 @@ a worker while fonts and scripts parse (1.5 s), file-task pump during init.
 
 ## Results (2026-09-19, runs `load-*`, `harness/loadtime.py`)
 
+Superseded the same evening by `docs/plan-instant-load.md`, which continues
+from the 6.53 s below (boot 7.35 → 5.00 s, load 6.53 → 4.03 s) and lists what remains.
+
 Same bench save, drive mode, 60-tile route, `--no-dashboard`, direct launcher,
 one recorded run per step; the contact sheets (`harness/loadsheet.sh`) show the
 loading screen, the first world frame and the first seconds of driving

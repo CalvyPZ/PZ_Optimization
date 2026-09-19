@@ -108,8 +108,8 @@ public final class Overrides {
       try {
          List<URL> urls = Collections.list(Overrides.class.getClassLoader().getResources(resource));
          for (URL u : urls) {
-            if (!u.getProtocol().equals("jar")) {
-               continue;
+            if (!u.getProtocol().equals("jar") || u.getPath().contains("pzopt.jar")) {
+               continue; // the game's own jar, not the overrides jar of the jar-based install (docs/plan-instant-load.md B8)
             }
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             try (InputStream in = u.openStream()) {

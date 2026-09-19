@@ -94,3 +94,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`.
 - Proton run prepared but blocked on Diego forcing a compat tool in Steam.
+- Boot/load (2026-09-19 evening, `docs/plan-instant-load.md`): launch → menu 7.35 → 5.00 s,
+  Continue → world 6.53 → 4.03 s, via boot threads (FMOD, anim sets), a boot-time file-pool
+  pump, Lua precompile, animation clip + pack index caches (`~/Zomboid/pzopt/`), linear script
+  parser, `Item.DoParam` switch, loader memos. First boot after a cache wipe is slower.

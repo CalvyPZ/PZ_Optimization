@@ -48,7 +48,33 @@ import java.util.Properties;
  *                            one lock (default true)
  *   loaderCpuFixes  true/false   algorithmic fixes on the loader thread with identical results: MapCollisionData.init
  *                            resolves lot headers once per cell, IsoMetaGrid.checkVehiclesZones dedupes with a hash
- *                            set (default true)
+ *                            set, IsoMetaCell.getChunk memoizes the lot header per cell, BuildingRoomsEditor
+ *                            .checkBuildingAndRoomIDs indexes rooms once per cell (default true)
+ *   scriptParserFast true/false  ScriptParser.stripComments in one linear pass and parseTokens without re-substringing
+ *                            (identical output, tests/pzopt/ScriptTextTest; the stock passes cost 1.8 s at boot) (default true)
+ *   earlyModels     true/false   ModelManager.create (models + the animation queue) runs right after the scripts load
+ *                            instead of after the Lua load, giving the boot pump ~2 s more to import animations (default true)
+ *   luaPrecompile   true/false   every Lua file (game, mods, map objects.lua) compiles on a pool during boot; the
+ *                            game's LuaCompiler.loadis takes the prototype from that cache (default true)
+ *   preloadAnimSets true/false   the player/zombie animation-set XML trees parse on a boot thread (1.1 s of the
+ *                            loader thread otherwise) (default true)
+ *   animClipCache   true/false   imported animation clips are written to <cache>/pzopt/anims/ after a stock import and
+ *                            read from there on later boots instead of parsing the .X files with jassimp (default true)
+ *   packIndex       true/false   version-0 texture packs keep their page end offsets in <cache>/pzopt/packs/*.idx so the
+ *                            reader seeks instead of scanning 526 MB byte by byte at boot (default true)
+ *   itemParamSwitch true/false   Item.DoParam dispatches through a switch on the lower-cased key instead of a chain of
+ *                            361 equalsIgnoreCase tests per parameter (0.9 s of boot) (default true)
+ *   dumpItems       true/false   after the scripts load, write every item script's fields to Zomboid/pzopt-items.out
+ *                            (reflection) so two runs can be diffed (default false)
+ *   bootPump        true/false   a thread pumps the async file system every 3 ms during GameWindow.init, so the queued
+ *                            texture pages and animations decode during boot instead of after the main menu appears
+ *                            (default true)
+ *   bootFileThreads int          file pool width while the boot pump runs (default cores - 6: with cores - 2 the 16 cores
+ *                            saturated and the main thread's Lua load ran 1.6x slower); shrinks to fileThreads at the load
+ *   noLoadFade      true/false   GameLoadingState.exit does not fade the loading screen to black (350 ms of sleeps) before
+ *                            the world's own 2 s fade-in (default true)
+ *   fmodAsync       true/false   FMODManager.init (system + 12 banks, ~1.6 s) runs on a thread from the top of
+ *                            GameWindow.mainThreadInit and is joined before the scripts load (default true)
  *   loadWorkers     int          recalc pool width while a world is loading (GameLoadingState.loader alive): the 361
  *                            chunks of the initial chunk map recalc on this many threads, then the pool shrinks back
  *                            to `workers` (default max(workers, cores / 2); clamped like workers; cores - 2 tripled the per-chunk
@@ -78,6 +104,18 @@ public final class Config {
    public static final int TEXTURE_BUFFER_MB = Math.max(1, integer("textureBufferMb", 50));
    public static final boolean PARALLEL_DEPTH_MAPS = bool("parallelDepthMaps", true);
    public static final boolean LOADER_CPU_FIXES = bool("loaderCpuFixes", true);
+   public static final boolean SCRIPT_PARSER_FAST = bool("scriptParserFast", true);
+   public static final boolean FMOD_ASYNC = bool("fmodAsync", true);
+   public static final boolean NO_LOAD_FADE = bool("noLoadFade", true);
+   public static final boolean BOOT_PUMP = bool("bootPump", true);
+   public static final boolean EARLY_MODELS = bool("earlyModels", true);
+   public static final boolean LUA_PRECOMPILE = bool("luaPrecompile", true);
+   public static final boolean PRELOAD_ANIM_SETS = bool("preloadAnimSets", true);
+   public static final boolean ANIM_CLIP_CACHE = bool("animClipCache", true);
+   public static final boolean PACK_INDEX = bool("packIndex", true);
+   public static final boolean ITEM_PARAM_SWITCH = bool("itemParamSwitch", true);
+   public static final boolean DUMP_ITEMS = bool("dumpItems", false);
+   public static final int BOOT_FILE_THREADS = Math.max(1, integer("bootFileThreads", Math.max(4, Runtime.getRuntime().availableProcessors() - 6)));
    public static final int LOAD_WORKERS = clampWorkers(integer("loadWorkers", Math.max(WORKERS, Runtime.getRuntime().availableProcessors() / 2)));
 
    private Config() {
@@ -139,6 +177,6 @@ public final class Config {
       return "parallel=" + PARALLEL + " workers=" + WORKERS + " (effective " + effectiveWorkers() + ", cores "
             + Runtime.getRuntime().availableProcessors() + ") wake=" + WAKE + " (effective " + effectiveWake() + ") instrument=" + INSTRUMENT + " dev=" + DEV
             + " translucentCache=" + TRANSLUCENT_CACHE + " hotsaveIntervalSec=" + HOTSAVE_INTERVAL_SEC + " persistentVbo=" + PERSISTENT_VBO + " treesInChunkTexture=" + TREES_IN_CHUNK_TEXTURE + " windowsInChunkTexture=" + WINDOWS_IN_CHUNK_TEXTURE + " translucentTilesInChunkTexture=" + TRANSLUCENT_TILES_IN_CHUNK_TEXTURE + " bakeBudget=" + BAKE_BUDGET + " lightingBudget=" + LIGHTING_BUDGET + " lightingRebakeMs=" + LIGHTING_REBAKE_MS + " cutawayFast=" + CUTAWAY_FAST + " cutawayRadius=" + CUTAWAY_RADIUS + " gridStackInterval=" + GRID_STACK_INTERVAL
-            + " fileThreads=" + FILE_THREADS + " fileInflight=" + FILE_INFLIGHT + " textureBufferMb=" + TEXTURE_BUFFER_MB + " parallelDepthMaps=" + PARALLEL_DEPTH_MAPS + " loaderCpuFixes=" + LOADER_CPU_FIXES + " loadWorkers=" + LOAD_WORKERS;
+            + " fileThreads=" + FILE_THREADS + " fileInflight=" + FILE_INFLIGHT + " textureBufferMb=" + TEXTURE_BUFFER_MB + " parallelDepthMaps=" + PARALLEL_DEPTH_MAPS + " loaderCpuFixes=" + LOADER_CPU_FIXES + " loadWorkers=" + LOAD_WORKERS + " scriptParserFast=" + SCRIPT_PARSER_FAST + " fmodAsync=" + FMOD_ASYNC + " noLoadFade=" + NO_LOAD_FADE + " bootPump=" + BOOT_PUMP + " earlyModels=" + EARLY_MODELS + " luaPrecompile=" + LUA_PRECOMPILE + " preloadAnimSets=" + PRELOAD_ANIM_SETS + " animClipCache=" + ANIM_CLIP_CACHE + " packIndex=" + PACK_INDEX + " itemParamSwitch=" + ITEM_PARAM_SWITCH + " bootFileThreads=" + BOOT_FILE_THREADS;
    }
 }

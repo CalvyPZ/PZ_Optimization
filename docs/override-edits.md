@@ -223,6 +223,34 @@ The class is otherwise verbatim Vineflower output (revision
 `src/shims/zombie/gameStates/TISLogoState.java` (logo screens skipped), this
 is what gets a run from launch to the main menu with no splash screens.
 
+Boot edits (added 2026-09-19, evening, `docs/plan-instant-load.md`), each
+behind a `Config` key and `pzopt.Overrides.enabled()`:
+
+- `mainThreadInit`: `FMODManager.instance.init()` is handed to
+  `pzopt.BootAsync.startFmod` (a thread) when `fmodAsync` is on; the four
+  `SoundManager.instance.set*Volume` calls right after the render-thread wait
+  are wrapped in `pzopt.BootAsync.afterFmod(...)`, which runs them at once when
+  the init is synchronous and otherwise after the join. Why: the FMOD system
+  create and the twelve bank files are 1.4 s of native work that nothing needs
+  before the sound scripts, and the VCAs the volume setters read live in the
+  banks.
+- `initShared`: `pzopt.BootAsync.joinFmod()` right before
+  `ScriptManager.instance.Load()` (whose last step,
+  `GameSounds.ScriptsLoaded`, is the first FMOD consumer). After
+  `SpriteModelManager.getInstance().init()`, when `earlyModels` is on:
+  `ModelManager.instance.create()` and `pzopt.BootAsync.startAnimSets()`;
+  `enter()` later finds the manager created and skips (its own guard). Why:
+  `create` only needs the scripts and the file system, and registering the
+  3,990 animation imports 2 s earlier lets the boot pump finish them during
+  the Lua load.
+- `init` (first statement): `pzopt.BootPump.start()`; `mainThreadStart` calls
+  `pzopt.BootPump.stop()` after `enter()`. Why: the file pool is only pumped
+  by `GameWindow.logic` (per frame), so during init its threads idled.
+- `init`, after `ZomboidFileSystem.instance.loadModPackFiles()`:
+  `pzopt.LuaPrecompiler.start()` (mods are known, so the file list is right).
+- `enter`: `pzopt.BootAsync.startAnimSets()` after `ModelManager.instance.create()`
+  (a no-op when `initShared` already started it).
+
 ## zombie.fileSystem.FileSystemImpl (added 2026-09-19, game load)
 
 Vineflower output needs one fix: in `updateAsyncTransactions` the decompiler
@@ -347,3 +375,127 @@ and recompile without fixes; `Display`'s inner classes `$Window` and
 `harness/run.sh ... --env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`: the console
 logs "Display mode changed to 5120x2160", the recording is full-screen and the
 route numbers match the XWayland runs.
+
+## zombie.scripting.ScriptParser (added 2026-09-19, evening, boot)
+
+`stripComments` first tries `pzopt.ScriptText.stripComments` (one forward pass
+with a nesting depth) when `scriptParserFast` is on and falls back to the
+stock backward `StringBuilder.replace` loop when that returns null
+(unbalanced comment markers). `parseTokens` returns
+`pzopt.ScriptText.parseTokens`, the same split with an index instead of a
+new substring per block, including the stock quirks (searches start one
+character in; a brace-less remainder is a token of its own). Why: the stock
+stripper is quadratic in the number of comments and cost 1.5 s on
+`tileGeometry.txt` alone. `tests/pzopt/ScriptTextTest` compares both
+functions against the jar's class on every `.txt` under `media/` (1,501
+files identical). Otherwise verbatim Vineflower output (revision `b0bbce05d5`).
+
+## zombie.fileSystem.FileSystemImpl (second edit, 2026-09-19, evening)
+
+`updateAsyncTransactions` now takes a `ReentrantLock` around its whole body
+(the body moved to a private method), and a `pzoptExecutor()` accessor
+exposes the pool. The constructor sizes the pool to
+`max(fileThreads, bootFileThreads)` when `bootPump` is on. Why: the boot pump
+thread (`pzopt.BootPump`) pumps concurrently with the main thread's own calls
+during font loading, and `pending`/`inProgress` are plain lists.
+
+## zombie.iso.IsoMetaCell (added 2026-09-19, evening, game load)
+
+`getChunk(int)` resolves the zombie intensity through
+`pzopt.LotHeaders.zombieIntensity` with a per-cell memo (`pzoptLotHeaderCache`,
+rebuilt if the cell's `info` changes) when `loaderCpuFixes` is on. Same
+loop and tests as `LotHeader.getZombieIntensityForChunk`, but
+`MapFiles.getLotHeader` (a `String.format` plus two hash lookups) runs once
+per map layer per cell instead of once per chunk. Why: 0.8 s of the loader
+thread in `IsoMetaGrid.load` → `loadZone` → `addZone` → `getChunk`.
+
+## zombie.buildingRooms.BuildingRoomsEditor (added 2026-09-19, evening, game load)
+
+`checkBuildingAndRoomIDs(IsoMetaCell)` builds an `IdentityHashMap` from
+`roomList` (walked backwards so the first occurrence wins, as `indexOf`
+does) and uses it for the two `roomList.indexOf(roomDef)` lookups when
+`loaderCpuFixes` is on. Same checks and messages. Why: O(rooms²) per cell,
+and `Basements.beforeLoadMetaGrid` calls it three times per load (0.85 s).
+
+## zombie.gameStates.GameLoadingState (added 2026-09-19, evening, game load)
+
+`exit`: `screenFader.startFadeToBlack()` is skipped when `noLoadFade` is on,
+so the `while (isFading)` loop with its 33 ms sleeps ends at once (the world's
+own 2 s fade-in through `UIManager.FadeOut` is untouched). `enter`, first
+statements: `pzopt.BootPump.onLoadStart(executor)` shrinks the file pool to
+`fileThreads`, `pzopt.BootAsync.joinAnimSets()` waits for the boot preload of
+the animation sets, and the Lua precompile statistics are logged. Why: F
+dropped from 0.41 to 0.05 s; the other hooks are the load-side ends of the
+boot threads.
+
+## se.krka.kahlua.luaj.compiler.LuaCompiler (added 2026-09-19, evening)
+
+`loadis(Reader, String, KahluaTable)` (the overload `LuaManager.RunLuaInternal`
+uses) reads the whole chunk into a string when `luaPrecompile` is on, asks
+`pzopt.LuaPrecompiler.lookup(name, content)` for a prototype compiled during
+boot, and returns `new LuaClosure(prototype, env)` on a hit; on a miss it
+compiles the same characters through the stock path (a `StringReader`). The
+other overloads are untouched. Why: Kahlua compiles ~1.7 s of Lua serially
+across boot and load; the boot pool does it in parallel. The precompiler
+stamps `Prototype.file`/`filename` with what the stock compile would have
+written (`FuncState.currentFile`/`currentfullFile`).
+
+## zombie.core.skinnedmodel.advancedanimation.AnimationSet (added 2026-09-19, evening)
+
+`GetAnimationSet` and `Reset` keep their signatures and now run their bodies
+inside `synchronized (setMap)`. Why: `pzopt.BootAsync.startAnimSets` parses
+the player and zombie sets on a boot thread while the game may ask for them
+(`IsoPlayer`/`IsoZombie` constructors, main-menu previews), and the map is a
+plain `HashMap`.
+
+## zombie.core.skinnedmodel.model.AnimationAssetManager (added 2026-09-19, evening)
+
+`startLoading` creates a `pzopt.CachedAnimationTask` (a `FileTask_LoadAnimation`
+subclass) instead of the stock task when `animClipCache` is on, and remembers
+it per asset. `loadCallback` has a new first branch for the task's
+`CachedClips` result (sets `anim.animationClips`, `onLoadingSucceeded`,
+`ModelManager.animationAssetLoaded`, exactly what the `ProcessedAiScene`
+branch does after `onLoadedX`), and the `ProcessedAiScene` branch ends with
+`pzoptWriteCache(anim)`, which hands the freshly imported clips to
+`pzopt.AnimClipCache.writeAsync`. Why: 2,209 jassimp imports (14–17
+thread-seconds) per boot for data that is a map of keyframes; the cache
+(one file per source, keyed by path, size, mtime and skinning mesh) replaces
+them with 2.9 thread-seconds of reading.
+
+## zombie.fileSystem.FileSystemImpl (third edit, 2026-09-19, evening)
+
+`runAsync(FileTask)` wraps the task's `call()` in a timing lambda that reports
+to `pzopt.FileTaskStats` (count and summed run time per task class; logged
+when the boot pump stops and when the loading screen starts). Why: to size
+the asset work per class (animations 14 s, texture pages 12 s of which most
+is the upload-budget sleep, meshes 0.3 s).
+
+## zombie.fileSystem.TexturePackDevice (added 2026-09-19, evening, boot)
+
+`initMetaData` opens a `pzopt.PackIndex` for version-0 packs when `packIndex`
+is on, and `readPage` looks the page's PNG end offset up in it: on a hit the
+stream skips to the end instead of the stock loop that reads the PNG bytes
+one at a time through the synchronized `PositionInputStream` looking for the
+end marker; on a miss the stock loop runs and the end offset is recorded, and
+the index is saved after the last page. Why: 0.5–0.6 s of boot scanning
+526 MB of packs byte by byte (`TexturePackPage.readIntByte`). The index is
+keyed by the pack file's size and mtime and lives in `~/Zomboid/pzopt/packs/`.
+Nothing else changes; `PositionInputStream` already counts skips.
+
+## zombie.scripting.objects.Item (added 2026-09-19, evening, boot)
+
+`DoParam(String, String)` starts with a guard: when `itemParamSwitch` is on it
+calls the new private `pzoptDoParam` and returns. That method is the stock
+method with its 367-branch `else if (param.trim().equalsIgnoreCase("..."))`
+chain rewritten as a `switch` on `param.trim().toLowerCase(Locale.ROOT)`;
+every case block is the stock branch body verbatim, the attribute check that
+precedes the chain stays first, the chain's tail (the negated
+`GameEntityScript` test with the unknown-parameter handling) is the `default`
+block, and the one key that appears twice in the chain (`SwingAnim`) keeps
+its first branch, as in stock. The rewrite was generated mechanically from
+the Vineflower output (the script is not kept; re-run the transformation if
+the class changes). Why: 0.9 s of boot in a linear chain of up to 367
+case-insensitive comparisons per item parameter. Both callers trim the key
+before calling, so the comparison semantics are the same. Verified with the
+`dumpItems` field dump (`pzopt.ScriptDump`) of every item script: identical
+with the switch on and off.
