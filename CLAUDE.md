@@ -103,7 +103,9 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   second "Menu framerate" combo caps the menus separately (`pzopt.FrameCap`, Lua under
   `src/lua/`, setting in `~/Zomboid/pzopt/framecap.ini`). Uncapped runs: `--prop uncappedFps=true`.
   `uiRenderOffscreen=true` in options.ini removes the per-frame Lua UI draw. Both combos also
-  offer 500/430/400/330/300 fps (Lua + `FrameCap` table; Core's 24..244 clamp is bypassed at load).
+  offer 500/430/400/330/300 fps; the in-game choice is snapshotted before `Core.loadOptions`
+  rewrites options.ini and a cap above 244 lives in framecap.ini (`gameFps=`); forced
+  `uncappedFps=` runs restore the player's choice on the next boot (`restore=`).
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`.
 - Proton run prepared but blocked on Diego forcing a compat tool in Steam.

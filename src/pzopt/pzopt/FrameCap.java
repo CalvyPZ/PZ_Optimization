@@ -19,7 +19,7 @@ import zombie.gameStates.GameLoadingState;
  * it into the options-screen combo, and Core.loadOptions resets a saved uncappedFPS=true back
  * to a 60 fps lock. GameWindow.InitDisplay calls {@link #afterLoadOptions()} right after
  * loadOptions; it enables the combo entry and re-applies the saved frameRate / uncappedFPS
- * pair from options.ini. The limiter itself is the stock accumulator in
+ * pair snapshotted by {@link #beforeLoadOptions()} (Core re-saves the file before we run). The limiter itself is the stock accumulator in
  * GameWindow.mainThreadStep, which now asks {@link #uncappedNow()} / {@link #lockNow()}: the
  * in-game values while a world is up or loading, the menu values otherwise.
  *
@@ -118,6 +118,22 @@ public final class FrameCap {
       return new File(ZomboidFileSystem.instance.getCacheDir(), "pzopt" + File.separator + "framecap.ini");
    }
 
+   // --- persistence ---------------------------------------------------------------------
+   //
+   // options.ini cannot hold the whole in-game choice: Core.loadOptions feeds frameRate= through an
+   // IntegerConfigOption clamped to 24..244, resets a saved uncappedFPS=true to a 60 fps lock, and
+   // then re-saves the file, all before we run; Core.saveOptions refuses a lock above 244 the same
+   // way. So the raw frameRate= / uncappedFPS= lines are snapshotted before Core loads
+   // (beforeLoadOptions) and a cap above 244 lives in framecap.ini (gameFps=).
+
+   /** In-game cap above the stock 244 chosen in the combo, 0 when the choice is a stock value. */
+   private static volatile int extraGameFps;
+   /** Raw options.ini values as they were before Core.loadOptions rewrote the file. */
+   private static int rawLock = -1;
+   private static Boolean rawUncapped;
+   /** Player's state before a forced uncappedFps=true/false run; restored on the next boot. */
+   private static String restore;
+
    private static void load() {
       File f = file();
       if (!f.isFile()) {
@@ -128,6 +144,9 @@ public final class FrameCap {
          p.load(r);
          int idx = Integer.parseInt(p.getProperty("menuFramerateIndex", String.valueOf(MENU_SAME)).trim());
          menuIndex = Math.max(MENU_SAME, Math.min(MENU_CHOICES, idx));
+         int extra = Integer.parseInt(p.getProperty("gameFps", "0").trim());
+         extraGameFps = extra > STOCK_MAX_FPS && extra <= MAX_FPS ? extra : 0;
+         restore = p.getProperty("restore");
       } catch (Exception e) {
          Log.warn("could not read " + f + ": " + e);
       }
@@ -138,72 +157,106 @@ public final class FrameCap {
       try {
          f.getParentFile().mkdirs();
          try (FileWriter w = new FileWriter(f)) {
-            w.write("# pzopt frame limiter for the menus; index into the Display-options combo\n");
-            w.write("# 1 = same as in-game, 2 = uncapped, 3.. = 500 430 400 330 300 244 240 165 144 120 95 90 75 60 55 45 30 24\n");
+            w.write("# pzopt frame limiter; indices into the Display-options combos\n");
+            w.write("# menu: 1 = same as in-game, 2 = uncapped, 3.. = 500 430 400 330 300 244 240 165 144 120 95 90 75 60 55 45 30 24\n");
             w.write("menuFramerateIndex=" + menuIndex + "\n");
+            w.write("# in-game cap above 244 (options.ini cannot hold it), 0 = use options.ini\n");
+            w.write("gameFps=" + extraGameFps + "\n");
+            if (restore != null) {
+               w.write("# player's cap before a forced uncappedFps run: lock,uncapped,gameFps; re-applied on the next boot\n");
+               w.write("restore=" + restore + "\n");
+            }
          }
       } catch (Exception e) {
          Log.warn("could not write " + f + ": " + e);
       }
    }
 
-   // --- start-up ----------------------------------------------------------------------
-
-   public static void afterLoadOptions() {
+   /** GameWindow.InitDisplay, before Core.loadOptions: snapshot the two lines Core is about to rewrite. */
+   public static void beforeLoadOptions() {
       if (!Overrides.enabled()) {
          return;
       }
-      SystemDisabler.setUncappedFPS(true);
-      String mode = Config.UNCAPPED_FPS;
-      if ("true".equalsIgnoreCase(mode)) {
-         PerformanceSettings.instance.setFramerateUncapped(true);
-      } else if ("false".equalsIgnoreCase(mode)) {
-         PerformanceSettings.instance.setFramerateUncapped(false);
-      } else {
-         applySaved();
-      }
-      load();
-      Log.info("frame cap: game " + describe() + " (uncappedFps=" + mode + "), menu " + describeMenu());
-   }
-
-   /** Re-reads the two lines Core.loadOptions parsed and then overwrote. */
-   private static void applySaved() {
       File ini = new File(ZomboidFileSystem.instance.getCacheDir(), "options.ini");
       if (!ini.isFile()) {
          return;
       }
-      int lock = -1;
-      Boolean uncapped = null;
       try (BufferedReader r = new BufferedReader(new FileReader(ini))) {
          String line;
          while ((line = r.readLine()) != null) {
             line = line.trim();
             if (line.startsWith("frameRate=")) {
                try {
-                  lock = Integer.parseInt(line.substring("frameRate=".length()).trim());
+                  rawLock = Integer.parseInt(line.substring("frameRate=".length()).trim());
                } catch (NumberFormatException ignored) {
                }
             } else if (line.startsWith("uncappedFPS=")) {
-               uncapped = Boolean.parseBoolean(line.substring("uncappedFPS=".length()).trim());
+               rawUncapped = Boolean.parseBoolean(line.substring("uncappedFPS=".length()).trim());
             }
          }
       } catch (Exception e) {
          Log.warn("could not read " + ini + ": " + e);
+      }
+   }
+
+   /** GameWindow.InitDisplay, after Core.loadOptions: make "Uncapped" selectable and apply the saved cap. */
+   public static void afterLoadOptions() {
+      if (!Overrides.enabled()) {
          return;
       }
-      boolean inRange = lock >= MIN_FPS && lock <= MAX_FPS;
-      if (uncapped == null || !uncapped) {
-         // Core already applied the capped value, unless it is one of the pzopt caps above 244:
-         // its IntegerConfigOption rejects those and the lock fell back to the option's value.
-         if (inRange && lock > STOCK_MAX_FPS) {
-            PerformanceSettings.setLockFPS(lock);
+      SystemDisabler.setUncappedFPS(true);
+      load();
+      if (restore != null) {
+         // The previous run forced the cap and the game saved that forced state on quit.
+         try {
+            String[] parts = restore.split(",");
+            rawLock = Integer.parseInt(parts[0].trim());
+            rawUncapped = Boolean.parseBoolean(parts[1].trim());
+            extraGameFps = Integer.parseInt(parts[2].trim());
+         } catch (Exception e) {
+            Log.warn("frame cap: bad restore entry '" + restore + "'");
          }
-         return;
+         restore = null;
+         save();
       }
-      PerformanceSettings.instance.setFramerateUncapped(true);
-      if (inRange) {
-         PerformanceSettings.setLockFPS(lock); // keep the saved value instead of the 60 Core reset it to
+      applySaved();
+      String mode = Config.UNCAPPED_FPS;
+      if ("true".equalsIgnoreCase(mode) || "false".equalsIgnoreCase(mode)) {
+         restore = PerformanceSettings.getLockFPS() + "," + PerformanceSettings.instance.isFramerateUncapped() + "," + extraGameFps;
+         save();
+         PerformanceSettings.instance.setFramerateUncapped(Boolean.parseBoolean(mode));
       }
+      Log.info("frame cap: game " + describe() + " (uncappedFps=" + mode + "), menu " + describeMenu());
+   }
+
+   /** Re-applies the player's choice over what Core.loadOptions left behind. */
+   private static void applySaved() {
+      if (extraGameFps > 0) {
+         PerformanceSettings.setLockFPS(extraGameFps);
+      } else if (rawLock >= MIN_FPS && rawLock <= STOCK_MAX_FPS) {
+         PerformanceSettings.setLockFPS(rawLock); // Core reset it to 60 when uncappedFPS=true was saved
+      }
+      if (rawUncapped != null) {
+         PerformanceSettings.instance.setFramerateUncapped(rawUncapped);
+      }
+   }
+
+   // --- in-game option -------------------------------------------------------------------
+
+   /** From the options screen: 0 = uncapped, else the fps lock; persists what options.ini cannot. */
+   public static void setGameFramerate(int fps) {
+      if (fps <= 0) {
+         PerformanceSettings.instance.setFramerateUncapped(true);
+      } else {
+         PerformanceSettings.instance.setFramerateUncapped(false);
+         PerformanceSettings.setLockFPS(Math.max(MIN_FPS, Math.min(MAX_FPS, fps)));
+      }
+      int extra = fps > STOCK_MAX_FPS ? Math.min(MAX_FPS, fps) : 0;
+      if (extra != extraGameFps) {
+         extraGameFps = extra;
+         save();
+      }
+      Log.info("frame cap: game " + describe());
    }
 
    public static String describe() {

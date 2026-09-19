@@ -1,8 +1,8 @@
 -- pzopt: frame-rate combos in Display options.
 --  * The stock "Framerate" combo gains 500, 430, 400, 330 and 300 fps entries above the stock 244.
---    Core.setFramerate only knows the stock indices, so the extended combo applies its value
---    through PerformanceSettings directly; pzopt.FrameCap re-applies a saved cap above 244 at
---    boot because Core.loadOptions rejects it (its frameRate option is clamped to 24..244).
+--    Core.setFramerate only knows the stock indices and options.ini cannot hold a cap above 244
+--    (Core clamps it to 24..244 on load and on save), so the combo applies its value through
+--    PerformanceSettings:setGameFramerate, which pzopt.FrameCap persists in framecap.ini.
 --  * A second "Menu framerate" combo right under it. The setting lives in Java: the overridden
 --    PerformanceSettings forwards to pzopt.FrameCap, which persists it in Zomboid/pzopt/framecap.ini.
 --    Index: 1 = same as in-game, 2 = uncapped, 3.. = the fps table below.
@@ -41,10 +41,9 @@ local function extendGameOption(option)
         local box = self.control
         local fps = tonumber(box.options[box.selected])
         if box.selected == 1 then
-            getCore():setFramerate(1) -- uncapped
+            getPerformance():setGameFramerate(0) -- uncapped, lock kept
         elseif fps then
-            getPerformance():setFramerateUncapped(false)
-            getPerformance():setFramerate(fps)
+            getPerformance():setGameFramerate(fps)
         end
     end
 end

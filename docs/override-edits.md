@@ -591,5 +591,23 @@ replacements that look the value up in the combo and apply it through
 feeds it through an `IntegerConfigOption` clamped to 24..244 that rejects
 anything higher and leaves the lock at the option's 60 default; `FrameCap.applySaved`
 therefore also re-applies a saved capped value above 244 (it already re-read
-the raw lines for the uncapped case). No Core edit. Menu means every state that is not
+the raw lines for the uncapped case). No Core edit.
+
+Correction the same night: that re-read never worked, because the live
+`Core.loadOptions` ends with `saveOptions()`, so by the time `afterLoadOptions`
+ran the file already held the clamped 24..244 value and `uncappedFPS=false`
+(a saved `uncappedFPS=true` becomes `frameRate=60`, which is how forced
+`--prop uncappedFps=true` runs left the player's options.ini at 60 fps on
+2026-09-19). `Core.saveOptions` also refuses a lock above 244 (the fake
+`IntegerConfigOption` rejects it), so the file can never hold the new caps.
+Now: `InitDisplay` calls `pzopt.FrameCap.beforeLoadOptions()` right before
+`Core.loadOptions()`, which snapshots the raw `frameRate=` / `uncappedFPS=`
+lines; `afterLoadOptions` re-applies them and any cap above 244 from
+`framecap.ini` (`gameFps=`). The extended combo applies through the new
+`PerformanceSettings.setGameFramerate(fps)` (0 = uncapped), which persists
+the above-244 value. A forced `uncappedFps=true|false` run writes a
+`restore=lock,uncapped,gameFps` line to framecap.ini and the next boot
+re-applies that instead of whatever the forced run saved on quit, so harness
+runs no longer change the player's frame-rate choice. Verified with two short
+boots: forced run logs "game uncapped", next auto boot logs "game 300 fps". Menu means every state that is not
 in-game or loading: logo, main menu, options, character creation.
