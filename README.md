@@ -1,52 +1,61 @@
 # PZ_Optimization
 
-Performance patches for **Project Zomboid Build 42** on the Java side of the game.
-Not a Lua mod: a set of drop-in `.class` files that shadow 24 game classes, remove
-the worst stalls from the chunk streamer, the renderer and the loading path, and
-leave `projectzomboid.jar` untouched. Every change has a kill switch, and every
+Performance patches for **Project Zomboid Build 42**, on the Java side of the game.
+Not a Lua mod: a set of drop-in `.class` files that shadow 24 game classes and remove
+the worst stalls from the chunk streamer, the renderer and the loading path.
+`projectzomboid.jar` is never modified. Every change has a kill switch, and every
 number in this file comes from the hands-off benchmark harness in this repo.
 
-**Current target: Build 42.20.4, jar revision `b0bbce05d5`, Linux and Windows.**
-Both Steam depots ship the same jar; Linux builds the classes from source, Windows
-unpacks the prebuilt zip. The overrides refuse to run against any other revision
-(they log one line and the game behaves as stock).
+**Target: Build 42.20.4, jar revision `b0bbce05d5`, Windows and Linux.** Both Steam
+depots ship the same jar. The overrides refuse to run against any other revision:
+they log one line and the game behaves as stock.
+
+Single-player only. Read [Known limitations](#known-limitations) before installing on
+a machine you play on.
 
 ---
 
 ## Contents
 
 1. [Results at a glance](#results-at-a-glance)
-2. [How the optimizations work](#how-the-optimizations-work)
-3. [How the install works without touching the jar](#how-the-install-works-without-touching-the-jar)
-4. [Install, step by step](#install-step-by-step)
-5. [Settings](#settings)
-6. [Known limitations](#known-limitations)
-7. [Benchmark harness](#benchmark-harness)
-8. [Repository layout](#repository-layout)
+2. [Install on Windows](#install-on-windows)
+3. [Install on Linux](#install-on-linux)
+4. [Settings](#settings)
+5. [Uninstall](#uninstall)
+6. [After a game update](#after-a-game-update)
+7. [How the optimizations work](#how-the-optimizations-work)
+8. [How the install works without touching the jar](#how-the-install-works-without-touching-the-jar)
+9. [Known limitations](#known-limitations)
+10. [Benchmark harness](#benchmark-harness)
+11. [Repository layout](#repository-layout)
 
 ---
 
 ## Results at a glance
 
 All runs: same save, same car, same 1,200-tile highway route east of Rosewood, max
-zoom, 5120x2160, native Linux build, NVIDIA OpenGL. Machine: Ryzen 7 9800X3D,
-RTX 4090, Crucial T705 NVMe, 32 GB DDR5. "Stock" is this build with every
-optimization switched off, which reproduces the shipped game exactly.
+zoom, 5120x2160. Machine: Ryzen 7 9800X3D, RTX 4090, Crucial T705 NVMe, 32 GB DDR5.
+"Stock" is this build with every optimization switched off, which reproduces the
+shipped game exactly.
 
-### 120 km/h drive, stock at its 244 fps cap vs optimized uncapped, with boot and load
+### 120 km/h drive: stock at its 244 fps cap vs optimized uncapped
 
-Full video with sound: https://www.youtube.com/watch?v=6jaipKCG7Po. Runs `sbs-stock120-1` /
-`sbs-opt120-uncap-1`, 2026-09-19; stock has the in-game limiter at its maximum (244) and every
-optimization off, including the boot and load ones.
+Full video with sound: https://www.youtube.com/watch?v=6jaipKCG7Po. Native Linux
+build, NVIDIA OpenGL, runs `sbs-stock120-1` / `sbs-opt120-uncap-1`, 2026-09-19.
+Stock has the in-game limiter at its maximum (244) and every optimization off,
+including the boot and load ones.
 
-**Boot and load** (real time; both games are launched together, the optimized one is in the
-world and waiting while stock is still loading):
+**Boot and load.** Both games are launched together; the optimized one is in the
+world and waiting while stock is still loading:
 
 [![Boot and load, stock vs optimized](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped-load.gif)](https://www.youtube.com/watch?v=6jaipKCG7Po)
 
-**The drive** (first 10 s of the route, then the result lines):
+**The drive.** First 10 s of the route, then the result lines:
 
 [![120 km/h drive, stock at the 244 fps cap vs optimized uncapped](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped-drive.gif)](https://www.youtube.com/watch?v=6jaipKCG7Po)
+
+Route window 39 s at about 122 km/h. Both sides fall off the cap here, so the
+difference is pure per-frame cost.
 
 | Metric | Stock (244 cap) | Optimized (uncapped) | Change |
 |---|---|---|---|
@@ -57,8 +66,35 @@ world and waiting while stock is still loading):
 | Frame time, p99 | 18.9 ms | 6.3 ms | -67 % |
 | Frame time, p99.9 | 22.6 ms | 11.4 ms | -50 % |
 | Worst frame | 53.1 ms | 23.0 ms | -57 % |
+| Frames over 33 ms | 1 | 0 | |
 | 1 % low fps | 57 | 147 | 2.6x |
 | GPU busy | 91 % | 86 % | uncapped, so the GPU stays busy |
+| Game CPU (of one core) | 289 % | 347 % | |
+
+The full-length video (396 MB, 3840x1450, 63 s) is too large for the repository;
+its YouTube description is in
+[`docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.youtube.txt`](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.youtube.txt).
+
+### Windows: bench route, 500 fps cap
+
+Windows 11, NVIDIA driver 616.92, game fullscreen at desktop resolution, vsync off,
+launched through Steam, zoom 2.5, two stock runs for the noise floor. Details, boot
+timings and the procedure are in [docs/windows-test.md](docs/windows-test.md).
+
+| Metric | Stock (best of 2) | Optimized | Change |
+|---|---|---|---|
+| fps, mean | 122 | 194 | 1.6x |
+| Frame time, mean | 8.2 ms | 5.2 ms | -37 % |
+| Frame time, p99 | 26.1 ms | 18.5 ms | -29 % |
+| Frame time, p99.9 | 36.5 ms | 26.6 ms | -27 % |
+| Frames over 33 ms | 30 | 8 | |
+| Chunk queue wait, mean | 180 ms | 32 ms | 5.7x |
+| GPU busy | 65 to 68 % | 52 % | |
+
+Noise floor between the two stock runs: 0.7 fps, 0.9 ms at p99. The optimized
+build is bound by the game thread (93 % of wall) with the GPU at half load. The p99
+gap to Linux (18.5 vs 8.3 ms) is the open Windows question; the driver and the cap
+are the candidates.
 
 ### 60 km/h drive, 240 fps cap (the first video)
 
@@ -84,38 +120,13 @@ Note: the remaining p99.9 is a Lua `OnTick` burst every 2.00 s from the
 PZDashboard mod, not this code. With that mod disabled the same route runs p99.9
 at 11.8 ms.
 
-### 120 km/h drive, stock at its 244 fps cap vs optimized uncapped (the second video)
-
-![Stock at 244 cap vs optimized uncapped, 120 km/h](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.jpg)
-
-The video itself (396 MB, 3840x1450, 63 s) is too large for the repository; it
-is published on YouTube with the description in
-[`docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.youtube.txt`](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.youtube.txt).
-
-Runs `sbs-stock120-1` / `sbs-opt120-uncap-1`, route window 39 s at about 122 km/h.
-Both sides fall off the cap here, so the difference is pure per-frame cost.
-
-| Metric | Stock (244 cap) | Optimized (uncapped) | Change |
-|---|---|---|---|
-| Boot, launch to main menu | 7.31 s | 6.01 s | -18 % |
-| Load, Continue to world ready | 8.74 s | 3.68 s | -58 % |
-| fps, mean | 122 | 412 | 3.4x |
-| Frame time, mean | 8.2 ms | 2.4 ms | -71 % |
-| Frame time, p99 | 18.9 ms | 6.3 ms | -67 % |
-| Frame time, p99.9 | 22.6 ms | 11.4 ms | -50 % |
-| Worst frame | 53.1 ms | 23.0 ms | -57 % |
-| Frames over 33 ms | 1 | 0 | |
-| 1 % low fps | 57 | 147 | 2.6x |
-| GPU busy | 91 % | 86 % | |
-| Game CPU (of one core) | 289 % | 347 % | |
-
 ![Stock vs optimized at 60 and 120 km/h: frame time percentiles, GPU busy, chunk latency](docs/media/drive-results.svg)
 
 ### Boot and load on a warm cache
 
 Bench save, `harness/loadtime.py`, best measured pair in the load loop
 (`docs/plan-instant-load.md`). The first boot after a cache wipe is slower because
-the animation and texture-pack caches under `~/Zomboid/pzopt/` are being written.
+the animation and texture-pack caches under `Zomboid/pzopt/` are being written.
 
 | Phase | Stock | Optimized |
 |---|---|---|
@@ -136,6 +147,253 @@ being ready for the game thread.
 
 ---
 
+## Install on Windows
+
+Nothing is compiled on Windows. You download one zip and unpack it into the game
+folder. Total time: about two minutes.
+
+**You need:** Project Zomboid on Steam, on the **Build 42.20.4** beta (Steam,
+right-click the game, Properties, Betas). Nothing else.
+
+### 1. Close the game
+
+The overrides are read when the game starts.
+
+### 2. Download the zip
+
+Get `pzopt-b0bbce05d5-classes.zip` (518 KB) from the
+[release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
+into your Downloads folder. The revision in the file name must match your game
+(Build 42.20.4 is `b0bbce05d5`). A zip for another revision installs fine but
+the classes disable themselves at start-up.
+
+### 3. Unpack it into the game folder
+
+Open PowerShell (Start menu, type `powershell`) and run this block. `$PZ` is
+Steam's default game folder; if your library is elsewhere, use the path Steam
+shows under right-click the game, Manage, Browse local files.
+
+```powershell
+$PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
+Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
+Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
+```
+
+The last line must print `revision=b0bbce05d5`. `Expand-Archive` only adds
+files and never touches `projectzomboid.jar`; it stops with an error instead of
+overwriting anything that already exists, so do not add `-Force`. If it does
+error, a previous install is still there: run the [uninstall](#uninstall) block
+first.
+
+### 4. Launch from Steam and check the log
+
+Start the game from Steam as usual. The first boot is slower than later ones:
+the animation-clip cache and texture-pack index under `%USERPROFILE%\Zomboid\pzopt\`
+are written on that boot and read on every boot after it.
+
+Once you are at the main menu, in the same PowerShell window:
+
+```powershell
+Select-String -Path "$env:USERPROFILE\Zomboid\console.txt" -Pattern "\[pzopt\] loaded override" | Measure-Object | Select-Object -ExpandProperty Count
+```
+
+| You see | Meaning |
+|---|---|
+| `20` or more | the overrides loaded and are active (one line per class; a few more appear once a world is loaded). Done. |
+| `0` | the class files did not load. Check that `$PZ\pzopt\Overrides.class` exists and that `$PZ\ProjectZomboid64.json` lists `"."` before `"projectzomboid.jar"` under `classpath` (it does on the stock depot). |
+| a line in `console.txt` saying the overrides were built for another revision | your game is not 42.20.4 / `b0bbce05d5`. The game runs as stock. Switch Steam to that beta or wait for a matching zip. |
+
+Options, Display now has an **Uncapped** framerate entry, 300 to 500 fps entries,
+and a separate **Menu framerate** combo. That is the only visible change; everything
+else is frame time.
+
+### Optional: change a setting
+
+Create `$PZ\pzopt.properties` with only the keys you want to change; everything
+else keeps its default. See [Settings](#settings) for the list.
+
+```properties
+workers=2
+hotsaveIntervalSec=60
+treesInChunkTexture=false
+```
+
+### Optional: the repository on Windows
+
+You do not need it to play. If you want the harness or the sources, clone to a
+short path such as `C:\Users\<you>\PZ_Optimization`; some files sit ten folders
+deep, and from a long path the checkout fails with "Filename too long" unless
+you pass `-c core.longpaths=true`. The build scripts do not run on Windows; the
+zip is built on Linux with `scripts/build.sh`.
+
+---
+
+## Install on Linux
+
+On Linux you build the class files from this repository against your own jar,
+then a script copies them into the game folder and records what it wrote.
+
+**You need:** Project Zomboid on Steam on the **Build 42.20.4** beta, a JDK 25 or
+newer (`javac`, `javap`), Python 3, `git` and `bash`.
+
+```sh
+# Arch / CachyOS
+sudo pacman -S jdk-openjdk
+# Debian / Ubuntu
+sudo apt install openjdk-25-jdk      # or the newest available
+# Fedora
+sudo dnf install java-latest-openjdk-devel
+```
+
+### 1. Close the game
+
+### 2. Clone and build
+
+```sh
+git clone https://github.com/DiegoVillalobosFlores/PZ_Optimization.git
+cd PZ_Optimization
+scripts/build.sh
+```
+
+If the game is not in `/games/steamapps/common/ProjectZomboid`, export the path
+first in the same shell (the folder is right if it contains `projectzomboid/`
+with `projectzomboid.jar` and `ProjectZomboid64.json` inside):
+
+```sh
+export PZ_ROOT="$HOME/.local/share/Steam/steamapps/common/ProjectZomboid"
+```
+
+`build.sh` compiles everything under `src/` against your jar and ends with a
+line like `built 95 class files into build/classes for game revision b0bbce05d5`.
+It also runs a structural check against the stock classes and fails loudly if
+your game revision does not match the sources. Optional, the unit tests (no
+game needed, a few seconds): `scripts/test.sh`.
+
+### 3. Install and verify
+
+```sh
+scripts/pzopt.sh install
+scripts/pzopt.sh status
+```
+
+`install` checks that the launcher classpath puts `.` ahead of the jar and that
+your game revision matches the build, copies `build/classes/` into the game
+folder, records every file in `pzopt-installed.txt`, and refuses to overwrite
+any existing file. Its last line confirms the jar checksum did not change.
+`status` must print `installed: yes`, the same revision on the `game revision`
+and `installed for` lines, and a file list with no `MISSING` or `MODIFIED`
+entries.
+
+### 4. Launch from Steam and check the log
+
+Start the game from Steam as usual (first boot is slower: caches under
+`~/Zomboid/pzopt/` are written). `~/Zomboid/console.txt` shows one
+`[pzopt] loaded override ... active` line per class in its first seconds. If a
+line says the overrides were built for another revision, the game and the files
+do not match and everything runs as stock.
+
+Settings go in `pzopt.properties` next to `projectzomboid.jar`, same format as on
+Windows; `scripts/pzopt.sh status` prints the file when it exists.
+
+---
+
+## Settings
+
+Keys go in `pzopt.properties` in the game directory (next to `projectzomboid.jar`),
+or as `-Dpzopt.<key>=` JVM properties. Only list the keys you change. A key set to
+`false` or `0` restores stock behaviour for that item alone. Full list with
+comments: `src/pzopt/pzopt/Config.java`.
+
+| Key | Default | What it controls |
+|---|---|---|
+| `parallel` | `true` | recalc chunks on a worker pool (`false` = stock single thread) |
+| `workers` | `min(4, cores-1)` | recalc pool width |
+| `wake` | `true` | wake the streamer on enqueue instead of the 140 ms poll |
+| `hotsaveIntervalSec` | `30` | minimum seconds between game-thread hot saves (`0` = stock) |
+| `treesInChunkTexture` | `true` | static trees bake into the chunk texture |
+| `windowsInChunkTexture` | `true` | windows and glass doors bake |
+| `translucentTilesInChunkTexture` | `false` | `Translucent`-flagged tiles bake (black tile bug open) |
+| `bakeBudget` | `8` | chunk textures baked per frame (`0` = unlimited) |
+| `lightingBudget` | `8` | chunk lighting refreshes per frame (`0` = stock) |
+| `cutawayFast` | `true` | replay the stored occluder mask on clean levels |
+| `persistentVbo` | `false` | persistently mapped sprite buffers |
+| `fileThreads` / `fileInflight` | `max(4, cores/2)` / `4x` | async file system width and queue depth |
+| `parallelDepthMaps` | `true` | decode depth-map tilesets concurrently |
+| `loaderCpuFixes` | `true` | algorithmic fixes on the loader thread |
+| `scriptParserFast` | `true` | linear script parser |
+| `itemParamSwitch` | `true` | `Item.DoParam` switch dispatch |
+| `fmodAsync` | `true` | FMOD init on a boot thread |
+| `bootPump` / `bootFileThreads` / `earlyModels` | `true` / `cores-6` / `true` | boot-time file pool pump |
+| `luaPrecompile` | `true` | compile all Lua on a pool at boot |
+| `preloadAnimSets` | `true` | parse animation sets at boot |
+| `animClipCache` | `true` | cache imported animation clips under `Zomboid/pzopt/` |
+| `packIndex` | `true` | cache texture-pack page offsets |
+| `shaderCache` | `true` | reuse model shaders instead of one render step per model |
+| `loadWorkers` | `max(workers, cores/2)` | recalc pool width while a world loads |
+| `noLoadFade` | `true` | skip the loading screen's fade to black |
+| `uncappedFps` | `auto` | `true`/`false` force the cap off/on for a run |
+| `instrument` | `false` | write per-chunk and per-frame timings for the harness |
+
+To compare against stock on your own machine, put every switch off in
+`pzopt.properties` (the full list is in [docs/windows-test.md](docs/windows-test.md))
+and delete the file to return to the defaults.
+
+---
+
+## Uninstall
+
+Close the game first. The jar was never modified, so no Steam file verification
+is needed afterwards. The caches under `Zomboid/pzopt/` can be deleted by hand;
+the frame-cap setting lives there too (`framecap.ini`), and without the overrides
+the game uses whatever `options.ini` holds.
+
+**Windows:** removes exactly the files the zip added, then the empty folders.
+
+```powershell
+$PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
+Get-Content "$PZ\pzopt-files.txt" | ForEach-Object { Remove-Item -LiteralPath (Join-Path $PZ $_) -ErrorAction SilentlyContinue }
+Remove-Item "$PZ\pzopt-files.txt", "$PZ\pzopt.properties" -ErrorAction SilentlyContinue
+foreach ($d in "pzopt","zombie","org","se","media\lua\client\pzopt") {
+  Get-ChildItem "$PZ\$d" -Recurse -Directory -ErrorAction SilentlyContinue | Sort-Object FullName -Descending |
+    Where-Object { -not (Get-ChildItem $_.FullName -Force) } | Remove-Item
+  if ((Test-Path "$PZ\$d") -and -not (Get-ChildItem "$PZ\$d" -Force)) { Remove-Item "$PZ\$d" }
+}
+Test-Path "$PZ\pzopt"   # False
+```
+
+**Linux:** removes exactly the files it installed and the empty folders it
+created, then deletes the manifest.
+
+```sh
+scripts/pzopt.sh uninstall
+```
+
+---
+
+## After a game update
+
+The classes are compiled against one exact jar. After Steam updates the game they
+disable themselves (one log line, stock behaviour). Never leave class files built
+for an older revision on a newer game; they are inert but pointless.
+
+**Windows:** run the uninstall block above and wait for a zip whose name carries
+the new revision.
+
+**Linux:** wait for a release of this repo that targets the new build. On an
+unchanged revision (a Steam re-verify, for example) just rebuild and reinstall:
+
+```sh
+scripts/pzopt.sh uninstall
+scripts/build.sh
+scripts/pzopt.sh install
+```
+
+If `build.sh` reports a revision or signature mismatch, the game changed and the
+overrides need updating (`scripts/regen-overrides.sh` plus the edit log is the
+maintainer's path; see `.claude/skills/game-update`).
+
+---
+
 ## How the optimizations work
 
 The game runs one main thread that simulates and renders, one streamer thread that
@@ -145,10 +403,7 @@ profiling (JFR) showed the main thread spending 80 % of an ordinary frame inside
 redraws every tree, window and fence each frame. The streamer was idle 90 % of the
 time but still delivered chunks 150 ms late because of a polling sleep. The
 loading path was a chain of single-threaded parsers. Each group of changes below
-attacks one of those.
-
-Every item names its `pzopt.properties` key. Defaults are the adopted set; a
-key set to `false` or `0` restores stock behaviour for that item alone.
+attacks one of those. Every item names its `pzopt.properties` key.
 
 ### 1. Chunk streaming
 
@@ -229,12 +484,12 @@ that cache, keyed by name and contents. A miss goes through the stock path.
 
 **Animation clip cache** (`animClipCache`). Importing 2,209 `.X` animation files
 through jassimp costs 14 to 17 thread-seconds per boot. After a stock import the
-resulting clips are written under `~/Zomboid/pzopt/anims/` and read from there on
+resulting clips are written under `Zomboid/pzopt/anims/` and read from there on
 later boots (2.9 thread-seconds).
 
 **Texture pack index** (`packIndex`). Version-0 texture packs were scanned byte by
 byte (526 MB) at every boot to find page boundaries. The offsets are kept in
-`~/Zomboid/pzopt/packs/*.idx` so the reader seeks.
+`Zomboid/pzopt/packs/*.idx` so the reader seeks.
 
 **Linear script parser** (`scriptParserFast`). `ScriptParser.stripComments` was
 quadratic (a `StringBuilder.replace` per comment on a multi-MB string, 1.56 s);
@@ -282,7 +537,7 @@ the world's own 2 s fade-in are removed.
 
 The Display options get a real **Uncapped** entry and a separate **Menu framerate**
 combo, plus 300, 330, 400, 430 and 500 fps entries in both (`pzopt.FrameCap`,
-Lua under `src/lua/`, setting stored in `~/Zomboid/pzopt/framecap.ini`). The
+Lua under `src/lua/`, setting stored in `Zomboid/pzopt/framecap.ini`). The
 in-game choice survives the game's own rewrite of `options.ini`.
 
 ### What was measured and not adopted
@@ -320,8 +575,9 @@ code is the `pzopt` package under `src/pzopt/`.
 Safety rails:
 
 - **Build guard.** The classes record the game revision they were compiled against
-  and disable themselves, with one log line, when the installed game differs.
-  `scripts/pzopt.sh install` refuses to install a mismatched build.
+  and the sha256 of every stock class they shadow, and disable themselves, with one
+  log line, when the installed game differs. `scripts/pzopt.sh install` refuses to
+  install a mismatched build.
 - **Signature check.** The build fails if any non-private member of a shadowed
   class is missing or changed, so other game classes always link.
 - **Kill switches.** Every optimization is a key in `pzopt.properties`.
@@ -329,296 +585,12 @@ Safety rails:
   from a worker; dev builds assert it.
 - **Save format and network payloads are untouched.**
 - **All files the mod writes** (caches, frame-cap setting, traces) stay under
-  `~/Zomboid/pzopt/`. The game directory only receives the files listed in
-  `pzopt-installed.txt`.
-
----
-
-## Install, step by step
-
-The game is installed through Steam on both platforms and the Windows depot
-ships the same `projectzomboid.jar` as the Linux one, so the same class files
-work on both. The difference is how you get them: on **Linux** you build them
-from this repository against your own jar; on **Windows** you unpack the
-prebuilt zip from the [release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
-and nothing is compiled. Every step below has a Linux part and a Windows part.
-Nothing here is a Workshop mod.
-
-Windows commands are PowerShell (Start menu, type `powershell`). They use `$PZ`
-for the game folder; the value below is Steam's default, adjust it if your
-library is elsewhere (Steam, right-click the game, Manage, Browse local files).
-
-### What you need
-
-| Requirement | Linux | Windows |
-|---|---|---|
-| Project Zomboid **Build 42.20.4** (Steam, Properties, Betas) | yes | yes |
-| A JDK 25 or newer (`javac`, `javap`) | yes, to compile against your jar | no |
-| Python 3 | yes, the install script reads the launcher JSON | no |
-| `git`, `unzip`, `bash` | yes | no |
-| The release zip `pzopt-b0bbce05d5-classes.zip` | no | yes (518 KB) |
-
-Linux: install a JDK with your package manager if `javac -version` fails:
-
-```sh
-# Arch / CachyOS
-sudo pacman -S jdk-openjdk
-# Debian / Ubuntu
-sudo apt install openjdk-25-jdk      # or the newest available
-# Fedora
-sudo dnf install java-latest-openjdk-devel
-```
-
-### Step 1. Close the game
-
-Both platforms. The overrides are read when the game starts; quit Project
-Zomboid before installing or removing them.
-
-### Step 2. Get the files
-
-**Linux:** clone the repository.
-
-```sh
-git clone https://github.com/DiegoVillalobosFlores/PZ_Optimization.git
-cd PZ_Optimization
-```
-
-**Windows:** download `pzopt-b0bbce05d5-classes.zip` from the
-[release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
-into your Downloads folder. The revision in the file name must be the one your
-game reports (Build 42.20.4 is `b0bbce05d5`); a zip for another revision
-installs fine but the classes disable themselves at start-up. If you also want
-the repository (harness, sources), `git clone` works on Windows too when the
-target is a short path such as `C:\Users\<you>\PZ_Optimization` (some files
-sit ten folders deep; from a long path the checkout fails with "Filename too
-long" unless you pass `-c core.longpaths=true`). The build scripts do not run
-on Windows: the zip is built on Linux with `scripts/build.sh`.
-
-### Step 3. Tell the commands where the game is
-
-**Linux:** only if the game is not in `/games/steamapps/common/ProjectZomboid`.
-Export the path once in the shell you will use for the next steps:
-
-```sh
-export PZ_ROOT="$HOME/.local/share/Steam/steamapps/common/ProjectZomboid"
-```
-
-The folder is right if it contains a `projectzomboid/` subfolder with
-`projectzomboid.jar` and `ProjectZomboid64.json` inside.
-
-**Windows:** set `$PZ` and check the launcher config and that nothing is
-installed yet. Do this in every new PowerShell window.
-
-```powershell
-$PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
-Get-Content "$PZ\ProjectZomboid64.json" | Select-String -Context 0,3 classpath
-Test-Path "$PZ\pzopt"; Test-Path "$PZ\zombie"; Test-Path "$PZ\org"; Test-Path "$PZ\se"
-```
-
-The classpath block must list `"."` before `"projectzomboid.jar"` (it does on
-the stock depot; that order is what lets loose class files shadow the jar) and
-the four `Test-Path` lines must print `False`.
-
-### Step 4. Build the class files
-
-**Linux:**
-
-```sh
-scripts/build.sh
-```
-
-This compiles everything under `src/` against your `projectzomboid.jar` and ends
-with a line like `built 95 class files into build/classes for game revision
-b0bbce05d5`. It also runs a structural check against the stock classes and fails
-loudly if your game revision does not match the sources. Optional but
-recommended, the unit tests (no game needed, a few seconds):
-
-```sh
-scripts/test.sh
-```
-
-**Windows:** nothing to build. The zip carries the finished class files plus
-`pzopt-files.txt`, the list of every file it adds.
-
-### Step 5. Install
-
-**Linux:**
-
-```sh
-scripts/pzopt.sh install
-```
-
-The script first checks that the launcher classpath puts `.` ahead of the jar
-and that your game revision matches the build, then copies `build/classes/` into
-the game folder and records every file it wrote in `pzopt-installed.txt`. It
-refuses to overwrite any file that already exists. The last line confirms the jar
-checksum did not change.
-
-**Windows:** unpack the zip straight into the game folder. It only adds files
-and never touches `projectzomboid.jar`. `Expand-Archive` refuses to overwrite
-existing files unless `-Force` is given; do not give it.
-
-```powershell
-Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-```
-
-### Step 6. Verify
-
-**Linux:**
-
-```sh
-scripts/pzopt.sh status
-```
-
-Expected output: `installed: yes`, the same revision on the `game revision` and
-`installed for` lines, and a file list with no `MISSING` or `MODIFIED` entries.
-
-**Windows:**
-
-```powershell
-Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
-(Get-Content "$PZ\pzopt-files.txt" | Where-Object { -not (Test-Path (Join-Path $PZ $_)) }).Count
-```
-
-Expected: `revision=b0bbce05d5` and `0` (no file from the list is missing).
-
-### Step 7. Play
-
-Both platforms: launch the game from Steam as usual. The console log
-(`~/Zomboid/console.txt` on Linux, `%USERPROFILE%\Zomboid\console.txt` on
-Windows) shows `[pzopt] loaded override ...` lines in its first seconds, one
-per class, each saying `active`. The Display options now have an **Uncapped**
-framerate entry, 300 to 500 fps entries, and a **Menu framerate** combo. On
-Windows:
-
-```powershell
-Select-String -Path "$env:USERPROFILE\Zomboid\console.txt" -Pattern "\[pzopt\] loaded override" | Measure-Object | Select-Object -ExpandProperty Count
-```
-
-If a line says the overrides were built for another revision, the game and the
-files do not match and everything runs as stock. The first boot after install
-is slower than later ones: the animation clip cache and texture-pack index
-under `Zomboid/pzopt/` are written on that boot and read on every boot after
-it.
-
-### Changing a setting
-
-Both platforms: create `pzopt.properties` next to `projectzomboid.jar` (on
-Windows that is `$PZ\pzopt.properties`) with only the keys you want to change;
-everything else keeps the adopted default, for example:
-
-```properties
-workers=2
-hotsaveIntervalSec=60
-treesInChunkTexture=false
-```
-
-On Linux `scripts/pzopt.sh status` prints the file when it exists. See
-[Settings](#settings).
-
-### Uninstall
-
-**Linux:**
-
-```sh
-scripts/pzopt.sh uninstall
-```
-
-Removes exactly the files it installed and the empty folders it created, then
-deletes the manifest.
-
-**Windows:** the same, driven by the zip's file list.
-
-```powershell
-$PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
-Get-Content "$PZ\pzopt-files.txt" | ForEach-Object { Remove-Item -LiteralPath (Join-Path $PZ $_) -ErrorAction SilentlyContinue }
-Remove-Item "$PZ\pzopt-files.txt", "$PZ\pzopt.properties" -ErrorAction SilentlyContinue
-foreach ($d in "pzopt","zombie","org","se","media\lua\client\pzopt") {
-  Get-ChildItem "$PZ\$d" -Recurse -Directory -ErrorAction SilentlyContinue | Sort-Object FullName -Descending |
-    Where-Object { -not (Get-ChildItem $_.FullName -Force) } | Remove-Item
-  if ((Test-Path "$PZ\$d") -and -not (Get-ChildItem "$PZ\$d" -Force)) { Remove-Item "$PZ\$d" }
-}
-Test-Path "$PZ\pzopt"   # False
-```
-
-On both platforms the jar was never modified, so no Steam file verification is
-needed. The caches under `Zomboid/pzopt/` can be deleted by hand; the frame-cap
-setting lives there too (`framecap.ini`), and without the overrides the game
-uses whatever `options.ini` holds.
-
-### After a game update
-
-The classes are compiled against one exact jar. After Steam updates the game they
-disable themselves (one log line, stock behaviour).
-
-**Linux:** either wait for a release of this repo that targets the new build, or
-on an unchanged revision (a Steam re-verify, for example) just run:
-
-```sh
-scripts/pzopt.sh uninstall
-scripts/build.sh
-scripts/pzopt.sh install
-```
-
-If `build.sh` reports a revision or signature mismatch, the game changed and the
-overrides need updating (`scripts/regen-overrides.sh` plus the edit log is the
-maintainer's path; see `.claude/skills/game-update`). Never copy class files
-built for an older revision onto a newer game.
-
-**Windows:** uninstall with the commands above and wait for a zip whose name
-carries the new revision. Do not leave old class files in place; they are inert
-but pointless.
-
-### Windows results
-
-First Windows numbers (bench route, 5120x2160, 500 fps cap, zoom 2.5, two
-stock runs for the noise floor): stock 122 fps and p99 26.1 ms, optimized 194 fps
-and p99 18.5 ms, chunk latency p50 199 → 37 ms. Details, boot timings and the
-test procedure are in [docs/windows-test.md](docs/windows-test.md). The
-benchmark harness runs on Windows through `harness/run-win.ps1`.
-
----
-
-## Settings
-
-Keys go in `pzopt.properties` in the game directory, or as `-Dpzopt.<key>=`
-JVM properties. Full list with comments: `src/pzopt/pzopt/Config.java`.
-
-| Key | Default | What it controls |
-|---|---|---|
-| `parallel` | `true` | recalc chunks on a worker pool (`false` = stock single thread) |
-| `workers` | `min(4, cores-1)` | recalc pool width |
-| `wake` | `true` | wake the streamer on enqueue instead of the 140 ms poll |
-| `hotsaveIntervalSec` | `30` | minimum seconds between game-thread hot saves (`0` = stock) |
-| `treesInChunkTexture` | `true` | static trees bake into the chunk texture |
-| `windowsInChunkTexture` | `true` | windows and glass doors bake |
-| `translucentTilesInChunkTexture` | `false` | `Translucent`-flagged tiles bake (black tile bug open) |
-| `bakeBudget` | `8` | chunk textures baked per frame (`0` = unlimited) |
-| `lightingBudget` | `8` | chunk lighting refreshes per frame (`0` = stock) |
-| `cutawayFast` | `true` | replay the stored occluder mask on clean levels |
-| `persistentVbo` | `false` | persistently mapped sprite buffers |
-| `fileThreads` / `fileInflight` | `max(4, cores/2)` / `4x` | async file system width and queue depth |
-| `parallelDepthMaps` | `true` | decode depth-map tilesets concurrently |
-| `loaderCpuFixes` | `true` | algorithmic fixes on the loader thread |
-| `scriptParserFast` | `true` | linear script parser |
-| `itemParamSwitch` | `true` | `Item.DoParam` switch dispatch |
-| `fmodAsync` | `true` | FMOD init on a boot thread |
-| `bootPump` / `bootFileThreads` / `earlyModels` | `true` / `cores-6` / `true` | boot-time file pool pump |
-| `luaPrecompile` | `true` | compile all Lua on a pool at boot |
-| `preloadAnimSets` | `true` | parse animation sets at boot |
-| `animClipCache` | `true` | cache imported animation clips under `~/Zomboid/pzopt/` |
-| `packIndex` | `true` | cache texture-pack page offsets |
-| `shaderCache` | `true` | reuse model shaders instead of one render step per model |
-| `loadWorkers` | `max(workers, cores/2)` | recalc pool width while a world loads |
-| `noLoadFade` | `true` | skip the loading screen's fade to black |
-| `uncappedFps` | `auto` | `true`/`false` force the cap off/on for a run |
-| `instrument` | `false` | write per-chunk and per-frame timings for the harness |
+  `Zomboid/pzopt/`. The game directory only receives the files listed in
+  `pzopt-files.txt` (Windows) or `pzopt-installed.txt` (Linux).
 
 ---
 
 ## Known limitations
-
-Read this before installing on a machine you play on.
 
 - **Version pin.** One exact game build. Every Build 42 patch needs a new build of
   these classes; until then they disable themselves.
@@ -635,15 +607,15 @@ Read this before installing on a machine you play on.
 - **Security.** Build 42.20.4 removed Lua `loadstring` and restricted the file
   types Lua may write. This mod does not widen either: the `LuaCompiler` override
   only caches compiled prototypes of the same source text, and all writes stay
-  under `~/Zomboid/pzopt/`.
+  under `Zomboid/pzopt/`.
 - **Visual changes still under soak.** Baked trees, windows and the cutaway mask
   have been verified on the bench route and on copies of real saves, but a long
   free-play soak (interiors, zombies behind fences, curtain and door state
   changes) is still open. Two rendering flags stay off because of known artifacts
   (see [Renderer](#2-renderer)).
-- **Platforms.** Measured on the native Linux depot with NVIDIA GL under XWayland
-  (Mesa Zink and native Wayland too) and on Windows 11 with NVIDIA GL
-  (`docs/windows-test.md`). On Windows the bench route was run and the frame-cap
+- **Platforms.** Measured on Windows 11 with NVIDIA GL (`docs/windows-test.md`)
+  and on the native Linux depot with NVIDIA GL under XWayland (Mesa Zink and
+  native Wayland too). On Windows the bench route was run and the frame-cap
   combos checked; the long free-play soak above is open there as well.
 - **Development install contents.** The build also carries the harness classes
   (`pzopt.Harness`, `pzopt.AutoStart`, `pzopt.Parity`, `pzopt.Stats`,
@@ -653,20 +625,35 @@ Read this before installing on a machine you play on.
 
 ## Benchmark harness
 
-`harness/run.sh` does one hands-off game run: resets a bench save from a template,
-auto-continues into it, runs a scripted route, quits, and collects logs, sysmon
-samples, an optional MangoHud CSV, optional JFR and an optional screen recording
+One hands-off game run: reset a bench save from a template, auto-continue into it,
+run a scripted route, quit, and collect logs, sysmon samples and per-frame timings
 into `harness/runs/<label>-<timestamp>/`. The bench save template is checked in
-as `harness/bench-save/pzopt-bench-template.tar.zst`; restore it once with:
-
-```sh
-zstd -dc harness/bench-save/pzopt-bench-template.tar.zst | tar -C ~/Zomboid/Saves/Sandbox -xf -
-```
+as `harness/bench-save/pzopt-bench-template.tar.zst`.
 
 Modes: `bench` (teleport route, fixed tiles per second), `drive` (spawns a car,
 cruise control, follows the road), `parity` (captures every chunk's recalc output
 for the byte-for-byte comparison), `verify` (a copy of a real save, for visual
-checks).
+checks). Bench runs must pin `--flag zoom=max`: frame-time baselines are only
+comparable at the same zoom, resolution and renderer. Measurement runs keep the
+PZDashboard mod off so its 2 s collectors stay out of the tail.
+
+**Windows:** `harness/run-win.ps1` runs the bench through Steam, samples CPU and
+GPU load with `Get-Counter` and `nvidia-smi`, and the analysis scripts run on any
+Python 3 (the embeddable build is enough). No MangoHud, JFR or recording. The game
+pauses on focus loss, so keep the window focused during a run.
+
+```powershell
+harness\run-win.ps1 -Label bench-opt -Flag zoom=max -Prop instrument=true
+harness\run-win.ps1 -Label bench-stock -Flag zoom=max -Prop instrument=true,parallel=false,wake=false,treesInChunkTexture=false,windowsInChunkTexture=false,bakeBudget=0,lightingBudget=0,cutawayFast=false,hotsaveIntervalSec=0
+python harness\analyze.py harness\runs\bench-opt-*
+```
+
+**Linux:** `harness/run.sh` adds an optional MangoHud CSV, JFR and a screen
+recording. Restore the bench save once with:
+
+```sh
+zstd -dc harness/bench-save/pzopt-bench-template.tar.zst | tar -C ~/Zomboid/Saves/Sandbox -xf -
+```
 
 ```sh
 # the two runs behind the 60 km/h video
@@ -689,20 +676,7 @@ python3 harness/dashboard.py                                                  # 
 
 Steam launches need the launch options set to
 `<repo>/harness/steam-launch.sh %command%`; `--launcher direct` starts the native
-game itself when Steam is not running. Bench runs must pin `--flag zoom=max`:
-frame-time baselines are only comparable at the same zoom, resolution and
-renderer. Measurement runs should use `--no-dashboard` to keep the PZDashboard
-mod's 2 s collectors out of the tail.
-
-On Windows, `harness/run-win.ps1` does the same bench (no MangoHud, JFR or
-recording; CPU and GPU load from `Get-Counter` and `nvidia-smi`), and the
-analysis scripts run on the embeddable Python:
-
-```powershell
-harness\run-win.ps1 -Label bench-opt -Flag zoom=max -Prop instrument=true
-harness\run-win.ps1 -Label bench-stock -Flag zoom=max -Prop instrument=true,parallel=false,wake=false,treesInChunkTexture=false,windowsInChunkTexture=false,bakeBudget=0,lightingBudget=0,cutawayFast=false,hotsaveIntervalSec=0
-python harness\analyze.py harness\runs\bench-opt-*
-```
+game itself when Steam is not running. Pass `--no-dashboard` on measurement runs.
 
 ---
 
@@ -715,11 +689,11 @@ python harness\analyze.py harness\runs\bench-opt-*
 | `src/shims/` | From-scratch replacements (`TISLogoState`) |
 | `src/lua/` | The frame-cap options Lua, installed under `media/lua/client/pzopt/` |
 | `scripts/` | `build.sh`, `pzopt.sh`, `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh`, `pz-env.sh` |
-| `harness/` | `run.sh` (Linux) and `run-win.ps1` (Windows), analysis scripts, `parity-gate.sh`, the `pzopt-harness` Lua mod, bench save template, `baseline/` captures (`baseline/windows/` for the Windows runs) |
+| `harness/` | `run-win.ps1` (Windows) and `run.sh` (Linux), analysis scripts, `parity-gate.sh`, the `pzopt-harness` Lua mod, bench save template, `baseline/` captures (`baseline/windows/` for the Windows runs) |
 | `config/` | MangoHud profiles |
 | `tools/` | Standalone Java probes (JFR sample dump, GLFW swap probe, static audit) |
 | `tests/` | JVM-only unit tests (`scripts/test.sh`) |
-| `docs/` | `results.md` (every run, in order), `override-edits.md` (every edit, in prose), the plans, `benchmark-progress.html` |
+| `docs/` | `results.md` (every run, in order), `override-edits.md` (every edit, in prose), `windows-test.md`, the plans, `benchmark-progress.html` |
 | `docs/media/` | The comparison videos, posters and the results chart |
 
 Project Zomboid is by The Indie Stone. This repository contains no game assets;
