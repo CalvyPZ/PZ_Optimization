@@ -14,7 +14,7 @@ JAR="$PZ_DIR/projectzomboid.jar"
 VF_JAR="${VF_JAR:-$HOME/.local/share/java/vineflower.jar}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$REPO/build/vineflower"
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell)
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 [[ -f "$VF_JAR" ]] || { echo "vineflower not found: $VF_JAR" >&2; exit 1; }

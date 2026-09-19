@@ -54,7 +54,7 @@ FLAG_FILE="$ZOMBOID/Lua/pzopt-harness.txt"
 NATIVE_FLAG_FILE="${NATIVE_ZOMBOID:-$HOME/Zomboid}/Lua/pzopt-harness.txt"
 
 label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
-record=0; jfr=0; jfr_period=""; game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=75; route_seconds=""; launcher="auto"; game_options=()
+record=0; jfr=0; jfr_period=""; game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --label) label="$2"; shift 2 ;;
@@ -73,7 +73,8 @@ while [[ $# -gt 0 ]]; do
     --refresh-template) refresh_template=1; shift ;; # rebuild the --source-save template from the source save
     --retries) retries="$2"; shift 2 ;;              # relaunches after a start-up crash (default 2)
     --renderer) renderer="$2"; shift 2 ;;
-    --lead) lead="$2"; shift 2 ;;                    # seconds from launch to the route start (world load + settle must fit)
+    --lead) lead="$2"; shift 2 ;;                    # fixed schedule: seconds from launch to the route start (world load + settle must
+                                                     # fit). Default: none; the route starts settle s after the world is up (see below)
     --route-seconds) route_seconds="$2"; shift 2 ;;  # expected route length (bench: tiles/speed = 100; drive: max_seconds)
     --env) game_env+=("$2"); shift 2 ;;
     --record) record=1; shift ;;
@@ -108,12 +109,12 @@ case "$launcher" in
   steam|direct) ;;
   *) echo "unknown --launcher $launcher" >&2; exit 2 ;;
 esac
-# a locked desktop session never gives the game a display (it sits at "Creating display" forever)
 if [[ "$LAYOUT" != native ]]; then
   # the Windows build (Proton) can only be started through the Steam client
   launcher=steam
   steam_logged_in || { echo "Proton layout needs the Steam client running and logged in (it launches the game)" >&2; exit 1; }
 fi
+# a locked desktop session never gives the game a display (it sits at "Creating display" forever)
 if command -v loginctl >/dev/null; then
   sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3=="'"$USER"'" && $4=="seat0" {print $1; exit}')
   if [[ -n "$sess" ]] && loginctl show-session "$sess" -p LockedHint 2>/dev/null | grep -q '=yes'; then
@@ -226,6 +227,8 @@ write_flags() {
     [[ -n "$quit_after" ]] && echo "quit_after=$quit_after"
     [[ -n "${route_start_epoch:-}" ]] && echo "route_start_epoch=$route_start_epoch"
     [[ -n "${mangohud_end_epoch:-}" ]] && echo "mangohud_end_epoch=$mangohud_end_epoch"
+    [[ -n "$mangohud_secs" ]] && echo "mangohud_secs=$mangohud_secs"
+    printf '%s\n' "${extra_flags[@]}" | grep -q '^settle=' || echo "settle=5"
     for f in "${extra_flags[@]}"; do echo "$f"; done
   } > "$FLAG_FILE"   # Lua getFileReader resolves under Zomboid/Lua/
 }
@@ -264,10 +267,16 @@ fi
 # So for the run that file is replaced by the selected profile plus the
 # autostart/duration keys, and put back byte-for-byte on exit.
 # MangoHud writes the CSV only when log_duration elapses while the game is
-# still running, so the route is put on a fixed schedule: pzopt.Harness starts
-# it at launch + --lead seconds (route_start_epoch flag; the world has ~lead-15 s
-# to load) and the log runs from lead-3 to lead + --route-seconds + 5. The game
+# still running, so the log and the route are timed together. Default: as soon
+# as the world is up pzopt.Harness fixes the route start at world-ready + settle
+# (5 s unless --flag settle=N) and publishes it in Zomboid/pzopt-schedule.out;
+# the scheduler below reads that, starts the log 3 s before the route through
+# MangoHud's control socket (mangohudctl, socket "mangoapp"; toggle_logging key
+# via xdotool as the fallback) and the log runs --route-seconds + 8. The game
 # quits at the route end or when the log has closed, whichever is later.
+# --lead N instead puts everything on a fixed clock from launch (autostart_log,
+# route at launch + N); a world that comes up too late for it is logged as
+# "route start LATE" and the console's "world ready" line prints the margin.
 if [[ -z "$mangohud_secs" && "$mode" != verify ]]; then mangohud_secs=$((route_seconds + 8)); fi
 [[ -n "$mangohud_config" ]] || mangohud_config="config/mangohud-benchmark.conf"
 MH_PROFILE="$mangohud_config"
@@ -278,8 +287,9 @@ if [[ -n "$mangohud_secs" ]]; then
   [[ -f "$MH_PROFILE" ]] || { echo "MangoHud config not found: $MH_PROFILE" >&2; exit 1; }
   mkdir -p "$(dirname "$MH_USER_CONF")" "$MH_OUT"
   [[ -f "$MH_USER_CONF" ]] && cp "$MH_USER_CONF" "$MH_USER_CONF.pzopt-orig"
-  { grep -v '^log_duration=\|^autostart_log=\|^output_folder=\|^log_interval=' "$MH_PROFILE"
-    printf 'output_folder=%s/\nautostart_log=%s\nlog_duration=%s\nlog_interval=0\n' "$MH_OUT" "$((lead - 3))" "$mangohud_secs"; } > "$MH_USER_CONF"
+  { grep -v '^log_duration=\|^autostart_log=\|^output_folder=\|^log_interval=\|^control=' "$MH_PROFILE"
+    printf 'output_folder=%s/\nlog_duration=%s\nlog_interval=0\ncontrol=mangoapp\n' "$MH_OUT" "$mangohud_secs"
+    [[ -n "$lead" ]] && printf 'autostart_log=%s\n' "$((lead - 3))"; } > "$MH_USER_CONF"
 fi
 
 # launcher JSON (vmArgs) edits for --jfr / --gc: the original comes back on exit
@@ -333,8 +343,12 @@ while :; do
   rm -f "$ZOMBOID"/pzopt-*.out "$ZOMBOID/console.txt"
   restore_harness_flag; write_flags; write_launch_env
   launch_epoch=$(date +%s)
-  route_start_epoch=$((launch_epoch + lead))
-  if [[ -n "$mangohud_secs" ]]; then mangohud_end_epoch=$((launch_epoch + lead - 3 + mangohud_secs + 1)); fi
+  route_start_epoch=""; mangohud_end_epoch=""
+  if [[ -n "$lead" ]]; then
+    route_start_epoch=$((launch_epoch + lead))
+    [[ -n "$mangohud_secs" ]] && mangohud_end_epoch=$((launch_epoch + lead - 3 + mangohud_secs + 1))
+  fi
+  rm -f "$ZOMBOID/pzopt-schedule.out"
   write_flags
   echo "launching app $APPID (mode=$mode quit_after=${quit_after:-none}, attempt $attempt); output -> $out"
   start=$(date +%s)
@@ -383,13 +397,39 @@ while :; do
   done
   [[ -n "$game_pid" ]] || { echo "game process did not appear within 120s" >&2; exit 1; }
   echo "game running (pid $game_pid); waiting for exit"
-  # MangoHud's avg / 1% / 0.1% FPS metrics accumulate from process start (menus, world load),
-  # so on drive runs its reset keybind (reset_fps_metrics=Shift_R+F9, the default) is pressed
-  # through XTEST just as the route starts; the game is an XWayland window, so xdotool reaches it.
-  if [[ -n "$mangohud_secs" && "$mode" == drive ]] && command -v xdotool >/dev/null; then
-    ( t=$((route_start_epoch - $(date +%s))); (( t > 0 )) && sleep "$t"; sleep 0.5
-      xdotool keydown Shift_R keydown F9; sleep 0.3; xdotool keyup F9 keyup Shift_R
-      echo "mangohud: fps metrics reset key sent $(( $(date +%s) - launch_epoch )) s after launch" ) &
+  # Scheduler: waits for the harness to publish the route start (pzopt-schedule.out, written at
+  # world-ready), starts the MangoHud log 3 s before it unless --lead put autostart_log in charge,
+  # and on drive runs presses MangoHud's reset keybind (reset_fps_metrics=Shift_R+F9, the default)
+  # through XTEST just as the route starts, because its avg / 1% / 0.1% FPS accumulate from process
+  # start (menus, world load); the game is an XWayland window, so xdotool reaches it.
+  sched_pid=""
+  if [[ -n "$mangohud_secs" ]]; then
+    ( sched="$ZOMBOID/pzopt-schedule.out"; start_ms=""
+      for _ in $(seq 1 1200); do   # up to 240 s for the world to come up
+        [[ -f "$sched" ]] && start_ms=$(sed -n 's/^route_start_epoch_ms=//p' "$sched") && [[ -n "$start_ms" ]] && break
+        kill -0 "$game_pid" 2>/dev/null || exit 0; sleep 0.2
+      done
+      [[ -n "$start_ms" ]] || { echo "schedule: the harness never published a route start (no pzopt-schedule.out)" >&2; exit 0; }
+      ready_ms=$(sed -n 's/^world_ready_epoch_ms=//p' "$sched")
+      echo "schedule: world ready $(( (ready_ms - launch_epoch*1000) / 1000 )) s after launch; route starts at +$(( (start_ms - launch_epoch*1000) / 1000 )) s"
+      sleep_until_ms() { local d=$(( $1 - $(date +%s%3N) )); (( d > 0 )) && sleep "$(printf '%d.%03d' $((d/1000)) $((d%1000)))"; return 0; }
+      if [[ -z "$lead" ]]; then
+        sleep_until_ms $((start_ms - 3000))
+        if mangohudctl set log_session 1 >/dev/null 2>&1; then
+          echo "mangohud: log started through the control socket at +$(( $(date +%s) - launch_epoch )) s"
+        elif command -v xdotool >/dev/null; then
+          xdotool keydown Shift_L keydown F2; sleep 0.3; xdotool keyup F2 keyup Shift_L
+          echo "mangohud: control socket unreachable; toggle_logging key sent at +$(( $(date +%s) - launch_epoch )) s" >&2
+        else
+          echo "mangohud: could not start the log (no control socket, no xdotool); use --lead for the fixed schedule" >&2
+        fi
+      fi
+      if [[ "$mode" == drive ]] && command -v xdotool >/dev/null; then
+        sleep_until_ms $((start_ms + 500))
+        xdotool keydown Shift_R keydown F9; sleep 0.3; xdotool keyup F9 keyup Shift_R
+        echo "mangohud: fps metrics reset key sent $(( $(date +%s) - launch_epoch )) s after launch"
+      fi ) &
+    sched_pid=$!
   fi
   # start-up watchdog: a launch that never gets as far as writing console.txt (a preload deadlock, a driver hang)
   # is killed by PID after 120 s instead of stalling the run forever
@@ -405,6 +445,7 @@ while :; do
   done
   end=$(date +%s)
   kill "$watchdog_pid" 2>/dev/null || true; wait "$watchdog_pid" 2>/dev/null || true
+  [[ -n "$sched_pid" ]] && { kill "$sched_pid" 2>/dev/null || true; wait "$sched_pid" 2>/dev/null || true; }
   kill "$sysmon_pid" 2>/dev/null; wait "$sysmon_pid" 2>/dev/null || true
   if [[ -n "$rec_pid" ]]; then kill -INT "$rec_pid" 2>/dev/null; wait "$rec_pid" 2>/dev/null || true; echo "recording: $out/recording.mp4 ($(du -h "$out/recording.mp4" 2>/dev/null | cut -f1))"; fi
   sleep 2
@@ -430,7 +471,7 @@ cp "$ZOMBOID/console.txt" "$out/console.txt"
 cp "$ZOMBOID"/pzopt-*.out "$out/" 2>/dev/null || true
 cp "$PZ_DIR/pzopt.properties" "$out/pzopt.properties"
 cp "$LAUNCHER" "$out/ProjectZomboid64.json"
-{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=$lead"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
+{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
 # gc.log rolls over (filecount=3); keep the segments that were written during this run
 for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
   [[ -f "$g" ]] || continue

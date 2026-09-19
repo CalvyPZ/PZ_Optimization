@@ -28,14 +28,22 @@ import zombie.vehicles.BaseVehicle;
  *   vehicle  script    drive mode: vehicle spawned on the nearest road when the player is on foot (default the race car; "none" = fixture required)
  *   kmh      km/h      drive mode: cruise-control speed (default 60); the route follows the road (roadFollow)
  *   speed    tiles/s   default 18 (about car speed on a road)
- *   settle   seconds   wait after the world is up before moving (default 15)
+ *   settle   seconds   wait after the world is up before moving (default 15; harness/run.sh passes 5: the
+ *                      load burst and the forced-zoom bake are over ~2 s after the world is up)
  *   zoom     max|level  force the camera zoom before the route (auto-zoom off); drive mode defaults to max, other modes keep the save's zoom
  *   max_seconds        drive mode: give up (route_status=timeout) after this long on the route (default 90)
  *   route_start_epoch  unix seconds: do not start the route before this instant (puts the route on the
- *                      schedule the external MangoHud log was configured for); ignored when absent
+ *                      schedule the external MangoHud log was configured for); absent = the route starts
+ *                      settle seconds after the world is up, whenever that is
  *   mangohud_end_epoch unix seconds at which the MangoHud log closes; the game stays up until then
  *                      (a few seconds past the route end on schedule), because MangoHud only writes
  *                      its CSV if the log ends while the game runs
+ *   mangohud_secs      length of the external log; when mangohud_end_epoch is absent the log is assumed to
+ *                      start 3 s before the route (run.sh starts it via mangohudctl) and the linger is derived
+ *
+ * Whatever the flags, the instant the route will start is published as soon as the world is up in
+ * Zomboid/pzopt-schedule.out (world_ready_epoch_ms, route_start_epoch_ms, log_end_epoch_ms): run.sh
+ * waits for that file and times the external log and the fps-metrics reset off it.
  *
  * bench and parity retain the teleport control route. drive uses the vehicle's
  * normal CarController input path and completes from observed vehicle
@@ -47,6 +55,10 @@ public final class Harness {
    public static final boolean REQUESTED = "bench".equals(HarnessFlags.get("mode")) || "parity".equals(HarnessFlags.get("mode")) || "drive".equals(HarnessFlags.get("mode"));
    private static final int IDLE = 0, WAIT_WORLD = 1, SETTLE = 2, RUN = 3, LINGER = 5, DONE = 4;
    private static long lingerUntilEpochMs;
+   /** Instant the route starts (unix ms), fixed at world-ready: max(route_start_epoch, world ready + settle). */
+   private static long plannedStartEpochMs;
+   /** Derived end of the external log when mangohud_end_epoch is absent (0 = none). */
+   private static long derivedLogEndEpochMs;
    private static int state = IDLE;
    private static boolean started;
    private static final String DEFAULT_ROUTE = "E:400,S:500,W:400,N:500";
@@ -103,6 +115,23 @@ public final class Harness {
     * world 10 s later, quitToDesktop() (GameWindow.closeRequested), and 10 s after that System.exit:
     * a benchmark run must never sit in the world waiting for a click.
     */
+   /** Publishes the instants run.sh needs to time the external log; written whole, then renamed into place. */
+   private static void writeSchedule(long worldReadyMs) {
+      File dir = new File(ZomboidFileSystem.instance.getCacheDir());
+      File tmp = new File(dir, "pzopt-schedule.out.tmp");
+      File f = new File(dir, "pzopt-schedule.out");
+      try (java.io.FileWriter w = new java.io.FileWriter(tmp)) {
+         w.write("world_ready_epoch_ms=" + worldReadyMs + "\n");
+         w.write("route_start_epoch_ms=" + plannedStartEpochMs + "\n");
+         w.write("log_end_epoch_ms=" + derivedLogEndEpochMs + "\n");
+         w.write("settle=" + settle + "\n");
+      } catch (java.io.IOException e) {
+         Log.warn("harness: could not write " + tmp + ": " + e);
+         return;
+      }
+      if (!tmp.renameTo(f)) Log.warn("harness: could not rename " + tmp + " to " + f);
+   }
+
    private static void requestQuit() {
       quitRequestedEpochMs = System.currentTimeMillis();
       Log.info("harness: quit requested");
@@ -128,6 +157,7 @@ public final class Harness {
    /** Quit now, or after the external log has closed if the runner asked for that and the logger is actually present. */
    private static void quitWhenLogsAreDone() {
       long end = Long.parseLong(HarnessFlags.get("mangohud_end_epoch", "0")) * 1000L;
+      if (end == 0) end = derivedLogEndEpochMs;
       long wait = end - System.currentTimeMillis();
       if (wait > 0 && wait < 600_000L && mangoHudLoaded()) {
          Log.info("harness: lingering " + wait / 1000 + "s for the MangoHud log to close");
@@ -192,6 +222,22 @@ public final class Harness {
                 }
                 Log.info("harness: world ready, player at " + (int)x + "," + (int)y + "," + (int)p.getZ() + "; settling " + settle + "s");
                 Log.info("harness: MangoHud is " + (mangoHudLoaded() ? "loaded" : "NOT loaded") + " in this process");
+                long scheduled = Long.parseLong(HarnessFlags.get("route_start_epoch", "0")) * 1000L;
+                long nowMs = System.currentTimeMillis();
+                long earliest = nowMs + (long)(settle * 1000);
+                plannedStartEpochMs = Math.max(scheduled, earliest);
+                if (scheduled > 0) {
+                   // slack between the earliest possible route start (now + settle) and the fixed schedule; negative = the
+                   // route starts LATE and the harness --lead needs to grow
+                   Log.info("harness: route scheduled in " + (scheduled - nowMs) / 1000 + "s; lead margin after the settle time " + (scheduled - earliest) / 1000 + "s");
+                } else {
+                   Log.info("harness: route starts in " + settle + "s (no fixed schedule)");
+                }
+                long logSecs = Long.parseLong(HarnessFlags.get("mangohud_secs", "0"));
+                if (logSecs > 0 && HarnessFlags.get("mangohud_end_epoch", "").isEmpty()) {
+                   derivedLogEndEpochMs = plannedStartEpochMs - 3000L + logSecs * 1000L + 1000L;
+                }
+                writeSchedule(nowMs);
                 // zoom flag: "max" (drive mode default) or a level such as 2.5 / 1.0; unset = whatever the save had.
                 // Forced here, at the start of the settle time, so the burst of chunk-texture bakes a zoom change
                 // causes (hundreds of chunk levels come on screen at once: a 280 ms frame) is over before the route.
@@ -206,7 +252,7 @@ public final class Harness {
          }
          case SETTLE -> {
              long notBefore = Long.parseLong(HarnessFlags.get("route_start_epoch", "0")) * 1000L;
-             if ((nowNs - stateSinceNs) / 1e9f >= settle && System.currentTimeMillis() >= notBefore) {
+             if (System.currentTimeMillis() >= plannedStartEpochMs) {
                 if (notBefore > 0) {
                    long late = System.currentTimeMillis() - notBefore;
                    Log.info("harness: route start " + (late > 1500 ? "LATE by " + late / 1000 + "s (world load took longer than the lead; the external log window is short)" : "on schedule"));

@@ -22,7 +22,9 @@ OUT="$BUILD/classes"
 RELEASE="${RELEASE:-25}"   # java.class.version 69 in the shipped jar
 
 # Game classes we shadow. Every inner class of these is shadowed too.
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell)
+# The first six are edited decompiled copies (src/overrides/, not committed);
+# TISLogoState is a from-scratch replacement in src/shims/ (committed).
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 command -v javac >/dev/null || { echo "javac not on PATH" >&2; exit 1; }
@@ -31,7 +33,7 @@ rm -rf "$OUT" "$BUILD/stock"
 mkdir -p "$OUT" "$BUILD/stock"
 
 echo "compiling src/ against $JAR (--release $RELEASE)"
-mapfile -t sources < <(find "$SRC/overrides" "$SRC/pzopt" -name '*.java' | sort)
+mapfile -t sources < <(find "$SRC/overrides" "$SRC/shims" "$SRC/pzopt" -name '*.java' | sort)
 javac --release "$RELEASE" -nowarn -Xlint:-options -parameters -g \
   -cp "$JAR" -d "$OUT" "${sources[@]}"
 

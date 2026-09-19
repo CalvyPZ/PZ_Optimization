@@ -195,3 +195,14 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
     last scan and fewer than that many frames have passed (never skipped when
     `player.dirtyRecalcGridStack` is set); `recalculateAnyGridStacks` still
     runs every frame.
+
+## zombie.GameWindow
+
+One edit, in the boot sequence (`init`, between `Translator.loadFiles()` and
+`LuaManager.init()`): the call to `doEpilepsyWarningText()` is wrapped in
+`if (!pzopt.Overrides.enabled())`, so the photosensitivity warning frame is
+not drawn at start-up while the build guard is active. The method itself is
+unchanged. The class is otherwise verbatim Vineflower output (revision
+`b0bbce05d5`), which recompiles without fixes. Together with the committed
+`src/shims/zombie/gameStates/TISLogoState.java` (logo screens skipped), this
+is what gets a run from launch to the main menu with no splash screens.

@@ -1,7 +1,7 @@
 # PZ_Optimization
 
 Performance patches for **Project Zomboid Build 42** itself, the Java game, not a
-Lua mod. Drop-in `.class` overrides that shadow five game classes, remove the
+Lua mod. Drop-in `.class` overrides that shadow six game classes, remove the
 worst stalls from the chunk streamer and the renderer, and leave the shipped
 jar untouched. Every change has a one-line kill switch and every number below
 comes from a scripted, hands-off benchmark harness that ships in this repo.
@@ -254,7 +254,8 @@ only comparable at the same zoom, resolution and renderer.
 | Path | What |
 |---|---|
 | `src/pzopt/pzopt/` | New classes: `Config`, `Overrides`/`BuildInfo` (build guard), `RecalcPool`, `OrderedPublisher`, `StreamerWake`, `Stats` (instrumentation), `Harness`/`Parity` (benchmark driver), `Guard`, `Log` |
-| `src/overrides/` | Not committed. Our copies of the five shadowed game classes (`scripts/regen-overrides.sh` + `docs/override-edits.md`) |
+| `src/overrides/` | Not committed. Our copies of the six shadowed game classes (`scripts/regen-overrides.sh` + `docs/override-edits.md`) |
+| `src/shims/` | From-scratch replacements for game classes, no decompiled code: `TISLogoState` skips the start-up logo screens (~5 s) so a run reaches the main menu sooner |
 | `scripts/` | `build.sh`, `pzopt.sh`, `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh` (CFR, whole jar into `decompiled/`, gitignored), `pz-env.sh` |
 | `harness/` | `run.sh`, `steam-launch.sh`, `sysmon.sh`, `analyze.py`, `compare.py`, `attribute.py`, `dashboard.py`, `parity-gate.sh`, the `pzopt-harness` Lua mod, `baseline/` captures |
 | `config/` | MangoHud benchmark profile |

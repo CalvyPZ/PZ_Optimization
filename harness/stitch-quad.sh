@@ -9,7 +9,9 @@
 # Usage: harness/stitch-quad.sh [out.mp4]
 # Env:   ST_S60 ST_O60 ST_S120 ST_O120 (seconds into each recording where its
 #        clip begins: motion onset minus 1.5 s, measured by frame differencing;
-#        the route starts ~73-74 s after launch with --lead 75)
+#        the route started ~73-74 s after launch with --lead 75; since 2026-09-19
+#        run.sh starts the route settle s after the world is up, so read the
+#        offset from the run's pzopt-schedule.out / run.opts launch_epoch)
 #        LEN60 / LEN120 (clip length per row; the 120 km/h cells freeze on
 #        their last frame until the 60 km/h cells finish)
 set -euo pipefail
