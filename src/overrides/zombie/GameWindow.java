@@ -703,10 +703,21 @@ public final class GameWindow {
 
       DebugOptions.instance.init();
       GameProfiler.init();
-      SoundManager.instance = (BaseSoundManager)(Core.soundDisabled ? new DummySoundManager() : new SoundManager());
-      AmbientStreamManager.instance = (BaseAmbientStreamManager)(Core.soundDisabled ? new DummyAmbientStreamManager() : new AmbientStreamManager());
-      BaseSoundBank.instance = (BaseSoundBank)(Core.soundDisabled ? new DummySoundBank() : new FMODSoundBank());
-      VoiceManager.instance.loadConfig();
+      // pzopt: the sound singletons are built after the FMOD init (at once when it was synchronous, else at the
+      // join in initShared). SoundManager and AmbientStreamManager construct FMODGlobalParameters (MusicState,
+      // MusicIntensity, TimeOfDay, ...) whose constructors resolve their descriptions from the banks; built while
+      // the banks are still loading they resolve to null, never register, and the menu music never stops (issue #3).
+      // Core.soundDisabled is read here too, so a failed init on the thread still yields the Dummy managers.
+      pzopt.BootAsync.afterFmod(() -> {
+         SoundManager.instance = (BaseSoundManager)(Core.soundDisabled ? new DummySoundManager() : new SoundManager());
+         AmbientStreamManager.instance = (BaseAmbientStreamManager)(Core.soundDisabled ? new DummyAmbientStreamManager() : new AmbientStreamManager());
+         BaseSoundBank.instance = (BaseSoundBank)(Core.soundDisabled ? new DummySoundBank() : new FMODSoundBank());
+         VoiceManager.instance.loadConfig();
+         SoundManager.instance.setSoundVolume(Core.getInstance().getOptionSoundVolume() / 10.0F); // pzopt: the VCAs live in the banks
+         SoundManager.instance.setMusicVolume(Core.getInstance().getOptionMusicVolume() / 10.0F);
+         SoundManager.instance.setAmbientVolume(Core.getInstance().getOptionAmbientVolume() / 10.0F);
+         SoundManager.instance.setVehicleEngineVolume(Core.getInstance().getOptionVehicleEngineVolume() / 10.0F);
+      });
 
       while (!RenderThread.isRunning()) {
          Thread.yield();
@@ -714,12 +725,6 @@ public final class GameWindow {
 
       TextureID.useCompressionOption = Core.safeModeForced || Core.getInstance().getOptionTextureCompression();
       TextureID.useCompression = TextureID.useCompressionOption;
-      pzopt.BootAsync.afterFmod(() -> { // pzopt: the VCAs live in the banks; runs now unless the FMOD init is still on its thread
-         SoundManager.instance.setSoundVolume(Core.getInstance().getOptionSoundVolume() / 10.0F);
-         SoundManager.instance.setMusicVolume(Core.getInstance().getOptionMusicVolume() / 10.0F);
-         SoundManager.instance.setAmbientVolume(Core.getInstance().getOptionAmbientVolume() / 10.0F);
-         SoundManager.instance.setVehicleEngineVolume(Core.getInstance().getOptionVehicleEngineVolume() / 10.0F);
-      });
 
       try {
          ZomboidFileSystem.instance.init();
