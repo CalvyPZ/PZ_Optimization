@@ -1,7 +1,7 @@
 # PZ_Optimization
 
 Performance patches for **Project Zomboid Build 42** itself, the Java game, not a
-Lua mod. Drop-in `.class` overrides that shadow six game classes, remove the
+Lua mod. Drop-in `.class` overrides that shadow 23 game classes, remove the
 worst stalls from the chunk streamer and the renderer, and leave the shipped
 jar untouched. Every change has a one-line kill switch and every number below
 comes from a scripted, hands-off benchmark harness that ships in this repo.
@@ -174,16 +174,37 @@ install directory precedes the jar, so a loose `.class` file under it
 by deleting the file; the jar's checksum never changes. The jar is compiled
 but not obfuscated (class-file version 69, Java 25).
 
-Shadowed game classes: `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`,
-`zombie.iso.ChunkSaveWorker`, `zombie.core.VBO.GLVertexBufferObject`,
-`zombie.iso.fboRenderChunk.FBORenderCell`, `zombie.GameWindow`, and for the game
-load `zombie.fileSystem.FileSystemImpl`, `zombie.tileDepth.TileDepthTextures`,
-`zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`,
-`zombie.iso.IsoMetaGrid` (plus the two `org.lwjglx` window-shim classes). They are rebuilt from the installed
-jar with Vineflower (`scripts/regen-overrides.sh`) plus the edits listed in
-`docs/override-edits.md`, each marked `// pzopt:`. The decompiled game code is
-**not committed**; only the new `pzopt.*` helper classes and the prose
-description of the edits are.
+Shadowed game classes (23 in all: 20 in `zombie.*`, the two `org.lwjglx` window
+shims and the Kahlua `LuaCompiler`):
+
+- streaming and render: `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`,
+  `zombie.iso.ChunkSaveWorker`, `zombie.iso.IsoMetaCell`,
+  `zombie.core.VBO.GLVertexBufferObject`,
+  `zombie.iso.fboRenderChunk.FBORenderCell`, `zombie.GameWindow`,
+  `zombie.core.PerformanceSettings`
+- game load and boot: `zombie.fileSystem.FileSystemImpl`,
+  `zombie.fileSystem.TexturePackDevice`, `zombie.tileDepth.TileDepthTextures`,
+  `zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`,
+  `zombie.iso.IsoMetaGrid`, `zombie.gameStates.GameLoadingState`,
+  `zombie.buildingRooms.BuildingRoomsEditor`,
+  `zombie.core.skinnedmodel.advancedanimation.AnimationSet`,
+  `zombie.core.skinnedmodel.model.AnimationAssetManager`,
+  `zombie.scripting.ScriptParser`, `zombie.scripting.objects.Item`,
+  `se.krka.kahlua.luaj.compiler.LuaCompiler`
+- window shims: `org.lwjglx.opengl.Display`, `org.lwjglx.input.Mouse`
+
+They are rebuilt from the installed jar with Vineflower
+(`scripts/regen-overrides.sh`) plus the edits listed in
+`docs/override-edits.md`, each marked `// pzopt:`. The edited sources are
+committed under `src/overrides/` (shipping them was cleared on 2026-09-19);
+the full CFR decompile under `decompiled/` is not.
+
+This is the "manual class replacement" method from the
+[PZ wiki's Java page](https://pzwiki.net/wiki/Java), which the wiki marks as
+not recommended in favour of a mod loader (ZombieBuddy, Leaf). The trade-off
+is deliberate: a full replacement is the only way to restructure the streamer
+and the chunk renderer, and the consequences are listed under
+[Release notes and known limitations](#release-notes-and-known-limitations).
 
 Safety rails:
 
@@ -227,6 +248,73 @@ instrument=false
 Full key list with defaults: `src/pzopt/pzopt/Config.java`. `scripts/test.sh`
 runs the unit tests (no game needed); `scripts/accept.sh` is build → reinstall
 → parity gate against the stock recalc capture.
+
+## Release notes and known limitations
+
+Read this before installing the mod on a machine you play on.
+
+**Version pin.** The class files are compiled against one exact game build
+and refuse to run against any other. The current target is Build 42.20.4,
+jar revision `b0bbce05d5` (`scripts/pzopt.sh status` prints both). A full
+class replacement does not survive a game update the way a mod-loader patch
+would: every Build 42 patch needs a new release of this mod. Until that
+release exists the overrides disable themselves and log one line, and
+`scripts/pzopt.sh uninstall` removes them cleanly. Never copy the class files
+by hand from an older release onto a newer game.
+
+**Other Java mods.** Only one mod can replace a given class. Anything that
+also replaces `IsoChunk`, `WorldStreamer`, `GameWindow`, `Item`,
+`ScriptParser` or the other classes listed above will conflict, and whichever
+file is found first on the classpath wins silently. Mods built on ZombieBuddy
+or Leaf patch methods instead of replacing classes and can coexist as long as
+they do not patch the same methods. ZombieBuddy 2.3.3 with ZBBetterFPS was
+run on 42.20.4 with our class files installed but every runtime optimization
+switched off, and the agent loaded fine; running both sets of optimizations
+together has not been tested, and ZBBetterFPS's zombie-separation patch
+crashes on that build on its own (see `docs/results.md`).
+
+**Single-player only.** The overrides have only been tested in single-player.
+Several of them are server-side classes in multiplayer (`IsoChunk`,
+`WorldStreamer`, `ChunkSaveWorker`, `IsoMetaGrid`), and the PZ wiki requires
+that a class running on both sides be installed on both with matching copies.
+On a dedicated server the class files would go under the server's `java/`
+folder, not the install root. None of this has been exercised. Do not install
+the mod on a server or join a server with it until that work is done.
+
+**Security and file writes.** Build 42.20.4 removed Lua `loadstring` and
+restricted the file types Lua may write after a public vulnerability report
+([wiki summary](https://pzwiki.net/wiki/Java)). This mod does not widen either:
+
+- The `LuaCompiler` override only serves a cached compiled prototype of the
+  same source text the stock compiler would compile, keyed by the chunk's
+  name and contents. A cache miss goes through the stock path unchanged. No
+  new way to load Lua from strings or from the network is introduced.
+- All files the mod writes (animation clip cache, texture-pack index, Lua
+  precompile cache, frame-cap setting, boot trace) stay under
+  `~/Zomboid/pzopt/`. The game directory only receives the class files the
+  installer records in `pzopt-installed.txt`.
+
+**What is redistributed.** The release zip carries the compiled `.class`
+files, the `pzopt.*` helper package, the Lua options file and the prose edit
+log. The edited sources of the shadowed classes are in this repo under
+`src/overrides/` (permission to ship them was confirmed on 2026-09-19); the
+full decompile of the jar is not and never will be. The Steam Workshop cannot
+deliver loose class files, so a release is a zip plus the install script; the
+one manual step the wiki says every Java mod needs.
+
+**Release build contents.** The development install also carries the
+benchmark harness classes (`pzopt.Harness`, `pzopt.AutoStart`,
+`pzopt.Parity`, `pzopt.Stats`, `pzopt.ScriptDump`) and a `pzopt.properties`
+with `uncappedFps=true`. A release build must strip the harness classes,
+ship no `pzopt.properties` (the adopted defaults are compiled in), and
+package the Lua options file as a proper mod folder with a `mod.info` so it
+can be enabled from the in-game mod list instead of being dropped into the
+install.
+
+**Platforms.** Tested only on the native Linux depot with NVIDIA GL under
+XWayland (Mesa Zink and native Wayland measured, see `docs/results.md`).
+The install script needs bash and Python 3; Windows users would copy
+`build/classes/` into the game folder by hand until a script exists.
 
 ## Benchmark harness
 
@@ -277,7 +365,7 @@ only comparable at the same zoom, resolution and renderer.
 | Path | What |
 |---|---|
 | `src/pzopt/pzopt/` | New classes: `Config`, `Overrides`/`BuildInfo` (build guard), `RecalcPool`, `OrderedPublisher`, `StreamerWake`, `Stats` (instrumentation), `Harness`/`Parity` (benchmark driver), `Guard`, `Log` |
-| `src/overrides/` | Not committed. Our copies of the six shadowed game classes (`scripts/regen-overrides.sh` + `docs/override-edits.md`) |
+| `src/overrides/` | Our copies of the 23 shadowed game classes, edits marked `// pzopt:` (`scripts/regen-overrides.sh` + `docs/override-edits.md`) |
 | `src/shims/` | From-scratch replacements for game classes, no decompiled code: `TISLogoState` skips the start-up logo screens (~5 s) so a run reaches the main menu sooner |
 | `scripts/` | `build.sh`, `pzopt.sh`, `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh` (CFR, whole jar into `decompiled/`, gitignored), `pz-env.sh` |
 | `harness/` | `run.sh`, `steam-launch.sh`, `sysmon.sh`, `analyze.py`, `compare.py`, `attribute.py`, `dashboard.py`, `parity-gate.sh`, the `pzopt-harness` Lua mod, `baseline/` captures |

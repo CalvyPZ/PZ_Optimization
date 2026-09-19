@@ -2,7 +2,7 @@
 
 Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/`:
 
-- `src/overrides/` (gitignored, local only): Vineflower decompiles of the game classes we
+- `src/overrides/` (committed since 2026-09-19): Vineflower decompiles of the game classes we
   shadow, with our edits applied. Shadowed list is `OVERRIDES` in `scripts/build.sh`:
   IsoChunk, WorldStreamer, ChunkSaveWorker, GLVertexBufferObject, FBORenderCell, GameWindow,
   TISLogoState, org.lwjglx Display and Mouse, FileSystemImpl, TileDepthTextures,
@@ -11,9 +11,9 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   BuildingRoomsEditor, GameLoadingState, se.krka LuaCompiler, AnimationSet,
   AnimationAssetManager, TexturePackDevice, scripting.objects.Item, and PerformanceSettings
   (frame limiter, 2026-09-19). Inner classes are shadowed too.
-  **Every edit is described in prose in `docs/override-edits.md`; never commit or quote the
-  game source.** Missing on a fresh clone: regenerate with `scripts/regen-overrides.sh` and
-  re-apply the documented edits.
+  **Every edit is described in prose in `docs/override-edits.md` and marked `// pzopt:` in the
+  source.** After a game update, `scripts/regen-overrides.sh` decompiles the new jar so the
+  edits can be re-applied on top.
 - `src/lua/`: loose game-dir Lua (`client/pzopt/*.lua`); build.sh copies it under
   `build/classes/media/lua/` so `pzopt.sh` installs it into the game dir's `media/lua/` with the
   classes. No mod to enable. Currently the "Menu framerate" Display-options combo.

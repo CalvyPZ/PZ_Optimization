@@ -14,9 +14,10 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
 
 ## Hard rules
 
-- **Never commit game code.** `decompiled/` and `src/overrides/` are gitignored and stay local.
-  Never `git add` them, never paste game source into committed docs. Every edit to an
-  overridden class is described in prose in `docs/override-edits.md`.
+- **`decompiled/` stays local** (gitignored, 24 MB CFR output of the whole jar). Never `git add`
+  it. `src/overrides/` (the 23 shadowed classes with our `// pzopt:` edits) IS committed since
+  2026-09-19: Diego confirmed the sources may ship. Every edit is still described in prose in
+  `docs/override-edits.md`, and the `// pzopt:` markers stay on every changed line.
 - **Shared machine.** Several Claude sessions and Diego use the one game install and `~/Zomboid`.
   Before a launch or a reinstall check both `pgrep -f '[P]rojectZomboid64'` and
   `pgrep -f '[h]arness/run.sh'` (excluding your own). Message busy peers (ListAgents /
@@ -107,7 +108,9 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   rewrites options.ini and a cap above 244 lives in framecap.ini (`gameFps=`); forced
   `uncappedFps=` runs restore the player's choice on the next boot (`restore=`).
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
-- Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`.
+- Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
+  wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under
+  GLX). `docs/plan-wayland.md`.
 - Proton run prepared but blocked on Diego forcing a compat tool in Steam.
 - Boot/load (2026-09-19 evening, `docs/plan-instant-load.md`): launch → menu 7.35 → 5.00 s,
   Continue → world 6.53 → 4.03 s, via boot threads (FMOD, anim sets), a boot-time file-pool
