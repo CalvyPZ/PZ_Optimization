@@ -43,7 +43,8 @@ import zombie.vehicles.BaseVehicle;
  *
  * Whatever the flags, the instant the route will start is published as soon as the world is up in
  * Zomboid/pzopt-schedule.out (world_ready_epoch_ms, route_start_epoch_ms, log_end_epoch_ms): run.sh
- * waits for that file and times the external log and the fps-metrics reset off it.
+ * waits for that file and times the external log and the fps-metrics reset off it. When run.sh has
+ * stopped the log itself it drops Zomboid/pzopt-logdone, which ends the linger early.
  *
  * bench and parity retain the teleport control route. drive uses the vehicle's
  * normal CarController input path and completes from observed vehicle
@@ -373,7 +374,8 @@ public final class Harness {
             }
          }
          case LINGER -> {
-            if (System.currentTimeMillis() >= lingerUntilEpochMs) {
+            // run.sh drops pzopt-logdone once it has closed the external log itself (control socket)
+            if (System.currentTimeMillis() >= lingerUntilEpochMs || new File(ZomboidFileSystem.instance.getCacheDir(), "pzopt-logdone").isFile()) {
                state = DONE;
                requestQuit();
             }

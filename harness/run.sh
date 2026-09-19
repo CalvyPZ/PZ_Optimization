@@ -348,7 +348,7 @@ while :; do
     route_start_epoch=$((launch_epoch + lead))
     [[ -n "$mangohud_secs" ]] && mangohud_end_epoch=$((launch_epoch + lead - 3 + mangohud_secs + 1))
   fi
-  rm -f "$ZOMBOID/pzopt-schedule.out"
+  rm -f "$ZOMBOID/pzopt-schedule.out" "$ZOMBOID/pzopt-logdone"
   write_flags
   echo "launching app $APPID (mode=$mode quit_after=${quit_after:-none}, attempt $attempt); output -> $out"
   start=$(date +%s)
@@ -399,35 +399,79 @@ while :; do
   echo "game running (pid $game_pid); waiting for exit"
   # Scheduler: waits for the harness to publish the route start (pzopt-schedule.out, written at
   # world-ready), starts the MangoHud log 3 s before it unless --lead put autostart_log in charge,
-  # and on drive runs presses MangoHud's reset keybind (reset_fps_metrics=Shift_R+F9, the default)
+  # on drive runs presses MangoHud's reset keybind (reset_fps_metrics=Shift_R+F9, the default)
   # through XTEST just as the route starts, because its avg / 1% / 0.1% FPS accumulate from process
-  # start (menus, world load); the game is an XWayland window, so xdotool reaches it.
+  # start (menus, world load; the game is an XWayland window, so xdotool reaches it), and stops the
+  # log 2 s after the route ends so the CSV is written at once and the game can quit
+  # (pzopt-logdone flag, read by pzopt.Harness's linger state) instead of waiting out log_duration.
+  # Everything it does is echoed to <run>/schedule.log as well.
+  # The control socket (control=mangoapp, abstract unix socket) speaks ":cmd=param;" and the game
+  # accepts a client once per frame, then greets it; a client that sends and hangs up before that
+  # (mangohudctl does) is dropped with its message unread. mh_control waits for the greeting first.
   sched_pid=""
   if [[ -n "$mangohud_secs" ]]; then
-    ( sched="$ZOMBOID/pzopt-schedule.out"; start_ms=""
+    ( sched="$ZOMBOID/pzopt-schedule.out"; start_ms=""; slog="$out/schedule.log"
+      say() { echo "$*" | tee -a "$slog"; }
+      mh_control() {  # mh_control ':logging=1;'  -> 0 when the command was delivered to the overlay
+        python3 - "$1" <<'PYC'
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(3)
+try:
+    s.connect(b"\0mangoapp")
+    s.recv(512)                       # ":MangoHudControlVersion=1;:DeviceName=...;" - sent once the game accepted us
+    s.sendall(sys.argv[1].encode()); time.sleep(0.3); s.close()
+except OSError as e:
+    print("control socket: " + str(e), file=sys.stderr); sys.exit(1)
+PYC
+      }
       for _ in $(seq 1 1200); do   # up to 240 s for the world to come up
         [[ -f "$sched" ]] && start_ms=$(sed -n 's/^route_start_epoch_ms=//p' "$sched") && [[ -n "$start_ms" ]] && break
         kill -0 "$game_pid" 2>/dev/null || exit 0; sleep 0.2
       done
-      [[ -n "$start_ms" ]] || { echo "schedule: the harness never published a route start (no pzopt-schedule.out)" >&2; exit 0; }
+      [[ -n "$start_ms" ]] || { say "schedule: the harness never published a route start (no pzopt-schedule.out)" >&2; exit 0; }
       ready_ms=$(sed -n 's/^world_ready_epoch_ms=//p' "$sched")
-      echo "schedule: world ready $(( (ready_ms - launch_epoch*1000) / 1000 )) s after launch; route starts at +$(( (start_ms - launch_epoch*1000) / 1000 )) s"
+      say "schedule: world ready $(( (ready_ms - launch_epoch*1000) / 1000 )) s after launch; route starts at +$(( (start_ms - launch_epoch*1000) / 1000 )) s"
       sleep_until_ms() { local d=$(( $1 - $(date +%s%3N) )); (( d > 0 )) && sleep "$(printf '%d.%03d' $((d/1000)) $((d%1000)))"; return 0; }
+      new_csv() { find "$MH_OUT" -name '*.csv' ! -name '*_summary.csv' -newermt "@$launch_epoch" 2>/dev/null | grep -q .; }
       if [[ -z "$lead" ]]; then
         sleep_until_ms $((start_ms - 3000))
-        if mangohudctl set log_session 1 >/dev/null 2>&1; then
-          echo "mangohud: log started through the control socket at +$(( $(date +%s) - launch_epoch )) s"
-        elif command -v xdotool >/dev/null; then
+        started=0
+        for attempt in 1 2 3; do
+          if mh_control ':logging=1;' 2>>"$slog"; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do new_csv && { started=1; break; }; sleep 0.3; done   # the CSV appears with the first logged frame
+            (( started )) && { say "mangohud: log started through the control socket at +$(( $(date +%s) - launch_epoch )) s (attempt $attempt)"; break; }
+            say "mangohud: command delivered but no CSV appeared (attempt $attempt)" >&2
+          else
+            say "mangohud: control socket not reachable (attempt $attempt)" >&2; sleep 1
+          fi
+        done
+        if (( ! started )) && command -v xdotool >/dev/null; then
           xdotool keydown Shift_L keydown F2; sleep 0.3; xdotool keyup F2 keyup Shift_L
-          echo "mangohud: control socket unreachable; toggle_logging key sent at +$(( $(date +%s) - launch_epoch )) s" >&2
-        else
-          echo "mangohud: could not start the log (no control socket, no xdotool); use --lead for the fixed schedule" >&2
+          say "mangohud: falling back to the toggle_logging key at +$(( $(date +%s) - launch_epoch )) s" >&2
+        elif (( ! started )); then
+          say "mangohud: could not start the log (no control socket, no xdotool); use --lead for the fixed schedule" >&2
         fi
       fi
       if [[ "$mode" == drive ]] && command -v xdotool >/dev/null; then
         sleep_until_ms $((start_ms + 500))
         xdotool keydown Shift_R keydown F9; sleep 0.3; xdotool keyup F9 keyup Shift_R
-        echo "mangohud: fps metrics reset key sent $(( $(date +%s) - launch_epoch )) s after launch"
+        say "mangohud: fps metrics reset key sent $(( $(date +%s) - launch_epoch )) s after launch"
+      fi
+      # route end: pzopt-bench.out is written when the route finishes (or is rejected / times out)
+      bench="$ZOMBOID/pzopt-bench.out"
+      for _ in $(seq 1 3000); do   # up to 10 min
+        [[ -f "$bench" ]] && break
+        kill -0 "$game_pid" 2>/dev/null || exit 0; sleep 0.2
+      done
+      [[ -f "$bench" ]] || exit 0
+      if [[ -z "$lead" ]]; then
+        sleep 2
+        if mh_control ':logging=0;' 2>>"$slog"; then
+          say "mangohud: log stopped through the control socket at +$(( $(date +%s) - launch_epoch )) s"
+          sleep 1; : > "$ZOMBOID/pzopt-logdone"   # lets the harness quit instead of lingering to log_end_epoch
+        else
+          say "mangohud: could not stop the log; the game lingers until log_duration elapses" >&2
+        fi
       fi ) &
     sched_pid=$!
   fi
