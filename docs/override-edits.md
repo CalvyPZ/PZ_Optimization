@@ -204,20 +204,43 @@ Two edits. In the boot sequence (`init`, between `Translator.loadFiles()` and
 not drawn at start-up while the build guard is active. The method itself is
 unchanged.
 
-In `mainThreadStep` (added 2026-09-19): the frame-rate cap is removed. Stock
-runs `frameStep()` only when the `accumulator` has reached
+In `mainThreadStep` (edited 2026-09-19, reverted to stock later that day): the
+stock limiter is back. `frameStep()` runs once the `accumulator` reaches
 `1 s / PerformanceSettings.getLockFPS()` (the `frameRate=` value from
-options.ini, 240 at most), and the game's own "uncapped" option is dead code
-because `Core.loadOptions` resets `uncappedFPS` to false and the lock to 60
-whenever it is set. The override's condition is now
-`isFramerateUncapped() || pzopt.Overrides.enabled()`, so with the build guard
-active every main-loop iteration is a frame; the stock limiter still runs
-when the guard is off. Nothing else consults the cap for timing
-(`GameTime` uses measured deltas); the only other reader is Lua's
-`getAverageFPS`, which clamps the displayed number to the lock value, so the
-in-game FPS readout may show 240 while MangoHud shows the real rate. The
-harness metric "frames below 240 fps cap" (`harness/analyze.py`
-`FPS_TARGET`) keeps its meaning as the share of frames slower than 4.17 ms.
+options.ini) unless `isFramerateUncapped()`, exactly as in stock. Earlier that
+day the condition had `|| pzopt.Overrides.enabled()` appended, which made every
+main-loop iteration a frame whenever the build guard was active; that removed
+the player's choice, so it was undone.
+
+In `mainThreadStep` (second edit, 2026-09-19): the two reads of the cap,
+`isFramerateUncapped()` and `getLockFPS()`, go through `pzopt.FrameCap.uncappedNow()`
+and `lockNow()`. Those return the in-game values while a world is up or loading
+(`isIngameState()` or the current state is `GameLoadingState`) and the separate
+menu cap otherwise; with the build guard off or the menu cap left at "same as
+in-game" they are the stock values, so the loop shape is unchanged. After each
+`frameStep()` (both branches) one call to `pzopt.FrameCap.onFrame(now)` counts frames
+per phase and prints one console line per menu/game transition
+("frame cap: menu phase 3.2 s, 144 frames, 45.0 fps (cap 45 fps)"), which is
+how a hands-off run verifies the menu cap.
+
+In `InitDisplay` (added 2026-09-19): one call to `pzopt.FrameCap.afterLoadOptions()`
+right after `Core.loadOptions()` (both branches), before the sprite renderer is
+created. Stock ships an "Uncapped" entry for the frame-rate combo in
+`MainOptions.lua` but it is dead twice over: nothing ever sets the
+`SystemDisabler` flag that gates the entry, and `Core.loadOptions` resets a saved
+`uncappedFPS=true` to a 60 fps lock. `FrameCap` sets that flag so the combo shows
+"Uncapped", then re-reads the `frameRate=` / `uncappedFPS=` lines from
+options.ini and re-applies them to `PerformanceSettings`, so what the player
+picks in Display options survives a restart. It also loads the menu cap from
+`Zomboid/pzopt/framecap.ini`. Config key `uncappedFps`: `auto` (default) honours
+options.ini, `true` / `false` force the in-game cap off / on for one run
+(`harness/run.sh --prop uncappedFps=true`). No-op when the build guard is off.
+Nothing else consults the cap for timing (`GameTime` uses measured deltas);
+Lua's `getAverageFPS` clamps the displayed number to the in-game lock value
+only when capped. The harness metric "frames below 240 fps cap"
+(`harness/analyze.py` `FPS_TARGET`) keeps its meaning as the share of frames
+slower than 4.17 ms.
+
 The class is otherwise verbatim Vineflower output (revision
 `b0bbce05d5`), which recompiles without fixes. Together with the committed
 `src/shims/zombie/gameStates/TISLogoState.java` (logo screens skipped), this
@@ -499,3 +522,19 @@ case-insensitive comparisons per item parameter. Both callers trim the key
 before calling, so the comparison semantics are the same. Verified with the
 `dumpItems` field dump (`pzopt.ScriptDump`) of every item script: identical
 with the switch on and off.
+
+## zombie.core.PerformanceSettings (added 2026-09-19, frame limiter)
+
+Three public instance methods added, nothing else touched: `getMenuFramerateIndex`,
+`setMenuFramerateIndex(int)` and `getMenuFramerateChoices`, each a one-line
+forward to `pzopt.FrameCap`. The class is exposed to Lua (`getPerformance()`),
+so the added methods are what the "Menu framerate" combo calls; the combo itself
+is `src/lua/client/pzopt/pzopt_framecap_options.lua`, installed loose into the
+game dir's `media/lua/client/pzopt/` by `scripts/pzopt.sh` (build.sh copies
+`src/lua/` under `build/classes/media/lua/`). The Lua wraps `MainOptions:addCombo`
+and, right after the stock "Framerate" combo is added, adds a second one whose
+entries are "Same as in-game", "Uncapped" and the stock fps table; index 1 / 2 /
+3.. is the convention `FrameCap` stores in `Zomboid/pzopt/framecap.ini`
+(`menuFramerateIndex=`), written the moment the option is applied because
+`Core.saveOptions` only writes keys it knows. Menu means every state that is not
+in-game or loading: logo, main menu, options, character creation.

@@ -25,7 +25,7 @@ RELEASE="${RELEASE:-25}"   # java.class.version 69 in the shipped jar
 # The edited decompiled copies live in src/overrides/ (not committed); the two org.lwjglx classes are
 # The Indie Stone's LWJGL 2 compatibility shim (HiDPI/Wayland fix, see docs/override-edits.md);
 # TISLogoState is a from-scratch replacement in src/shims/ (committed).
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState org/lwjglx/opengl/Display org/lwjglx/input/Mouse zombie/fileSystem/FileSystemImpl zombie/tileDepth/TileDepthTextures zombie/core/textures/TextureIDAssetManager zombie/MapCollisionData zombie/iso/IsoMetaGrid zombie/scripting/ScriptParser zombie/iso/IsoMetaCell zombie/buildingRooms/BuildingRoomsEditor zombie/gameStates/GameLoadingState se/krka/kahlua/luaj/compiler/LuaCompiler zombie/core/skinnedmodel/advancedanimation/AnimationSet zombie/core/skinnedmodel/model/AnimationAssetManager zombie/fileSystem/TexturePackDevice zombie/scripting/objects/Item)
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState org/lwjglx/opengl/Display org/lwjglx/input/Mouse zombie/fileSystem/FileSystemImpl zombie/tileDepth/TileDepthTextures zombie/core/textures/TextureIDAssetManager zombie/MapCollisionData zombie/iso/IsoMetaGrid zombie/scripting/ScriptParser zombie/iso/IsoMetaCell zombie/buildingRooms/BuildingRoomsEditor zombie/gameStates/GameLoadingState se/krka/kahlua/luaj/compiler/LuaCompiler zombie/core/skinnedmodel/advancedanimation/AnimationSet zombie/core/skinnedmodel/model/AnimationAssetManager zombie/fileSystem/TexturePackDevice zombie/scripting/objects/Item zombie/core/PerformanceSettings)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 command -v javac >/dev/null || { echo "javac not on PATH" >&2; exit 1; }
@@ -37,6 +37,13 @@ echo "compiling src/ against $JAR (--release $RELEASE)"
 mapfile -t sources < <(find "$SRC/overrides" "$SRC/shims" "$SRC/pzopt" -name '*.java' | sort)
 javac --release "$RELEASE" -nowarn -Xlint:-options -parameters -g \
   -cp "$JAR" -d "$OUT" "${sources[@]}"
+
+# Loose Lua under src/lua/ ships next to the classes: install copies build/classes/ onto the
+# game dir, so build/classes/media/lua/client/pzopt/*.lua lands in media/lua/client/pzopt/.
+if [[ -d "$SRC/lua" ]]; then
+  mkdir -p "$OUT/media/lua"
+  cp -r "$SRC/lua/." "$OUT/media/lua/"
+fi
 
 # Extract the stock copies of the overridden classes for comparison.
 patterns=()

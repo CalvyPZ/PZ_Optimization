@@ -1,6 +1,6 @@
 # src/
 
-Three source roots, compiled together by `scripts/build.sh`:
+Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/`:
 
 - `src/overrides/` (gitignored, local only): Vineflower decompiles of the game classes we
   shadow, with our edits applied. Shadowed list is `OVERRIDES` in `scripts/build.sh`:
@@ -9,10 +9,14 @@ Three source roots, compiled together by `scripts/build.sh`:
   TextureIDAssetManager, MapCollisionData, IsoMetaGrid, and since the boot/load work
   (2026-09-19 evening, `docs/plan-instant-load.md`): ScriptParser, IsoMetaCell,
   BuildingRoomsEditor, GameLoadingState, se.krka LuaCompiler, AnimationSet,
-  AnimationAssetManager, TexturePackDevice, scripting.objects.Item. Inner classes are shadowed too.
+  AnimationAssetManager, TexturePackDevice, scripting.objects.Item, and PerformanceSettings
+  (frame limiter, 2026-09-19). Inner classes are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md`; never commit or quote the
   game source.** Missing on a fresh clone: regenerate with `scripts/regen-overrides.sh` and
   re-apply the documented edits.
+- `src/lua/`: loose game-dir Lua (`client/pzopt/*.lua`); build.sh copies it under
+  `build/classes/media/lua/` so `pzopt.sh` installs it into the game dir's `media/lua/` with the
+  classes. No mod to enable. Currently the "Menu framerate" Display-options combo.
 - `src/shims/`: small replacement classes (e.g. the TISLogoState shim that skips the boot
   splash screens).
 - `src/pzopt/pzopt/`: our own package, committed.
@@ -21,7 +25,8 @@ Three source roots, compiled together by `scripts/build.sh`:
 
 | Class | Role |
 |---|---|
-| `Config` | runtime keys read from `pzopt.properties` in the game dir; DEFAULTS are the adopted optimizations (parallel, workers, wake, persistentVbo, trees/windows/translucentTiles InChunkTexture, bakeBudget 8, lightingBudget 8, hotsaveIntervalSec 30, cutawayFast, fileThreads, parallelDepthMaps, loaderCpuFixes, loadWorkers). `instrument=false` by default: harness runs pass `--prop instrument=true`. |
+| `FrameCap` | frame limiter: enables the stock "Uncapped" combo entry, re-applies the saved frameRate/uncappedFPS that `Core.loadOptions` resets, and holds the separate menu cap (`~/Zomboid/pzopt/framecap.ini`) the main loop reads via `uncappedNow()`/`lockNow()`; the "Menu framerate" combo is `src/lua/client/pzopt/pzopt_framecap_options.lua`, shipped loose into the game dir |
+| `Config` | runtime keys read from `pzopt.properties` in the game dir; DEFAULTS are the adopted optimizations (parallel, workers, wake, persistentVbo, trees/windows/translucentTiles InChunkTexture, bakeBudget 8, lightingBudget 8, hotsaveIntervalSec 30, cutawayFast, fileThreads, parallelDepthMaps, loaderCpuFixes, loadWorkers). `instrument=false` by default: harness runs pass `--prop instrument=true`. `uncappedFps=auto` honours the in-game frame-rate option; `true`/`false` force it per run. |
 | `RecalcPool` / `OrderedPublisher` / `StreamerWake` | parallel chunk recalc workers, ordered publication, waking the streamer |
 | `Harness` / `HarnessFlags` / `AutoStart` | in-game harness: reads the flag file, auto-continues into the bench save, presses click-to-start (bench/parity/drive only, never verify), forces zoom, drives the route (`roadFollow`), writes `pzopt-schedule.out`, `pzopt-bench.out` |
 | `Stats` | `pzopt-frames.out` / `pzopt-chunks.out` samplers |

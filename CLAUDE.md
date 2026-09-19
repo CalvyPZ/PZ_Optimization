@@ -90,6 +90,9 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   bakeBudget=8, lightingBudget=8, hotsaveIntervalSec=30, on top of wake + recalc pool.
 - Remaining tail with the PZDashboard mod is its 2 s collectors; measure with `--no-dashboard`.
 - Uncapped: NVIDIA GL is GPU-bound (98 %) at 570 fps; Zink blocks ~1.8 ms/frame in swap.
+  The in-game limiter is stock again; "Uncapped" is a real Display-options entry and a
+  second "Menu framerate" combo caps the menus separately (`pzopt.FrameCap`, Lua under
+  `src/lua/`, setting in `~/Zomboid/pzopt/framecap.ini`). Uncapped runs: `--prop uncappedFps=true`.
   `uiRenderOffscreen=true` in options.ini removes the per-frame Lua UI draw.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`.

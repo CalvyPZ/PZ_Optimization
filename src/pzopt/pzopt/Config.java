@@ -112,6 +112,8 @@ public final class Config {
    public static final boolean LUA_PRECOMPILE = bool("luaPrecompile", true);
    public static final boolean PRELOAD_ANIM_SETS = bool("preloadAnimSets", true);
    public static final boolean ANIM_CLIP_CACHE = bool("animClipCache", true);
+   /** auto = honour options.ini (frameRate / uncappedFPS); true / false force the frame cap off / on for a run. */
+   public static final String UNCAPPED_FPS = string("uncappedFps", "auto");
    public static final boolean PACK_INDEX = bool("packIndex", true);
    public static final boolean ITEM_PARAM_SWITCH = bool("itemParamSwitch", true);
    public static final boolean DUMP_ITEMS = bool("dumpItems", false);
@@ -142,6 +144,11 @@ public final class Config {
    private static boolean bool(String key, boolean def) {
       String v = raw(key);
       return v == null ? def : Boolean.parseBoolean(v.trim());
+   }
+
+   private static String string(String key, String def) {
+      String v = raw(key);
+      return v == null ? def : v.trim();
    }
 
    private static int integer(String key, int def) {
