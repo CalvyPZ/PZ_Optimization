@@ -383,7 +383,7 @@ def print_summary(s):
         def f(k, unit=""):
             d = sm.get(k)
             return f"{k} {d['mean']:.0f}{unit} (p10 {d['p10']:.0f}, p90 {d['p90']:.0f})" if d else None
-        parts = [x for x in (f("cpu_pct", "%"), f("cpu_busiest_core_pct", "%"), f("game_cpu_pct", "% of a core"), f("gpu_pct", "%"), f("gpu_sm_mhz", "MHz"), f("gpu_w", "W")) if x]
+        parts = [x for x in (f("cpu_pct", "%"), f("cpu_busiest_core_pct", "%"), f("game_cpu_pct", "% of a core"), f("gpu_pct", "%"), f("gpu_sm_mhz", "MHz"), f("gpu_w", "W"), f("bat_w", "W battery")) if x]
         print(f"machine (sysmon, {sm[next(iter(sm))]['n']} samples in the route window): " + "; ".join(parts))
     t = s.get("threads")
     if t and t["threads"]:

@@ -432,7 +432,7 @@ if [[ -n "$mangohud_secs" && "$launcher" == steam ]] && ! grep -a -q 'harness: M
 fi
 if [[ -n "$mangohud_secs" ]]; then
   # newest MangoHud csv written since launch
-  mh=$(find "$MH_OUT" -name '*.csv' -newermt "@$launch_epoch" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+  mh=$(find "$MH_OUT" -name '*.csv' ! -name '*_summary.csv' -newermt "@$launch_epoch" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
   if [[ -n "$mh" ]]; then cp "$mh" "$out/mangohud.csv"; basename "$mh" > "$out/mangohud.name"; echo "mangohud log: $mh"; else echo "no MangoHud log found in $MH_OUT" >&2; fi
 fi
 echo "run took $((end-start))s (attempt $attempt$( (( crashed )) && echo ', CRASHED')); log at $out/console.txt"

@@ -48,6 +48,8 @@ METRICS = [
     ("busiest core (sysmon)", lambda s: s["sysmon"]["cpu_busiest_core_pct"]["mean"], "%", False, 3.0),
     ("GPU load (sysmon)", lambda s: s["sysmon"]["gpu_pct"]["mean"], "%", False, 3.0),
     ("GPU SM clock (sysmon)", lambda s: s["sysmon"]["gpu_sm_mhz"]["mean"], "MHz", False, 50.0),
+    ("GPU power (sysmon)", lambda s: s["sysmon"]["gpu_w"]["mean"], "W", True, 0.5),
+    ("battery draw (sysmon)", lambda s: s["sysmon"]["bat_w"]["mean"], "W", True, 0.5),
     ("game thread CPU share", lambda s: thread_share(s, "MainThread"), "%", True, 3.0),
     # the GL thread is "Render Thread" on the Windows build and "main" on the native Linux build
     ("render thread CPU share", lambda s: thread_share(s, "Render Thread", "main"), "%", True, 3.0),
