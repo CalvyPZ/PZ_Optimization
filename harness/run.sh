@@ -23,6 +23,9 @@
 #   --jfr            record a JFR flight recording of the run (settings=profile, dumped on exit)
 #                    by adding -XX:StartFlightRecording to the launcher JSON's vmArgs; collected as pzopt.jfr
 #   --jfr-period N   execution-sample period in ms for --jfr (default: the profile setting's 10 ms)
+#   --jfr-setting event#setting=value   extra JFR event setting for --jfr (repeatable), e.g.
+#                    jdk.JavaMonitorWait#threshold=0ms jdk.ThreadPark#threshold=0ms jdk.NativeMethodSample#period=1ms
+#                    (harness/waits.py reads the wait events: where each thread blocks and for how long)
 #   --gc g1          launch with -XX:+UseG1GC instead of the JSON's -XX:+UseZGC
 #   --no-dashboard   run without the PZDashboard mod (removed from the bench save's mods.txt and default.txt)
 #
@@ -54,7 +57,7 @@ FLAG_FILE="$ZOMBOID/Lua/pzopt-harness.txt"
 NATIVE_FLAG_FILE="${NATIVE_ZOMBOID:-$HOME/Zomboid}/Lua/pzopt-harness.txt"
 
 label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
-record=0; jfr=0; jfr_period=""; game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=()
+record=0; jfr=0; jfr_period=""; jfr_settings=(); game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --label) label="$2"; shift 2 ;;
@@ -67,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --mangohud-config) mangohud_config="$2"; shift 2 ;; # config file used for this MangoHud run
     --jfr) jfr=1; shift ;;
     --jfr-period) jfr_period="$2"; shift 2 ;;
+    --jfr-setting) jfr_settings+=("$2"); shift 2 ;;
     --game-profiler) game_profiler=1; shift ;;
     --gc) gc="$2"; shift 2 ;;
     --no-dashboard) no_dashboard=1; shift ;;
@@ -302,9 +306,9 @@ JFR_OUT="$PZ_DIR/pzopt.jfr"
 {
   cp "$LAUNCHER" "$LAUNCHER.pzopt-orig"
   rm -f "$JFR_OUT"
-  python3 - "$LAUNCHER" "$jfr" "$jfr_period" "$gc" "$PZ_DIR_JVM/pzopt.jfr" "$PZ_DIR_JVM/gc.log" "$launcher" <<'PY'
+  python3 - "$LAUNCHER" "$jfr" "$jfr_period" "$gc" "$PZ_DIR_JVM/pzopt.jfr" "$PZ_DIR_JVM/gc.log" "$launcher" "$(IFS=,; echo "${jfr_settings[*]:-}")" <<'PY'
 import json, sys
-path, jfr, period, gc, jfr_file, gc_log, launcher = sys.argv[1:]
+path, jfr, period, gc, jfr_file, gc_log, launcher, jfr_settings = sys.argv[1:]
 j = json.load(open(path))
 if launcher == "direct":
     # no Steam client to talk to: the game must not try to initialise steam_api
@@ -315,6 +319,8 @@ if jfr == "1":
     opt = f"-XX:StartFlightRecording=settings=profile,filename={jfr_file},dumponexit=true"
     if period:
         opt += f",jdk.ExecutionSample#period={period}ms"
+    if jfr_settings:
+        opt += "," + jfr_settings
     j["vmArgs"].append(opt)
 if gc:
     want = {"g1": "-XX:+UseG1GC", "zgc": "-XX:+UseZGC"}[gc]
@@ -518,7 +524,7 @@ cp "$ZOMBOID/console.txt" "$out/console.txt"
 cp "$ZOMBOID"/pzopt-*.out "$out/" 2>/dev/null || true
 cp "$PZ_DIR/pzopt.properties" "$out/pzopt.properties"
 cp "$LAUNCHER" "$out/ProjectZomboid64.json"
-{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
+{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
 # gc.log rolls over (filecount=3); keep the segments that were written during this run
 for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
   [[ -f "$g" ]] || continue

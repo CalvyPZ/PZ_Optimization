@@ -38,7 +38,7 @@ public final class JfrSamples {
       Path file = Path.of(args[0]);
       String wantThread = args.length > 1 ? args[1] : null;
       int maxDepth = args.length > 2 ? Integer.parseInt(args[2]) : 48;
-      long java = 0, nat = 0, gc = 0;
+      long java = 0, nat = 0, gc = 0, waits = 0;
       try (RecordingFile rf = new RecordingFile(file);
             BufferedWriter out = new BufferedWriter(new OutputStreamWriter(System.out), 1 << 20)) {
          out.write("kind\tthread\tepochNs\tframes\n");
@@ -59,6 +59,23 @@ public final class JfrSamples {
                out.write("stall\t" + (st != null ? st.getJavaName() : "?") + "\t" + epochNs(e.getStartTime()) + "\t" + e.getDuration().toNanos() / 1000 + "\n");
                continue;
             }
+            if (type.equals("jdk.JavaMonitorWait") || type.equals("jdk.ThreadPark") || type.equals("jdk.JavaMonitorEnter")) {
+               // wait \t <thread> \t epochNs \t <duration-us> \t <event> \t frames   (only recorded when the run lowered
+               // the event thresholds, e.g. --jfr-setting jdk.JavaMonitorWait#threshold=0ms; read by harness/waits.py)
+               RecordedThread wt = e.getThread("eventThread");
+               String wname = wt != null ? wt.getJavaName() : "?";
+               if (wantThread != null && !wantThread.equals(wname)) {
+                  continue;
+               }
+               StringBuilder sb = new StringBuilder(512);
+               sb.append("wait\t").append(wname).append('\t').append(epochNs(e.getStartTime())).append('\t')
+                     .append(e.getDuration().toNanos() / 1000).append('\t').append(type.substring(4)).append('\t');
+               appendFrames(sb, e.getStackTrace(), maxDepth);
+               sb.append('\n');
+               out.write(sb.toString());
+               waits++;
+               continue;
+            }
             boolean isJava = type.equals("jdk.ExecutionSample");
             if (!isJava && !type.equals("jdk.NativeMethodSample")) {
                continue;
@@ -74,15 +91,7 @@ public final class JfrSamples {
             }
             StringBuilder sb = new StringBuilder(512);
             sb.append(isJava ? "java\t" : "native\t").append(name).append('\t').append(epochNs(e.getStartTime())).append('\t');
-            List<RecordedFrame> frames = st.getFrames();
-            int n = Math.min(frames.size(), maxDepth);
-            for (int i = 0; i < n; i++) {
-               RecordedMethod m = frames.get(i).getMethod();
-               if (i > 0) {
-                  sb.append(';');
-               }
-               sb.append(m.getType().getName()).append('.').append(m.getName());
-            }
+            appendFrames(sb, st, maxDepth);
             sb.append('\n');
             out.write(sb.toString());
             if (isJava) {
@@ -92,7 +101,22 @@ public final class JfrSamples {
             }
          }
       }
-      System.err.println("samples: " + java + " java, " + nat + " native; " + gc + " gc events" + (wantThread != null ? " (thread " + wantThread + ")" : ""));
+      System.err.println("samples: " + java + " java, " + nat + " native; " + gc + " gc events; " + waits + " wait events" + (wantThread != null ? " (thread " + wantThread + ")" : ""));
+   }
+
+   private static void appendFrames(StringBuilder sb, RecordedStackTrace st, int maxDepth) {
+      if (st == null) {
+         return;
+      }
+      List<RecordedFrame> frames = st.getFrames();
+      int n = Math.min(frames.size(), maxDepth);
+      for (int i = 0; i < n; i++) {
+         RecordedMethod m = frames.get(i).getMethod();
+         if (i > 0) {
+            sb.append(';');
+         }
+         sb.append(m.getType().getName()).append('.').append(m.getName());
+      }
    }
 
    private static long epochNs(Instant t) {

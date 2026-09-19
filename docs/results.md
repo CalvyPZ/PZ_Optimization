@@ -258,3 +258,44 @@ now captures desktop audio. The quad video (`docs/media/drive-60-120kmh-stock-vs
 optimized-quad.mp4`, 3840x1920, git-ignored at 731 MB) uses the `quad6-*` runs:
 optimized 60 and 120 km/h both at the 240 fps cap with the GPU at ~57–61 %,
 stock at 72–75 fps with the GPU at 100 %.
+
+## 2026-09-19 (15:00–15:45): why the GPU idles uncapped — Zink's swap, not the game
+
+Full write-up: `docs/plan-resource-use.md`. New tooling: `run.sh --jfr-setting`,
+wait events in `tools/JfrSamples.java`, `harness/waits.py` (per-thread blocking
+sites in the route window).
+
+| run | renderer | route | fps | GPU busy | game thread | GL thread |
+|---|---|---|---|---|---|---|
+| waits-uncap-1 | Zink / Wayland | 122 km/h | 378 | 60 % | 60 % (39 % of the window blocked waiting for the GL thread) | 30 % (64 % of native samples inside glfwSwapBuffers) |
+| waits-uncap-zinkx11-1 | Zink / XWayland | 122 km/h (off road) | 293 → 195 | 51 % | 68 % | throttled to the 240 Hz refresh |
+| waits-uncap-gl-1 | NVIDIA GL | 122 km/h (off road) | 629 moving | 93 % | 85 % | 59 % |
+| base60-gl-1 | NVIDIA GL | 60 km/h, complete | 570 | **98 %** | 69 % | 43 % |
+| uifbo60-gl-1 | NVIDIA GL, uiRenderOffscreen=true | 60 km/h, complete | 567 | 98 % | **57 %** | 42 % |
+
+- The game thread runs one frame ahead and waits for the single ready slot; the
+  GL thread's wall time sets the frame, and on Zink ~1.8 ms of it is the swap.
+- NVIDIA GL uncapped is GPU-bound at max zoom (12800x5400 offscreen buffer);
+  the CPU idle is the correct state there.
+- Stock "render UI offscreen" removes the per-frame Lua UI draw (25–34 % of
+  game-thread CPU); frames from both recordings are identical.
+- 122 km/h runs left the road twice today at ~380 tiles; A/Bs use 60 km/h.
+
+## 2026-09-19 (15:45–16:05): NVIDIA GL on native Wayland, MangoHud overlay fixed there
+
+- `wl-gl60-1` (NVIDIA GL, `-Dzomboid.wayland=1`, 60 km/h): 527 fps, GPU 96 %,
+  route complete, but no MangoHud HUD or CSV: GLFW resolves `eglSwapBuffers`
+  with `dlsym` on its private libEGL handle, so the preloaded hook never sees
+  the swap (on X11 the Steam overlay's dlsym hook chains to MangoHud).
+  MangoHud's own dlsym shim kills the game's JNI launcher (`wl-gl-mhshim-1/2`).
+- Fix in the `Display` override (`docs/override-edits.md`): when MangoHud's
+  library is preloaded and the platform is Wayland, `swapBuffers()` calls that
+  library's exported `eglSwapBuffers` with GLFW's EGL display/surface through
+  the JDK foreign-function API. Proved first with `tools/GlfwSwapProbe.java`
+  (the game's LWJGL build; MangoHud blacklists processes named `java`, so the
+  probe runs under a copied launcher).
+- `wl-gl-mh-3` (400-tile route): HUD drawn, control socket up, CSV logged;
+  663 fps mean, frame 1.5 / 4.2 ms (mean / p99), GPU 92 %.
+- The single 3.4 s frame at route start in `wl-gl60-1` came from the other
+  session's texture-buffer override installed during that run (256 MB decode
+  budget, since reverted to 50), not from the Wayland GL path.

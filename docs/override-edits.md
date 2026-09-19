@@ -251,6 +251,24 @@ Edits in `Display` (all marked `// pzopt:`):
 Edit in `Mouse`: `setCursorPosition` divides the game's framebuffer pixels by
 the same scales before calling `glfwSetCursorPos`.
 
+Third edit in `Display` (added 2026-09-19, evening): **MangoHud on native
+Wayland.** `swapBuffers()` first calls a private `pzoptHudSwap()`. On the first
+call it checks that the overrides are enabled, the GLFW platform is Wayland,
+`MANGOHUD=1` is set and `/proc/self/maps` shows `libMangoHud_opengl.so` already
+loaded; if so it resolves that library's exported `eglSwapBuffers` with the JDK
+foreign-function API (`SymbolLookup.libraryLookup` + `Linker.downcallHandle`,
+signature `int (void*, void*)`). Every swap then calls it with
+`GLFWNativeEGL.glfwGetEGLDisplay()` / `glfwGetEGLSurface(window)` (cached per
+window handle) and returns; MangoHud draws the HUD and forwards to the real
+`eglSwapBuffers`. Any failure (no handle, `EGL_FALSE`, exception) logs one
+warning and falls back to `glfwSwapBuffers` for the rest of the process. Why:
+GLFW resolves EGL entry points with `dlsym` on its private `libEGL` handle, so
+the `LD_PRELOAD` hook never sees the swap on Wayland (on X11 the Steam overlay's
+own `dlsym` hook chains to MangoHud, which is why it works there);
+MangoHud's `dlsym` shim library deadlocks the game's JNI launcher. Verified
+with `tools/GlfwSwapProbe.java` (the same LWJGL build, "hud" mode) and the
+`wl-gl-mh-*` runs.
+
 Both classes are otherwise verbatim Vineflower output (revision `b0bbce05d5`)
 and recompile without fixes; `Display`'s inner classes `$Window` and
 `$Callbacks` come along as loose classes. Verified 2026-09-19 with

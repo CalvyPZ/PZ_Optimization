@@ -154,6 +154,8 @@ def load_samples(run, thread=GAME_THREAD):
         f.readline()
         for line in f:
             kind, th, t, rest = line.rstrip("\n").split("\t", 3)
+            if kind == "wait":  # blocking events (harness/waits.py), not samples
+                continue
             if kind in events:
                 events[kind].append((int(t) // 1000, th, int(rest)))
             elif th == thread:
