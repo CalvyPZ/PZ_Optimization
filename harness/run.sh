@@ -79,7 +79,7 @@ while [[ $# -gt 0 ]]; do
     --env) game_env+=("$2"); shift 2 ;;
     --record) record=1; shift ;;
     --launcher) launcher="$2"; shift 2 ;;                # auto|steam|direct (see the header)
-    --option) game_options+=("$2"); shift 2 ;;           # key=value written into ~/Zomboid/options.ini for the run (restored on exit)                     # screen recording of the run (gpu-screen-recorder, first monitor) -> <run>/recording.mp4
+    --option) game_options+=("$2"); shift 2 ;;           # key=value written into ~/Zomboid/options.ini for the run (restored on exit)                     # screen recording of the run (gpu-screen-recorder, first monitor, native res, AV1 HDR) -> <run>/recording.mp4
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -357,11 +357,14 @@ while :; do
   sysmon_pid=$!
   rec_pid=""
   if (( record )); then
-    # whole monitor (window capture is X11-only), scaled to half the 5120x2160 desktop, GPU encoder,
-    # desktop audio (game sound) on an AAC track;
-    # stopped with SIGINT once the game has exited
+    # whole monitor through KMS (Wayland session; window capture is X11-only) at the native desktop
+    # resolution. The desktop runs in HDR, so the capture is kept as HDR: NVENC AV1 10-bit, PQ / BT.2020
+    # (av1_hdr; the SDR codecs tone-map instead, and h264 NVENC stops at 4096 px wide anyway; verified
+    # 2026-09-19). Desktop audio (game sound) goes on an AAC track; stopped with SIGINT once the game has
+    # exited. harness/stitch-quad.sh rescales the inputs itself; being HDR they need a tone-map there
+    # for an SDR upload.
     rec_mon=$(gpu-screen-recorder --list-monitors 2>/dev/null | head -1 | cut -d'|' -f1)
-    gpu-screen-recorder -w "${rec_mon:-DP-1}" -s 2560x1080 -f 60 -q very_high -k auto -cursor no -a default_output -o "$out/recording.mp4" > "$out/recording.log" 2>&1 &
+    gpu-screen-recorder -w "${rec_mon:-DP-1}" -f 60 -q very_high -k av1_hdr -cursor no -a default_output -o "$out/recording.mp4" > "$out/recording.log" 2>&1 &
     rec_pid=$!
   fi
   if [[ "$launcher" == direct ]]; then
