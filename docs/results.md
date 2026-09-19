@@ -212,3 +212,49 @@ Stock driving at max zoom is GPU-bound (92 %) at 123 fps mean; with the
 adopted set the route sits on the 240 fps cap for 99 % of frames and the GPU
 has 45 % headroom. The p99.9 (18 ms) is the same 2-second PZDashboard burst
 as on the teleport route.
+
+## 2026-09-19 (01:30–03:40): quad-view showcase, Steam performance monitor found capping fps
+
+Four showcase recordings (60 and 120 km/h, stock vs optimized) were re-taken for
+the quad-view video (`harness/stitch-quad.sh`, `config/mangohud-showcase-*.conf`).
+The first optimized takes stopped at ~157 fps instead of the 240 fps cap seen at
+00:50, with every pzopt setting confirmed identical (`[pzopt] settings:` line) and
+the same save, route and zoom. The analyzer's thread split pointed at the render
+side: the GL thread (`main`) went from 12–17 % of a core to 90 %, the game thread
+(`MainThread`) from 99 % to 30 %, GPU busy from 55 % to 42 %.
+
+Cause: **Steam's in-game performance monitor** (the newer FPS/perf overlay in
+Steam's settings, not the classic Steam overlay). It hooks every GL call and
+serialises the render thread. Verified by A/B/A on the optimized 120 km/h route,
+all launched through Steam with nothing else changed:
+
+| Steam performance monitor | classic overlay | route | mean fps | render thread | game thread |
+|---|---|---|---|---|---|
+| on (as at 01:30–02:30) | on | 60 km/h | 157 | 92 % | 31 % |
+| off, Steam shut down, `--launcher direct` | – | 60 km/h | 238 | 17 % | 99 % |
+| off | off | 120 km/h | 237 | 21 % | 99 % |
+| off | on | 120 km/h | 236 | 22 % | 97 % |
+| **on** | on | 120 km/h | **164** | **92 %** | 24 % |
+| off | on | 120 km/h | 237.5 | 19 % | 99 % |
+
+The classic Steam overlay is harmless; only the performance monitor costs the
+frames. It stays disabled for all benchmark and showcase runs. Stock is GPU-bound
+at ~75 fps at max zoom either way, so the monitor does not change the stock
+numbers, only hides the optimized headroom. Runs: `quad2-opt60-1` (capped),
+`quad5-opt60-2`, `quad6-*` (video), `overlaycheck-opt120-1..4` (A/B/A).
+
+Two smaller findings from the same session:
+
+- Direct launches (`--launcher direct`) ran the JVM under the desktop's
+  `LC_NUMERIC=de_DE`; MangoHud then failed to parse `fps_metrics=avg,0.01,0.001`
+  (no 1 % / 0.1 % rows, `4,2ms` formatting). `run.sh` now pins `LC_NUMERIC=C` for
+  direct launches, matching the Steam runtime.
+- MangoHud 0.8.4 applies `offset_x` towards the anchored edge for right-anchored
+  positions, so `position=top-right` needs a negative `offset_x` to move inwards.
+
+Showcase runs also press MangoHud's `reset_fps_metrics` key (Shift_R+F9, via
+xdotool) at route start so avg / 1 % / 0.1 % cover only the drive, and `--record`
+now captures desktop audio. The quad video (`docs/media/drive-60-120kmh-stock-vs-
+optimized-quad.mp4`, 3840x1920, git-ignored at 731 MB) uses the `quad6-*` runs:
+optimized 60 and 120 km/h both at the 240 fps cap with the GPU at ~57–61 %,
+stock at 72–75 fps with the GPU at 100 %.
