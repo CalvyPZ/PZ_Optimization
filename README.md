@@ -210,7 +210,12 @@ runs the unit tests (no game needed); `scripts/accept.sh` is build → reinstall
 `harness/run.sh` does one hands-off game run: resets a bench save from a
 template, auto-continues into it, runs a scripted route, quits, and collects
 logs, sysmon samples, optional MangoHud CSV, optional JFR, and an optional
-screen recording into `harness/runs/<label>-<timestamp>/`. Three modes:
+screen recording into `harness/runs/<label>-<timestamp>/`. The bench save
+template used for every run in this repo is checked in as
+`harness/bench-save/pzopt-bench-template.tar.zst` (Sandbox, car on the
+highway east of town); restore it once with
+`zstd -dc harness/bench-save/pzopt-bench-template.tar.zst | tar -C ~/Zomboid/Saves/Sandbox -xf -`
+and `run.sh` picks it up as `Sandbox/pzopt-bench-template`. Three modes:
 
 - `bench`: the teleport route (fixed tiles per second), used for the render
   A/Bs.
