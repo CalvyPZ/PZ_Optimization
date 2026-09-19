@@ -22,9 +22,10 @@ OUT="$BUILD/classes"
 RELEASE="${RELEASE:-25}"   # java.class.version 69 in the shipped jar
 
 # Game classes we shadow. Every inner class of these is shadowed too.
-# The first six are edited decompiled copies (src/overrides/, not committed);
+# The edited decompiled copies live in src/overrides/ (not committed); the two org.lwjglx classes are
+# The Indie Stone's LWJGL 2 compatibility shim (HiDPI/Wayland fix, see docs/override-edits.md);
 # TISLogoState is a from-scratch replacement in src/shims/ (committed).
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState)
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState org/lwjglx/opengl/Display org/lwjglx/input/Mouse)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 command -v javac >/dev/null || { echo "javac not on PATH" >&2; exit 1; }

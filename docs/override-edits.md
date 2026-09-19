@@ -206,3 +206,38 @@ unchanged. The class is otherwise verbatim Vineflower output (revision
 `b0bbce05d5`), which recompiles without fixes. Together with the committed
 `src/shims/zombie/gameStates/TISLogoState.java` (logo screens skipped), this
 is what gets a run from launch to the main menu with no splash screens.
+
+## org.lwjglx.opengl.Display and org.lwjglx.input.Mouse (added 2026-09-19)
+
+These two are The Indie Stone's LWJGL 2 compatibility shim over GLFW 3.4 (the
+window and mouse the whole game talks to), not `zombie.*` code. They are
+overridden for one reason: native Wayland on a scaled desktop. The game selects
+the Wayland GLFW platform only when the JVM property `zomboid.wayland=1` is set
+(otherwise the shim forces X11). On Wayland GLFW hands the window size out in
+screen coordinates while the framebuffer is scaled (`GLFW_SCALE_FRAMEBUFFER`
+is on by default), so on a 5120x2160 panel at KDE's 125 % scale the stock shim
+told the game the display was 4096x1728 and the game drew that viewport into
+the bottom-left of a 5120x2160 buffer, leaving black bands on top and right.
+
+Edits in `Display` (all marked `// pzopt:`):
+
+- `getWidth()` / `getHeight()` return the framebuffer size whenever it is known
+  (the stock code returned the screen-coordinate size). On X11 and XWayland the
+  two are identical, so nothing changes there.
+- two new helpers, `getFramebufferScaleX()` / `getFramebufferScaleY()`, give
+  framebuffer pixels per screen coordinate (1.0 when GLFW does not scale).
+- the cursor-position callback multiplies GLFW's screen coordinates by those
+  scales before handing them to `Mouse.addMoveEvent`, so clicks land where the
+  cursor is drawn.
+- the lock-cursor-to-window clamp in `updateMouseCursor` clamps to the
+  screen-coordinate size (GLFW's space), not the framebuffer size.
+
+Edit in `Mouse`: `setCursorPosition` divides the game's framebuffer pixels by
+the same scales before calling `glfwSetCursorPos`.
+
+Both classes are otherwise verbatim Vineflower output (revision `b0bbce05d5`)
+and recompile without fixes; `Display`'s inner classes `$Window` and
+`$Callbacks` come along as loose classes. Verified 2026-09-19 with
+`harness/run.sh ... --env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`: the console
+logs "Display mode changed to 5120x2160", the recording is full-screen and the
+route numbers match the XWayland runs.
