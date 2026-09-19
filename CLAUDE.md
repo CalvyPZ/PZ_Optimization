@@ -86,8 +86,17 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 ## Current state (2026-09-19)
 
 - Adopted Config defaults (max-zoom route mean 6.2 → 4.4 ms, p99 19.3 → 8.3):
-  persistentVbo, treesInChunkTexture, translucentTilesInChunkTexture, windowsInChunkTexture,
-  bakeBudget=8, lightingBudget=8, hotsaveIntervalSec=30, on top of wake + recalc pool.
+  treesInChunkTexture, windowsInChunkTexture, bakeBudget=8 (never-baked
+  levels only), lightingBudget=8 (queued, never drops JNI dirty bits), hotsaveIntervalSec=30,
+  on top of wake + recalc pool. translucentTilesInChunkTexture is OFF: it bakes
+  `Translucent` tileset tiles opaque black (black floor rectangles, 2026-09-19).
+  persistentVbo is OFF too: no gain at the 240 cap and suspected for a black building lot.
+  Black one-tile rectangles beside walls were cutawayFast replaying the stock int-shifted
+  occluder mask (fixed with an exact mask); JUMBO trees missing near buildings were the
+  FBORenderTrees batch in chunk-texture mode (trees now bake via the plain sprite path).
+- Verify runs on a copy of a real save: `--source-save Apocalypse/<name>` (template kept under
+  Saves/<mode>/pzopt-template-<name>); auto-start presses click-to-start and marks started
+  in every mode, so the run exits to desktop after `--quit-after`.
 - Remaining tail with the PZDashboard mod is its 2 s collectors; measure with `--no-dashboard`.
 - Uncapped: NVIDIA GL is GPU-bound (98 %) at 570 fps; Zink blocks ~1.8 ms/frame in swap.
   The in-game limiter is stock again; "Uncapped" is a real Display-options entry and a

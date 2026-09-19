@@ -117,7 +117,12 @@ stock.
    `doDestroy()` unmaps for real and deletes the fence.
    Stock behaviour was `glBufferData` (orphan) + `glMapBufferRange(WRITE |
    INVALIDATE_RANGE | UNSYNCHRONIZED)` per 64 KB batch, ~25 % of render-thread
-   samples at max zoom (`attr-jfr-z25`).
+   samples at max zoom (`attr-jfr-z25`). Default off since 2026-09-19
+   (evening): with the in-game 240 fps limiter back, two 120 km/h drives with
+   it on and off had the same frame profile (mean 4.2 ms, p99 7.2 / 7.3 ms), and
+   one stationary run with it on drew a whole building lot floor opaque black
+   for a minute (`artfix-opt120-2`), which its fence logic is the only edit
+   able to cause. Re-enable with `--prop persistentVbo=true` for uncapped runs.
 
 ## zombie.iso.fboRenderChunk.FBORenderCell (added 2026-09-18)
 
@@ -136,7 +141,16 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
    the player stencil (`isTranslucentTree`), fading, wind-animated or carrying
    render effects; every other tree bakes into its chunk-level texture, and
    the existing `checkTreeTranslucency` pass invalidates the level (flag 4096)
-   when a tree changes state. Measured on the max-zoom teleport route
+   when a tree changes state. Two additions (2026-09-19, evening): a tree whose
+   texture is not ready yet (`Asset.isReady`) stays per frame and
+   `checkTreeTranslucency` re-dirties its level when the texture arrives; and
+   `renderMinusFloor(IsoObject)` bakes a tree with `FBORenderTrees.current`
+   temporarily null (`treeBakeDirect`, default on), so `IsoTree.render` takes
+   the plain sprite path. The batch path (`FBORenderTrees` in chunk-texture
+   mode) dropped most JUMBO trees around town buildings (they never appeared,
+   even after a forced redraw), while the plain path draws every tree.
+   Per-frame JUMBO trees cost 8.1 ms mean on the max-zoom route versus 4.2 ms
+   baked, so this is the difference between the edit paying off and not. Measured on the max-zoom teleport route
    (`trees-1` vs `pvbo-1`): frame mean 6.2 → 5.2 ms, p99 18.7 → 17.4 ms, GPU
    busy 84 → 61 %.
 3. **Windows and glass doors in the chunk texture.** In
@@ -150,7 +164,12 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
    is set; it replaces the three literal `depthFlags & 2` tests (the early
    `return true` in `isObjectRenderLayer_Translucent`, the early `return
    false` in `isObjectRenderLayer_MinusFloor`, and the `TranslucentSE` /
-   `MinusFloorSE` choice in `calculateObjectRenderLayer`).
+   `MinusFloorSE` choice in `calculateObjectRenderLayer`). Default off since
+   2026-09-19 (evening): the flag is the tileset property `Translucent`
+   (road decals, dirt patches, puddles), and baked into the opaque chunk
+   texture those tiles come out as opaque black one-tile rectangles on the
+   floor (Diego's screenshot, walking, not only at speed). The per-frame
+   pass draws about 20 of them per frame; not worth it.
 5. **Dev counters** (only with `instrument=true`): `renderTranslucent(IsoObject)`
    and `renderTranslucent(IsoGridSquare)` count what the per-frame pass draws
    by kind (window, door, tree, Translucent-flagged tile with a per-tileset
@@ -162,25 +181,46 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
    render decision in `renderOneLevel`, before `beginRenderChunkLevel`: when a
    level is dirty and, at its texture's lowest level, the frame has already
    started `BAKE_BUDGET` bakes, the texture is deferred (its upper level follows
-   the decision through the set). A deferred level whose texture was baked
+   the decision through the set). Since 2026-09-19 (evening) only a never-baked
+   level (`DIRTY_CREATE` still set) can be deferred: a re-bake of a texture that
+   is already on screen (obscuring set, trees, cutaways, lighting, object
+   changes) always lands in the same frame, because drawing the stale texture
+   for a frame while the per-frame translucent list already reflects the new
+   state showed windows and glass doors flickering as the car passed buildings. A deferred level whose texture was baked
    before (`DIRTY_CREATE`, 512, no longer set) takes the existing "clean"
    path — the manager's current chunk is pointed at its texture,
    `endRenderChunkLevel(..., false)` queues it for drawing and the cached
    translucent lists are re-registered; a never-baked level returns without
    drawing. Deferred levels are retried next frame in chunk order.
-7. **Lighting budget** (`pzopt.Config.LIGHTING_BUDGET`, 0 = stock). In
-   `updateChunkLighting` the pass also runs when a previous pass stopped early
-   (`pzoptLightingPending`), not only when the lighting counter changed; with
-   a budget the loop returns after that many chunks were refreshed and marks
-   the pass pending (the stock debug-only `Lighting.SplitUpdate` branch with
-   its fixed 5 is kept for when the budget is 0).
+7. **Lighting budget** (`pzopt.Config.LIGHTING_BUDGET`, 0 = stock). With a
+   budget `updateChunkLighting` calls a new private
+   `pzoptUpdateChunkLightingBudgeted`: in the frame the lighting counter
+   changes it still asks `LightingJNI.getChunkDirty` for every on-screen chunk
+   level (sorted by chunk lighting counter as in stock) and records the dirty
+   levels as a bitmask per chunk in a `LinkedHashMap<IsoChunk, Long>`; then, on
+   that frame and the following ones, it refreshes the square light info
+   (`cacheLightInfo` over the level's renderable squares) of at most that many
+   chunks per frame, oldest entry first, dropping entries whose chunk left the
+   on-screen list. The first version (2026-09-18) simply returned after the
+   budget and re-entered the loop next frame; the JNI rewrites its dirty bits
+   on its next pass, so the chunks it had not reached lost their update and
+   stayed with stale light info (unlit tiles and tree silhouettes behind the
+   car at 120 km/h, darker chunk-sized patches on grass). The stock branch
+   (budget 0) is unchanged, including the debug-only `Lighting.SplitUpdate`.
 8. **Occluder-mask replay** (`pzopt.Config.CUTAWAY_FAST`). In
    `calculateOccludingSquares(int)`, a chunk level that is not dirty and whose
    mask was computed before (tracked in a bounded `HashSet<ChunkLevelData>`)
    has its stored `occludingSquares[playerIndex]` bitmask replayed into the
    occluded grid (bit → square x/y, level z, same window test and `max`
    update as the stock per-square loop); dirty or never-computed levels run
-   the stock `ChunkLevelData.calculateOccludingSquares`. Every input of that
+   the stock `ChunkLevelData.calculateOccludingSquares`. The replayed mask is
+   pzopt's own (`pzoptExactOccluderMask`, a `HashMap<ChunkLevelData, Long>`,
+   computed after the stock call with the stock test but without the
+   on-screen clip). The stock `occludingSquares` mask is built with an `int`
+   shift (`1 << x + y * 8`): bits 32-63 wrap and bit 31 sign-extends when cast
+   to long, which stock never notices because it only compares the mask with
+   its previous value. Replaying it marked whole rows of tiles beside house
+   walls as occluding, drawn as black one-tile rectangles (2026-09-19). Every input of that
    test (cutaway flags, vision matrix, square existence) dirties the level
    when it changes, so a clean level's mask is current.
 9. **Cutaway visit radius** (`pzopt.Config.CUTAWAY_RADIUS`, chunks). The

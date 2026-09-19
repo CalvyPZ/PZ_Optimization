@@ -504,6 +504,7 @@ public final class Harness {
    // road following: heading from the vehicle's own motion, road centre sampled ahead of it
    private static float hdgX = 1f, hdgY = 0f;
    private static float lastRoadOffset;
+   private static float roadOffsetFiltered, roadOffsetRate;
    private static int noRoadFrames;
 
    /**
@@ -558,12 +559,21 @@ public final class Harness {
             return 0f;
          }
          noRoadFrames = 0;
-         float u = offset + 0.3f * (offset - lastRoadOffset) / Math.max(dt, 1e-3f) * 0.05f; // mild damping
+         // The road scan quantises the target to half tiles, so a raw per-frame derivative is a step of
+         // +-0.5 / dt (3.75 tiles at 240 fps) on every scan change: it slammed the wheel and the car
+         // oscillated across the road until it hit a yard (2026-09-19 evening, three timeouts in a row).
+         // Low-pass the offset over ~0.15 s and damp with the smoothed rate in tiles per second.
+         float a = Math.min(1f, Math.max(dt, 1e-3f) / 0.15f);
+         float prev = roadOffsetFiltered;
+         roadOffsetFiltered += (offset - roadOffsetFiltered) * a;
+         float rate = dt > 1e-3f ? (roadOffsetFiltered - prev) / dt : 0f;
+         roadOffsetRate += (rate - roadOffsetRate) * a;
+         float u = roadOffsetFiltered + 0.35f * roadOffsetRate;
          lastRoadOffset = offset;
          steerFrame++;
          float mag = Math.abs(u);
-         if (mag < 0.4f) return 0f;
-         int duty = mag > 2.5f ? 1 : mag > 1.2f ? 2 : 4; // press every frame / every 2nd / every 4th
+         if (mag < 0.5f) return 0f;
+         int duty = mag > 3f ? 1 : mag > 1.5f ? 2 : 4; // press every frame / every 2nd / every 4th
          if (steerFrame % duty != 0) return 0f;
          if (u > 0) { down[keyRight] = true; return 1f; }
          down[keyLeft] = true;

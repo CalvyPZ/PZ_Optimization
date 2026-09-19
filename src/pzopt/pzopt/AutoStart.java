@@ -21,7 +21,8 @@ final class AutoStart {
    }
 
    static synchronized void start() {
-      if (thread != null || !Harness.REQUESTED) {
+      // any harness mode, verify included: a verify run must enter the world too, not sit under "click to start"
+      if (thread != null || (!Harness.REQUESTED && HarnessFlags.get("mode") == null)) {
          return;
       }
       thread = new Thread(AutoStart::run, "pzopt-autostart");
@@ -54,6 +55,11 @@ final class AutoStart {
                }
             } else if (pressed) {
                Log.info("harness: loading screen left");
+               if (!Harness.REQUESTED) {
+                  // verify mode has no route state machine to do it: mark the world as reached so the
+                  // Lua mod ends the process at the main menu after quit_after instead of sitting there
+                  HarnessFlags.markStarted();
+               }
                return; // one world per process
             }
          } catch (InterruptedException e) {

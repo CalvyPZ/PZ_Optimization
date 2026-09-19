@@ -23,6 +23,8 @@ import java.util.Properties;
  *   persistentVbo   true/false  sprite ring buffers use persistently mapped buffer storage instead of an orphaning
  *                            glBufferData + glMapBufferRange per 64 KB batch (default true)
  *   treesInChunkTexture true/false  static trees bake into the chunk textures; only translucent/fading trees are
+ *   treeBakeDirect true/false  bake trees through IsoTree.render without a FBORenderTrees batch (the batch drops JUMBO trees)
+ *   devRedrawFrame N          dev: force a full redraw of on-screen chunk levels N frames after the first render
  *                            drawn every frame (default true; false = stock: every tree every frame)
  *   windowsInChunkTexture true/false  windows and glass doors bake like walls instead of being drawn every frame
  *                            (default true)
@@ -89,13 +91,15 @@ public final class Config {
    public static final boolean DEV = bool("dev", false);
    public static final boolean TRANSLUCENT_CACHE = bool("translucentCache", false);
    public static final int HOTSAVE_INTERVAL_SEC = integer("hotsaveIntervalSec", 30);
-   public static final boolean PERSISTENT_VBO = bool("persistentVbo", true);
+   public static final boolean PERSISTENT_VBO = bool("persistentVbo", false);
    public static final boolean TREES_IN_CHUNK_TEXTURE = bool("treesInChunkTexture", true);
    public static final boolean WINDOWS_IN_CHUNK_TEXTURE = bool("windowsInChunkTexture", true);
-   public static final boolean TRANSLUCENT_TILES_IN_CHUNK_TEXTURE = bool("translucentTilesInChunkTexture", true);
+   public static final boolean TRANSLUCENT_TILES_IN_CHUNK_TEXTURE = bool("translucentTilesInChunkTexture", false);
    public static final int BAKE_BUDGET = integer("bakeBudget", 8);
    public static final int LIGHTING_BUDGET = integer("lightingBudget", 8);
    public static final int LIGHTING_REBAKE_MS = integer("lightingRebakeMs", 0);
+   public static final int DEV_REDRAW_FRAME = integer("devRedrawFrame", 0);
+   public static final boolean TREE_BAKE_DIRECT = bool("treeBakeDirect", true);
    public static final boolean CUTAWAY_FAST = bool("cutawayFast", true);
    public static final int CUTAWAY_RADIUS = integer("cutawayRadius", 0);
    public static final int GRID_STACK_INTERVAL = integer("gridStackInterval", 0);
