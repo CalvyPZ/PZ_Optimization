@@ -32,6 +32,33 @@ zoom, 5120x2160, native Linux build, NVIDIA OpenGL. Machine: Ryzen 7 9800X3D,
 RTX 4090, Crucial T705 NVMe, 32 GB DDR5. "Stock" is this build with every
 optimization switched off, which reproduces the shipped game exactly.
 
+### 120 km/h drive, stock at its 244 fps cap vs optimized uncapped, with boot and load
+
+Full video with sound: https://www.youtube.com/watch?v=6jaipKCG7Po. Runs `sbs-stock120-1` /
+`sbs-opt120-uncap-1`, 2026-09-19; stock has the in-game limiter at its maximum (244) and every
+optimization off, including the boot and load ones.
+
+**Boot and load** (real time; both games are launched together, the optimized one is in the
+world and waiting while stock is still loading):
+
+[![Boot and load, stock vs optimized](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped-load.gif)](https://www.youtube.com/watch?v=6jaipKCG7Po)
+
+**The drive** (first 10 s of the route, then the result lines):
+
+[![120 km/h drive, stock at the 244 fps cap vs optimized uncapped](docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped-drive.gif)](https://www.youtube.com/watch?v=6jaipKCG7Po)
+
+| Metric | Stock (244 cap) | Optimized (uncapped) | Change |
+|---|---|---|---|
+| Boot, launch to main menu | 7.31 s | 6.01 s | -18 % |
+| Load, Continue to world ready | 8.74 s | 3.68 s | -58 % |
+| fps, mean | 122 | 412 | 3.4x |
+| Frame time, mean | 8.2 ms | 2.4 ms | -71 % |
+| Frame time, p99 | 18.9 ms | 6.3 ms | -67 % |
+| Frame time, p99.9 | 22.6 ms | 11.4 ms | -50 % |
+| Worst frame | 53.1 ms | 23.0 ms | -57 % |
+| 1 % low fps | 57 | 147 | 2.6x |
+| GPU busy | 91 % | 86 % | uncapped, so the GPU stays busy |
+
 ### 60 km/h drive, 240 fps cap (the first video)
 
 [![Stock vs optimized, 60 km/h drive](docs/media/drive-60kmh-stock-vs-optimized.jpg)](docs/media/drive-60kmh-stock-vs-optimized.mp4)

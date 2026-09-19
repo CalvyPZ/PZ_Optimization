@@ -91,6 +91,8 @@ real above twice that.
 | `parity.py a b` | pzopt-parity.out | square-by-square recalc diff |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe) |
+| `stitch-sbs.sh` | stock + optimized 120 km/h recordings | side-by-side video with live boot/load counters and a hardware panel; header explains the HUD-clock sync. The first ~2.3 s of every capture show the desktop: never start a pane before the game window appears |
+| `stitch-sbs-gif.sh` | the stitch-sbs.sh mp4 | two README GIFs under GitHub's 10 MB limit: `-load.gif` (boot + load, real time) and `-drive.gif` (10 s of the route + the result lines) |
 | `proton-preflight.sh` | Steam manifests | read-only Proton readiness report |
 | `simulate.py` | | streamer queue simulation |
 

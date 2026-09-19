@@ -299,3 +299,24 @@ sites in the route window).
 - The single 3.4 s frame at route start in `wl-gl60-1` came from the other
   session's texture-buffer override installed during that run (256 MB decode
   budget, since reverted to 50), not from the Wayland GL path.
+
+## 2026-09-19 (23:00): side-by-side video, stock 244 fps cap vs optimized uncapped, 120 km/h
+
+`harness/stitch-sbs.sh` -> `docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.mp4`
+(3840x1450, 63 s). Both panes start at their own launch with live boot / load counters; the
+optimized pane waits at its route start until the stock run is loaded, then both drive in sync.
+
+| run | build | cap | boot (first log -> Continue) | load (Continue -> world) | fps mean | frame mean / p99 / p99.9 ms | GPU busy |
+|---|---|---|---|---|---|---|---|
+| `sbs-stock120-1` | every pzopt flag off (render, loader and boot flags) | 244 (`--option frameRate=244`) | 7.31 s | 8.74 s | 122.1 | 8.2 / 18.9 / 22.6 | 91 % |
+| `sbs-opt120-uncap-1` | defaults, `--prop uncappedFps=true` | none | 6.01 s | 3.68 s | 412.4 | 2.4 / 6.3 / 11.4 | 86 % |
+
+Stock at the 244 cap is GPU-bound at ~122 fps exactly as at the 240 cap. The optimized boot
+here (6.0 s) is slower than the 5.0 s figure from the load loop: the caches under
+`~/Zomboid/pzopt` were cold-ish after the stock run and the machine was busy with a render
+check; the load (3.7 s) matches. Hardware panel: Ryzen 7 9800X3D, RTX 4090 (driver 615.71),
+32 GB DDR5-8000, Crucial T705 2 TB (13.5 GB/s sequential read measured with fio, 1 MiB QD32,
+direct I/O through ZFS).
+
+Side finding: `zpool status zpcachyos` reports 5 permanent data errors (ZFS-8000-8A) on the
+T705 pool that holds /games and /home; `zpool status -v` lists the files.
