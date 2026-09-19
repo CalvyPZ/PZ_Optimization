@@ -1,0 +1,41 @@
+Project Zomboid Build 42 at 120 km/h: stock vs optimized (boot, load and frame time)
+
+Same save, same 1200 m highway route, same PC. Left: the stock game at its maximum frame cap (244 fps). Right: the game with my class overrides, frame cap removed. Both windows start at launch; the counters under each pane time the boot (first log line to the main menu) and the load (Continue to world ready), then both cars drive the route in sync. The MangoHud overlay shows live frame time and fps.
+
+RESULTS (route window, 39 s at ~122 km/h, max zoom, 5120x2160)
+
+                        stock (244 cap)   optimized (uncapped)   change
+Boot, launch to menu    7.31 s            6.01 s                 -18 %
+Load, Continue to world 8.74 s            3.68 s                 -58 %
+Average fps             122               412                    3.4x
+Frame time, mean        8.2 ms            2.4 ms                 -71 %
+Frame time, p99         18.9 ms           6.3 ms                 -67 %
+Frame time, p99.9       22.6 ms           11.4 ms                -50 %
+Worst frame             53.1 ms           23.0 ms                -57 %
+Frames over 33 ms       1                 0
+1 % low fps             57                147                    2.6x
+GPU busy                91 %              86 %
+Game CPU (of one core)  289 %             347 %
+
+Stock is GPU-bound at ~122 fps even with the cap at 244: at max zoom the renderer redraws every chunk's trees, windows and translucent tiles every frame. The optimized build bakes them into the chunk texture once, halves the GPU work per frame and keeps the frame time flat, which is what you see in the frame-time graph.
+
+WHAT THE OPTIMIZATIONS DO
+- Chunk streaming: parallel chunk load and light recalculation with a wake-up instead of a polling sleep, so new chunks appear without a hitch at 120 km/h.
+- Rendering: trees and windows baked into the chunk texture, a per-frame bake and lighting budget, an exact fast cutaway mask.
+- Boot and load: FMOD and animation sets initialised on boot threads, the file pool pumped from the start of init, Lua precompiled on a pool, animation clip and texture-pack index caches, a linear script parser.
+- Frame cap: a real "Uncapped" entry and a separate menu frame-rate cap in the Display options.
+
+HARDWARE
+CPU: AMD Ryzen 7 9800X3D (8 cores / 16 threads, up to 5.45 GHz)
+GPU: NVIDIA GeForce RTX 4090 24 GB, driver 615.71
+RAM: 32 GB DDR5-8000
+SSD: Crucial T705 2 TB, PCIe 5.0 x4 (13.5 GB/s sequential read measured)
+OS: CachyOS (Arch Linux), native Linux build of the game, NVIDIA OpenGL under XWayland, 5120x2160 at 240 Hz
+
+METHOD
+Hands-off harness: the game is launched, continues the bench save, spawns the car and drives the route on its own, then quits. The stock run uses the same build with every optimization switched off and the in-game limiter at 244. Frame times come from the game's own frame log and from MangoHud; boot and load times come from the game log. Timings in the video are synced to the log through the MangoHud clock.
+
+Music: the game's main-menu theme.
+Project Zomboid is by The Indie Stone.
+
+#ProjectZomboid #Build42 #Optimization #Linux #RTX4090 #9800X3D
