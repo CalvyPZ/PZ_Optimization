@@ -611,3 +611,24 @@ re-applies that instead of whatever the forced run saved on quit, so harness
 runs no longer change the player's frame-rate choice. Verified with two short
 boots: forced run logs "game uncapped", next auto boot logs "game 300 fps". Menu means every state that is not
 in-game or loading: logo, main menu, options, character creation.
+
+## zombie.core.skinnedmodel.model.Model (added 2026-09-19, night, game load; GitHub issue #1)
+
+`CreateShader(name)`: the stock method always posts a lambda to the render
+thread and waits for it, even when `ShaderManager` already holds the shader.
+Every `Model` constructor calls it, and the render thread only drains that
+queue once per render step, so each model built off the render thread costs
+one loading-screen frame. On the desktop that is ~1 ms; on the laptop
+`diego-flip` (issue #1) the loading-screen step is ~220 ms and the 73 animal
+models `AnimalDefinitions.loadAnimalDefinitions` builds (all `animalEffect`)
+were 16.5 s of the 31 s load. Now, when `shaderCache` is on, the method first
+asks `pzopt.ModelShaders` for a shader an earlier model already created for
+the same name and static flag and takes it without the round trip; only the
+first model per shader still posts to the render thread, and that call's wall
+time is recorded. `ModelShaders.summary()` ("model shaders: N cached, M
+render-thread round trips (x s waited), K served from the cache") is logged
+when the boot pump stops, when the load starts and at the harness's "world
+ready", so the trace shows the stall on any machine. The cache is safe
+because `ShaderManager` never removes shaders and a shader reloaded by the
+debug file watcher recompiles in place. Config key `shaderCache` (default
+true). The class-load marker goes in a static initializer like the others.

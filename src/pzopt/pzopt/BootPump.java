@@ -91,6 +91,7 @@ public final class BootPump {
       Log.info(String.format("boot pump stopped after %.2f s; file system %s", (System.nanoTime() - startNs) / 1e9,
             GameWindow.fileSystem.hasWork() ? "still has work" : "idle"));
       Log.info(FileTaskStats.summary());
+      Log.info(ModelShaders.summary());
       if (AnimClipCache.enabled()) {
          Log.info(AnimClipCache.stats());
       }
@@ -113,6 +114,7 @@ public final class BootPump {
                + (GameWindow.fileSystem.hasWork() ? "work remains" : "no work pending"));
       }
       Log.info(FileTaskStats.summary());
+      Log.info(ModelShaders.summary());
       if (AnimClipCache.enabled()) {
          Log.info(AnimClipCache.stats());
       }

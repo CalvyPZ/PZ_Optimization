@@ -112,3 +112,18 @@ so the recalc workers get the cores (C6, ~0.3 s); (4) fonts and translations
 on a thread under the FMOD overlap (boot, ~0.3 s); (5) NIO walk in
 `ZomboidFileSystem.init` (boot, ~0.25 s); (6) a persisted Kahlua state is the
 only way past the ~2 s of boot Lua and is out of scope for overrides.
+
+## Addendum 2026-09-19 (night): laptop load, GitHub issue #1
+
+On `diego-flip` (Radeon 890M, on battery) the load after Continue was 31 s,
+16.5 s of it inside `loadAnimalDefinitions`. The loop itself only reads Lua
+tables; the cost is `Model.CreateShader`, which posts to the render thread and
+waits once per model (73 animal models, one shader), and each wait is one
+loading-screen render step: ~1 ms here, ~220 ms there. The `Model` override
+serves repeat shaders from `pzopt.ModelShaders` (`shaderCache`), so only the
+first model per shader pays. `harness/loadtime.py` now prints the
+`loadAnimalDefinitions` window as row C2a, and the trace carries a
+"model shaders: ..." summary at load start and at world ready. Open question
+for the laptop: why its loading-screen render step is ~220 ms (texture uploads
+on radeonsi under the 6 W GPU power cap is the guess); a mains-powered run
+would separate power-limited from game-limited.

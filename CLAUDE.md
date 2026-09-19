@@ -116,3 +116,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   Continue → world 6.53 → 4.03 s, via boot threads (FMOD, anim sets), a boot-time file-pool
   pump, Lua precompile, animation clip + pack index caches (`~/Zomboid/pzopt/`), linear script
   parser, `Item.DoParam` switch, loader memos. First boot after a cache wipe is slower.
+- Issue #1 (laptop, 2026-09-19 night): 16.5 s of its load was `Model.CreateShader` blocking on
+  the render thread once per model (73 animal models × one ~220 ms loading-screen step). The
+  `Model` override serves repeat shaders from `pzopt.ModelShaders` (`shaderCache`);
+  `loadtime.py` row C2a shows the window. Why that laptop's loading-screen step is 220 ms is open.

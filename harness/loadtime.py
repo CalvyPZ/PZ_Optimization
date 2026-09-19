@@ -26,6 +26,7 @@ PHASES = [
     ("A Continue -> loader thread started", r"continuing latest save", r"IsoMetaGrid\.Create: begin loading"),
     ("C1 metagrid step1, tile definitions", r"IsoMetaGrid\.Create: begin loading", r"LoadTileDefinitions end"),
     ("C2 tiledefs end -> GameTime/radio/dictionary", r"LoadTileDefinitions end", r"IsoMetaGrid\.Create: finished loading"),
+    ("  C2a loadAnimalDefinitions (73 models; render-thread round trips)", r"loadAnimalDefinitions start", r"loadAnimalDefinitions end"),
     ("C3 map zones (Lua OnLoadMapZones, checkVehiclesZones, map_meta/zones)", r"IsoMetaGrid\.Create: finished loading", r"MapCollisionData\.init\(\) start"),
     ("C4 MapCollisionData.init", r"MapCollisionData\.init\(\) start", r"MapCollisionData\.init\(\) end"),
     ("C5 popman/pathfind/streamer create", r"MapCollisionData\.init\(\) end", r"WorldStreamer\.isBusy\(\) loop start"),

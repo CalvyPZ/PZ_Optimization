@@ -223,6 +223,7 @@ public final class Harness {
                 }
                 Log.info("harness: world ready, player at " + (int)x + "," + (int)y + "," + (int)p.getZ() + "; settling " + settle + "s");
                 Log.info("harness: MangoHud is " + (mangoHudLoaded() ? "loaded" : "NOT loaded") + " in this process");
+                Log.info(ModelShaders.summary()); // how many model loads blocked on the render thread during boot + load
                 long scheduled = Long.parseLong(HarnessFlags.get("route_start_epoch", "0")) * 1000L;
                 long nowMs = System.currentTimeMillis();
                 long earliest = nowMs + (long)(settle * 1000);
