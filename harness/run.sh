@@ -13,7 +13,9 @@
 # logged in (a logged-out client silently ignores -applaunch). Steam mode needs the launch options set to
 #   <repo>/harness/steam-launch.sh %command%
 # (see that file): it is how MANGOHUD=1 and the renderer variables reach the game.
-#   --renderer zink  Mesa Zink (GL over the NVIDIA Vulkan driver) instead of NVIDIA's GL;
+#   --renderer zink  Mesa Zink (GL over the NVIDIA Vulkan driver) instead of NVIDIA's GL; MangoHud then
+#                    comes in through its Vulkan layer (MANGOHUD=1 only, no libMangoHud_opengl preload:
+#                    both hooks at once killed the game at "VSync: OFF" on 2026-09-18, native-zink-1);
 #                    recorded in run.opts and in console.txt's "OpenGL version" line
 #   --env K=V        any other variable for the game process (repeatable)
 #
@@ -85,7 +87,14 @@ if [[ -z "$route_seconds" ]]; then
 fi
 [[ -n "$label" ]] || { echo "usage: $0 --label <name> [--quit-after secs] [--mode m] [--source-save Mode/Name] [--flag k=v]..." >&2; exit 2; }
 [[ -d "$ZOMBOID" ]] || { echo "Zomboid user dir not found: $ZOMBOID" >&2; exit 1; }
-[[ -e "$GAME_WRAPPER" ]] || { echo "game launcher not found: $GAME_WRAPPER" >&2; exit 1; }
+if [[ ! -e "$GAME_WRAPPER" ]]; then
+  echo "game launcher not found: $GAME_WRAPPER" >&2
+  # pz-env.sh falls back to the Proton layout whenever the native binary is missing, so the Windows depot itself may be
+  # absent: Steam holds one platform's depot at a time and swaps it when the compat tool changes (2026-09-19: only the
+  # Linux depot 108603 installed, no ProjectZomboid64.exe / projectzomboid.jar at the root)
+  [[ "$LAYOUT" == native ]] || echo "Windows depot not installed: in Steam, Properties > Compatibility, force a Proton tool and let it re-download; harness/proton-preflight.sh checks the rest (docs/proton-run-prep-2026-09-19.md)" >&2
+  exit 1
+fi
 echo "layout=$LAYOUT install=$PZ_DIR user-dir=$ZOMBOID"
 if pgrep -f '[P]rojectZomboid64' >/dev/null; then echo "the game is already running" >&2; exit 1; fi
 steam_logged_in() {
@@ -100,6 +109,11 @@ case "$launcher" in
   *) echo "unknown --launcher $launcher" >&2; exit 2 ;;
 esac
 # a locked desktop session never gives the game a display (it sits at "Creating display" forever)
+if [[ "$LAYOUT" != native ]]; then
+  # the Windows build (Proton) can only be started through the Steam client
+  launcher=steam
+  steam_logged_in || { echo "Proton layout needs the Steam client running and logged in (it launches the game)" >&2; exit 1; }
+fi
 if command -v loginctl >/dev/null; then
   sess=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3=="'"$USER"'" && $4=="seat0" {print $1; exit}')
   if [[ -n "$sess" ]] && loginctl show-session "$sess" -p LockedHint 2>/dev/null | grep -q '=yes'; then
@@ -159,12 +173,15 @@ cp -r "$TEMPLATE" "$ZOMBOID/Saves/$BENCH_SAVE"
 (( no_dashboard )) && disable_dashboard "$ZOMBOID/Saves/$BENCH_SAVE/mods.txt"  # the save is rebuilt from the template every run; nothing to restore
 
 # 3. point the game at the bench save and write the flag file
-LAUNCH_ENV="$ZOMBOID/pzopt-launch.env"   # read by harness/steam-launch.sh (the Steam launch option)
+# read by harness/steam-launch.sh (the Steam launch option) at this fixed path, whatever the layout: under Proton
+# $ZOMBOID is the compatdata prefix, which the wrapper does not look at
+LAUNCH_ENV="$HOME/Zomboid/pzopt-launch.env"; mkdir -p "$HOME/Zomboid"
 write_launch_env() {
   {
     [[ -n "$mangohud_secs" ]] && echo "PZOPT_MANGOHUD=1"
     case "$renderer" in
-      zink) echo "MESA_LOADER_DRIVER_OVERRIDE=zink"; echo "__GLX_VENDOR_LIBRARY_NAME=mesa"; echo "__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json" ;;
+      zink) echo "MESA_LOADER_DRIVER_OVERRIDE=zink"; echo "__GLX_VENDOR_LIBRARY_NAME=mesa"; echo "__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json"
+            echo "PZOPT_MANGOHUD_LIB=none" ;;   # Zink presents through Vulkan: MangoHud's Vulkan layer hooks it, the GL preload must stay out
       nvidia) ;;
       *) echo "unknown --renderer $renderer" >&2; exit 2 ;;
     esac
@@ -346,7 +363,10 @@ while :; do
       # dlsym shim deadlocks the Java launcher at start-up (mh-direct-check). What made it work under Steam was
       # the Steam overlay library in the same preload chain: it interposes dlsym/glX itself and chains to the
       # next hook, so it is preloaded here too when present.
-      if [[ "${PZOPT_MANGOHUD:-0}" == 1 && -f /usr/lib/mangohud/libMangoHud_opengl.so ]]; then
+      # With PZOPT_MANGOHUD_LIB=none (Zink) nothing is preloaded: MANGOHUD=1 enables the Vulkan layer.
+      if [[ "${PZOPT_MANGOHUD:-0}" == 1 && "${PZOPT_MANGOHUD_LIB:-opengl}" == none ]]; then
+        export MANGOHUD=1
+      elif [[ "${PZOPT_MANGOHUD:-0}" == 1 && -f /usr/lib/mangohud/libMangoHud_opengl.so ]]; then
         overlay="$HOME/.local/share/Steam/ubuntu12_64/gameoverlayrenderer.so"
         export MANGOHUD=1 LD_PRELOAD="${overlay:+$( [[ -f "$overlay" ]] && echo "$overlay:" )}/usr/lib/mangohud/libMangoHud_opengl.so"
       fi
@@ -427,7 +447,7 @@ if (( game_profiler )); then
     echo "GameProfiler recording directory not found: $ZOMBOID/Recording" >&2
   fi
 fi
-if [[ -n "$mangohud_secs" && "$launcher" == steam ]] && ! grep -a -q 'harness: MangoHud is loaded' "$out/console.txt"; then
+if [[ -n "$mangohud_secs" && "$launcher" == steam && "$LAYOUT" == native ]] && ! grep -a -q 'harness: MangoHud is loaded' "$out/console.txt"; then
   echo "MangoHud was not loaded into the game: set the Steam launch options to '$REPO/harness/steam-launch.sh %command%' (see harness/steam-launch.sh)" >&2
 fi
 if [[ -n "$mangohud_secs" ]]; then
