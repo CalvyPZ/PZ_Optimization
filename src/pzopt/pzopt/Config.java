@@ -76,7 +76,8 @@ import java.util.Properties;
  *   noLoadFade      true/false   GameLoadingState.exit does not fade the loading screen to black (350 ms of sleeps) before
  *                            the world's own 2 s fade-in (default true)
  *   fmodAsync       true/false   FMODManager.init (system + 12 banks, ~1.6 s) runs on a thread from the top of
- *                            GameWindow.mainThreadInit and is joined before the scripts load (default true)
+ *                            GameWindow.mainThreadInit and is joined before the scripts load; the sound managers
+ *                            (whose FMOD global parameters need the banks) are built at the join (default true)
  *   loadWorkers     int          recalc pool width while a world is loading (GameLoadingState.loader alive): the 361
  *                            chunks of the initial chunk map recalc on this many threads, then the pool shrinks back
  *                            to `workers` (default max(workers, cores / 2); clamped like workers; cores - 2 tripled the per-chunk

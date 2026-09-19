@@ -470,7 +470,11 @@ until the tile set is filtered.
 
 **FMOD on a boot thread** (`fmodAsync`). Sound system and 12 bank files (1.6 s)
 initialise on a thread started at the top of the main thread's init and are
-joined right before the first sound script needs them.
+joined right before the first sound script needs them. The sound managers are
+built at the join, not before it: their FMOD global parameters (music state,
+intensity, time of day, ...) resolve against the loaded banks in their
+constructors, and built too early they silently never register, which left the
+menu music playing forever and the in-game audio dead (issue #3).
 
 **Boot-time file-pool pump** (`bootPump`, `bootFileThreads`, `earlyModels`). The
 async file system only advanced once per rendered frame, and frames start at the

@@ -3,19 +3,28 @@ package pzopt;
 import java.util.ArrayList;
 import java.util.List;
 
+import fmod.fmod.FMODManager;
+import zombie.core.Core;
+
 /**
  * Boot work that the stock game does serially on the main thread but that
  * nothing needs until later (docs/plan-instant-load.md, B2 and B9).
  *
  * FMOD: FMODManager.init (system create plus twelve bank files, ~1.6 s of
  * native work) is the first thing GameWindow.mainThreadInit does. Its first
- * consumer is GameSounds.ScriptsLoaded at the end of ScriptManager.Load
- * (event descriptions for the sound scripts); the four volume setters right
- * after it in mainThreadInit read VCAs from the banks. So the init runs on a
- * thread from the top of mainThreadInit, the volume calls are queued, and
- * GameWindow.initShared joins the thread and runs the queue just before the
- * scripts load. The FMOD Studio API is thread-safe; the game already drives it
- * from several threads.
+ * consumer is not GameSounds.ScriptsLoaded at the end of ScriptManager.Load
+ * (event descriptions for the sound scripts) but the constructors of
+ * SoundManager and AmbientStreamManager right after it in mainThreadInit:
+ * their FMODGlobalParameter fields (MusicState, MusicIntensity, TimeOfDay, ...)
+ * resolve their parameter descriptions from the loaded banks in the
+ * constructor, and a null description is silently kept (the parameter never
+ * registers and its values never reach FMOD; the menu music then never stops
+ * and the in-game music and ambience are dead, issue #3). The four volume
+ * setters read VCAs from the banks as well. So the init runs on a thread from
+ * the top of mainThreadInit, the construction of the sound singletons and the
+ * volume calls are queued behind it, and GameWindow.initShared joins the
+ * thread and runs the queue just before the scripts load. The FMOD Studio API
+ * is thread-safe; the game already drives it from several threads.
  */
 public final class BootAsync {
    private static Thread fmod;
@@ -129,6 +138,16 @@ public final class BootAsync {
       }
       for (Runnable r : queued) {
          r.run();
+      }
+      if (!Core.soundDisabled) {
+         // Regression check for issue #3: MusicState is one of SoundManager's global parameters; it is only in the
+         // map when its description was resolved after the banks loaded.
+         boolean registered = FMODManager.instance.getGlobalParameter("MusicState") != null;
+         if (registered) {
+            Log.info("fmod global parameters registered after the join (MusicState found)");
+         } else {
+            Log.warn("fmod global parameter MusicState not registered: the sound managers were built before the banks loaded");
+         }
       }
    }
 }

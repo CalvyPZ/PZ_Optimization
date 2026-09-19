@@ -290,13 +290,24 @@ Boot edits (added 2026-09-19, evening, `docs/plan-instant-load.md`), each
 behind a `Config` key and `pzopt.Overrides.enabled()`:
 
 - `mainThreadInit`: `FMODManager.instance.init()` is handed to
-  `pzopt.BootAsync.startFmod` (a thread) when `fmodAsync` is on; the four
-  `SoundManager.instance.set*Volume` calls right after the render-thread wait
-  are wrapped in `pzopt.BootAsync.afterFmod(...)`, which runs them at once when
-  the init is synchronous and otherwise after the join. Why: the FMOD system
-  create and the twelve bank files are 1.4 s of native work that nothing needs
-  before the sound scripts, and the VCAs the volume setters read live in the
-  banks.
+  `pzopt.BootAsync.startFmod` (a thread) when `fmodAsync` is on; the
+  construction of `SoundManager.instance`, `AmbientStreamManager.instance` and
+  `BaseSoundBank.instance` (each still choosing the Dummy variant on
+  `Core.soundDisabled`), `VoiceManager.instance.loadConfig()` and the four
+  `SoundManager.instance.set*Volume` calls are wrapped together in one
+  `pzopt.BootAsync.afterFmod(...)` block, which runs at once when the init is
+  synchronous and otherwise at the join. Why: the FMOD system create and the
+  twelve bank files are 1.4 s of native work that nothing needs before the
+  sound scripts, and the VCAs the volume setters read live in the banks. The
+  managers must wait too (issue #3, 2026-09-20): `SoundManager` and
+  `AmbientStreamManager` build their `FMODGlobalParameter` fields (MusicState,
+  MusicIntensity, TimeOfDay, ...) in field initialisers, and each constructor
+  resolves its parameter description from the banks loaded so far. Built
+  while the banks were still loading they kept a null description, never
+  registered with `FMODManager`, and their values never reached FMOD: the
+  menu music never stopped and the in-game music and ambience were dead. This
+  was true on Linux as well; nobody had listened to a run. `joinFmod` now logs
+  whether `MusicState` is registered.
 - `initShared`: `pzopt.BootAsync.joinFmod()` right before
   `ScriptManager.instance.Load()` (whose last step,
   `GameSounds.ScriptsLoaded`, is the first FMOD consumer). After
