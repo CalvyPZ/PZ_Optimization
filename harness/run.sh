@@ -326,16 +326,21 @@ while :; do
   sysmon_pid=$!
   rec_pid=""
   if (( record )); then
-    # whole monitor (window capture is X11-only), scaled to half the 5120x2160 desktop, GPU encoder;
+    # whole monitor (window capture is X11-only), scaled to half the 5120x2160 desktop, GPU encoder,
+    # desktop audio (game sound) on an AAC track;
     # stopped with SIGINT once the game has exited
     rec_mon=$(gpu-screen-recorder --list-monitors 2>/dev/null | head -1 | cut -d'|' -f1)
-    gpu-screen-recorder -w "${rec_mon:-DP-1}" -s 2560x1080 -f 60 -q very_high -k auto -cursor no -o "$out/recording.mp4" > "$out/recording.log" 2>&1 &
+    gpu-screen-recorder -w "${rec_mon:-DP-1}" -s 2560x1080 -f 60 -q very_high -k auto -cursor no -a default_output -o "$out/recording.mp4" > "$out/recording.log" 2>&1 &
     rec_pid=$!
   fi
   if [[ "$launcher" == direct ]]; then
     # same variables the Steam wrapper would apply, on the host instead of inside the Steam runtime container
     (
       set -a; . "$LAUNCH_ENV"; set +a
+      # The Steam runtime runs the game under the C locale; on the host the JVM picks up the desktop's
+      # LC_NUMERIC (de_DE), and MangoHud then fails to parse "fps_metrics=avg,0.01,0.001" (only AVG is
+      # shown, "4,2ms" formatting). Pin the numeric locale so direct launches match Steam launches.
+      export LC_NUMERIC=C
       # The game reaches GL through glvnd and LWJGL resolves glXSwapBuffers with dlsym, so MangoHud's OpenGL
       # library alone never hooks on the host (no CSV, no HUD in every direct run before 2026-09-19), and its
       # dlsym shim deadlocks the Java launcher at start-up (mh-direct-check). What made it work under Steam was
@@ -358,6 +363,14 @@ while :; do
   done
   [[ -n "$game_pid" ]] || { echo "game process did not appear within 120s" >&2; exit 1; }
   echo "game running (pid $game_pid); waiting for exit"
+  # MangoHud's avg / 1% / 0.1% FPS metrics accumulate from process start (menus, world load),
+  # so on drive runs its reset keybind (reset_fps_metrics=Shift_R+F9, the default) is pressed
+  # through XTEST just as the route starts; the game is an XWayland window, so xdotool reaches it.
+  if [[ -n "$mangohud_secs" && "$mode" == drive ]] && command -v xdotool >/dev/null; then
+    ( t=$((route_start_epoch - $(date +%s))); (( t > 0 )) && sleep "$t"; sleep 0.5
+      xdotool keydown Shift_R keydown F9; sleep 0.3; xdotool keyup F9 keyup Shift_R
+      echo "mangohud: fps metrics reset key sent $(( $(date +%s) - launch_epoch )) s after launch" ) &
+  fi
   # start-up watchdog: a launch that never gets as far as writing console.txt (a preload deadlock, a driver hang)
   # is killed by PID after 120 s instead of stalling the run forever
   ( for _ in $(seq 1 60); do sleep 2; [[ -f "$ZOMBOID/console.txt" ]] && exit 0; kill -0 "$game_pid" 2>/dev/null || exit 0; done
