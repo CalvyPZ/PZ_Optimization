@@ -475,12 +475,59 @@ built for an older revision onto a newer game.
 
 ### Windows
 
-Not tested. The build and install scripts are bash and the layout detection in
-`scripts/pz-env.sh` knows the Windows depot (`ProjectZomboid64.exe` next to the
-jar), so under Git Bash or WSL with `PZ_DIR` set to the game folder the same
-steps should work, but nobody has run them. Without the script you can copy the
-contents of `build/classes/` into the game folder by hand and remove them by hand
-afterwards.
+Tested on 2026-09-19 (Windows 11, Build 42.20.4): the Windows depot ships the
+same `projectzomboid.jar` as the Linux one, so the class files built on Linux
+work unchanged and nothing has to be compiled on Windows. The runtime guard
+still checks the game revision and the hash of every shadowed class; on a
+mismatch it logs one line and the game runs as stock.
+
+1. **Get the zip.** Download `pzopt-b0bbce05d5-classes.zip` from the
+   [release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
+   (or build it on a Linux machine with `scripts/build.sh`; it lands in `build/`).
+   The revision in the name must match your game: Steam, Properties, Betas must
+   show **42.20.4**.
+2. **Close the game** and check the launcher config. In PowerShell, with `$PZ`
+   set to your game folder (Steam, right-click the game, Manage, Browse local files):
+
+   ```powershell
+   $PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
+   Get-Content "$PZ\ProjectZomboid64.json" | Select-String classpath
+   Test-Path "$PZ\pzopt"; Test-Path "$PZ\zombie"; Test-Path "$PZ\org"; Test-Path "$PZ\se"
+   ```
+
+   The classpath must list `"."` before `"projectzomboid.jar"` (it does on the
+   stock depot) and the four folders must not exist yet.
+3. **Unpack the zip into the game folder.** It only adds files; the jar is never
+   touched.
+
+   ```powershell
+   Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
+   Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
+   ```
+
+4. **Play.** Launch from Steam. `%USERPROFILE%\Zomboid\console.txt` shows one
+   `[pzopt] loaded override ... active` line per class; a line saying the
+   overrides were built for another revision means the game and the zip do not
+   match. The first boot writes the caches under `%USERPROFILE%\Zomboid\pzopt\`
+   and is slower than the ones after it.
+5. **Settings** work as on Linux: `pzopt.properties` next to the jar.
+6. **Uninstall** removes exactly the files the zip added (listed in
+   `pzopt-files.txt`) and the empty folders:
+
+   ```powershell
+   Get-Content "$PZ\pzopt-files.txt" | ForEach-Object { Remove-Item -LiteralPath (Join-Path $PZ $_) -ErrorAction SilentlyContinue }
+   Remove-Item "$PZ\pzopt-files.txt", "$PZ\pzopt.properties" -ErrorAction SilentlyContinue
+   foreach ($d in "pzopt","zombie","org","se","media\lua\client\pzopt") {
+     Get-ChildItem "$PZ\$d" -Recurse -Directory -ErrorAction SilentlyContinue | Sort-Object FullName -Descending |
+       Where-Object { -not (Get-ChildItem $_.FullName -Force) } | Remove-Item
+     if ((Test-Path "$PZ\$d") -and -not (Get-ChildItem "$PZ\$d" -Force)) { Remove-Item "$PZ\$d" }
+   }
+   ```
+
+First Windows numbers (bench route, 5120x2160, 500 fps cap): stock 172 fps and
+p99 19.1 ms, optimized 252 fps and p99 13.9 ms; details, the boot timings and
+the test procedure are in [docs/windows-test.md](docs/windows-test.md). The
+benchmark harness runs on Windows through `harness/run-win.ps1`.
 
 ---
 

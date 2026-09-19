@@ -178,6 +178,80 @@ Test-Path "$PZ\pzopt"   # False
 The caches in `%USERPROFILE%\Zomboid\pzopt\` can be deleted by hand; the game
 never reads them without the overrides installed.
 
+## Results 2026-09-19 (first Windows test)
+
+Machine: the same box booted into Windows 11 IoT Enterprise LTSC 2024 (Ryzen 7 9800X3D, RTX 4090,
+NVIDIA driver 616.92 / 32.0.16.1692, Azul Zulu 25 bundled JRE, ZGC). Game at
+`C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid`, Build 42.20.4, jar sha256 and
+size identical to the Linux depot's, classpath `"."` before the jar. Desktop 5120x2160, game
+fullscreen at desktop resolution, vsync off, in-game cap 500 fps (`framecap.ini gameFps=500`),
+launched through Steam. No MangoHud; utilization from `Get-Counter` + `nvidia-smi`.
+
+Install: `Expand-Archive` of the zip, 97 manifest files, no pre-existing folders. Guard: every
+override logged `active`, no revision or class-hash mismatch. Nothing had to be compiled.
+
+### Boot
+
+| Boot | Menu after process start | Notes |
+|---|---|---|
+| 1 (cold caches) | ~40 s | 1522 anim clips written, FMOD "Error initializing output device" (no audio device set up on this Windows install, not ours) |
+| 2 (warm) | 21 s | anim clip cache 2161 hits / 0 misses |
+| 3+ (warm, bench runs) | ~15 s | boot pump 5.9 s, anim sets preloaded 1.0–1.2 s |
+
+Quitting from the main menu of boot 1 crashed on exit: `EXCEPTION_ACCESS_VIOLATION` in
+`ZNetJNI64.dll` under `SteamWorkshop.n_GetInstalledItemFolders`, reached from
+`RenderThread.shutdown → IsoPuddles.getInstance → Texture.getSharedTexture → ZomboidFileSystem.validatePrefix`
+(the puddle renderer is constructed for the first time during shutdown and asks Steam for mod
+folders after the Steam API is gone). Stock code path; a menu quit of a later boot did not
+reproduce it. Dump kept as `harness/runs/win-boot-20260919/hs_err_pid3536-boot1-quit.log`.
+
+Frame-cap combos: Diego confirmed Uncapped, 300–500 and the separate Menu framerate combo; a
+500 fps choice survived a relaunch (`framecap.ini`, `[pzopt] frame cap: game 500 fps`).
+
+### Bench route, optimized vs stock switches
+
+`harness/run-win.ps1` (a PowerShell port of the run.sh steps a bench needs) on the committed
+bench save, `--flag zoom=max` (max zoom on this install is **2.0**, not the 2.5 of the Linux
+runs: options.ini `zoomLevels2x` tops out at 200), dashboard off, `instrument=true`. Stock =
+every switch in the list above off. Analysis with `harness/analyze.py` (embeddable Python 3.12
+under `%LOCALAPPDATA%\Programs\Python312-embed`).
+
+| Run | fps mean | frame mean | p50 | p90 | p99 | p99.9 | max | >33 ms |
+|---|---|---|---|---|---|---|---|---|
+| `win-bench-stock-20260919-222950` | 172.5 | 5.8 ms | 4.8 | 10.1 | 19.1 | 28.4 | 46.8 | 8 |
+| `win-bench-opt-20260919-222646` | 251.7 | 4.0 ms | 3.2 | 6.8 | 13.9 | 19.9 | 42.2 | 2 |
+
+| Run | chunks | queue wait mean | queue wait p99 | recalc threads |
+|---|---|---|---|---|
+| stock | 4294 | 174 ms | 351 ms | World Streamer only |
+| optimized | 4294 | 30 ms | 74 ms | 4 × pzopt-recalc |
+
+Utilization over the route window (sysmon, ~62 samples each):
+
+| Run | machine CPU | busiest core | game process | main thread | GPU load | GPU W |
+|---|---|---|---|---|---|---|
+| stock | 29 % | 66 % | 271 % of a core | 88 % of wall | 70 % (p90 99) | 139 |
+| optimized | 28 % | 70 % | 274 % of a core | 93 % of wall | 60 % (p90 82) | 157 |
+
+Finding against the objective: at 252 fps under a 500 cap neither the machine (28 % of 16
+cores) nor the GPU (60 %) is saturated; the game thread is (`main` 93 % of wall). The
+optimized build is game-thread-bound on Windows exactly as on Linux. Stock burns more GPU per
+frame (the per-frame tree/translucent pass) for fewer frames.
+
+Not directly comparable with the Linux native numbers (zoom 2.0 vs 2.5, 500 vs 240 cap,
+Windows driver 616.92), but the direction and the p99 gain (19.1 → 13.9 ms) match the Linux
+result (19.3 → 8.3 ms at zoom 2.5).
+
+One stock run only: no noise floor yet. Two runs were discarded and are kept with an
+`-INVALID-` suffix: the first optimized run lost window focus for 11 s right after the world
+came up (options.ini `focusloss=true` pauses the game; `IsoChunk.update` stops, so the
+sampler's first route frame was 12.6 s and the route started late), and the first stock run
+got its properties on one comma-joined line (`powershell -File` does not split `-Prop a,b`;
+run-win.ps1 now splits on commas itself).
+
+Not yet done from the list above: the manual drive at max zoom, walking through buildings,
+quit-to-menu-and-Continue, and the visible-fps reading with the in-game limiter at Uncapped.
+
 ## What to bring back to Linux
 
 - `console.txt` from the first optimized boot (the `[pzopt]` lines) and from a

@@ -100,6 +100,18 @@ Use `--record` on drive runs and read frames from `recording.mp4` with ffmpeg (t
 sheet) before concluding anything about visuals; it is a monitor capture, so the game window
 must stay focused and uncovered.
 
+## Windows
+
+`run-win.ps1` (PowerShell) does the run.sh steps a bench needs on a Windows depot: harness mod,
+bench save rebuilt from `bench-save/pzopt-bench-template.tar.zst` (Windows tar reads zstd), flag
+file, pzopt.properties, Steam launch, a `Get-Counter` + `nvidia-smi` sampler with sysmon.sh's
+columns, collection into `harness/runs/`. No MangoHud, JFR or recording. `-Prop`/`-Flag` accept
+comma-joined values (`powershell -File` hands the script one string). The Java harness quits at
+the route end by itself when no MangoHud is loaded. `analyze.py` runs on the embeddable Python
+(no installer needed); `analyze-win.ps1` is a PowerShell fallback. The game pauses on focus loss
+(`focusloss=true`), which stops `IsoChunk.update` and with it the frame sampler: keep the window
+focused. Reference numbers in `baseline/windows/`, findings in `docs/windows-test.md`.
+
 ## Pitfalls that already cost runs
 
 - EXIT trap under `set -e`: a failing last command of an `&&` list aborts the restore.
