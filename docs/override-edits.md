@@ -573,8 +573,23 @@ is `src/lua/client/pzopt/pzopt_framecap_options.lua`, installed loose into the
 game dir's `media/lua/client/pzopt/` by `scripts/pzopt.sh` (build.sh copies
 `src/lua/` under `build/classes/media/lua/`). The Lua wraps `MainOptions:addCombo`
 and, right after the stock "Framerate" combo is added, adds a second one whose
-entries are "Same as in-game", "Uncapped" and the stock fps table; index 1 / 2 /
+entries are "Same as in-game", "Uncapped" and the fps table; index 1 / 2 /
 3.. is the convention `FrameCap` stores in `Zomboid/pzopt/framecap.ini`
 (`menuFramerateIndex=`), written the moment the option is applied because
-`Core.saveOptions` only writes keys it knows. Menu means every state that is not
+`Core.saveOptions` only writes keys it knows.
+
+Extra caps (added 2026-09-19, later): both combos list 500, 430, 400, 330 and
+300 fps above the stock 244 (`FrameCap.FPS_TABLE` and the Lua's copy of it must
+agree; the framecap.ini index for the stock entries shifted by five). The stock
+"Framerate" combo is built with the extended list from the same `addCombo`
+wrapper, and the stock `'framerate'` GameOption, which hard-codes the stock
+indices in `toUI`/`apply`, is caught on `gameOptions:add` and given
+replacements that look the value up in the combo and apply it through
+`PerformanceSettings.setFramerateUncapped` / `setFramerate` instead of
+`Core.setFramerate` (which only knows indices 1..14). `Core.saveOptions` writes
+`frameRate=` from `getLockFPS()` so the value persists, but `Core.loadOptions`
+feeds it through an `IntegerConfigOption` clamped to 24..244 that rejects
+anything higher and leaves the lock at the option's 60 default; `FrameCap.applySaved`
+therefore also re-applies a saved capped value above 244 (it already re-read
+the raw lines for the uncapped case). No Core edit. Menu means every state that is not
 in-game or loading: logo, main menu, options, character creation.

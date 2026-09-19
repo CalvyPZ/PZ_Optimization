@@ -32,8 +32,16 @@ import zombie.gameStates.GameLoadingState;
  * {@code false} force the in-game cap off / on for a run without touching the player's settings.
  */
 public final class FrameCap {
-   /** Same order as Core.setFramerate indices 2..14. */
-   static final int[] FPS_TABLE = {244, 240, 165, 144, 120, 95, 90, 75, 60, 55, 45, 30, 24};
+   /**
+    * The combo's fps entries, highest first. 500..300 are pzopt additions (the stock combo stops at
+    * 244); the rest is Core.setFramerate indices 2..14 in the same order. Also the table the Lua
+    * combos show, so the two must agree.
+    */
+   static final int[] FPS_TABLE = {500, 430, 400, 330, 300, 244, 240, 165, 144, 120, 95, 90, 75, 60, 55, 45, 30, 24};
+   /** Core's IntegerConfigOption for frameRate= rejects anything above this. */
+   static final int STOCK_MAX_FPS = 244;
+   public static final int MIN_FPS = 24;
+   public static final int MAX_FPS = 500;
    public static final int MENU_SAME = 1;
    public static final int MENU_UNCAPPED = 2;
    public static final int MENU_CHOICES = 2 + FPS_TABLE.length;
@@ -131,7 +139,7 @@ public final class FrameCap {
          f.getParentFile().mkdirs();
          try (FileWriter w = new FileWriter(f)) {
             w.write("# pzopt frame limiter for the menus; index into the Display-options combo\n");
-            w.write("# 1 = same as in-game, 2 = uncapped, 3.. = 244 240 165 144 120 95 90 75 60 55 45 30 24\n");
+            w.write("# 1 = same as in-game, 2 = uncapped, 3.. = 500 430 400 330 300 244 240 165 144 120 95 90 75 60 55 45 30 24\n");
             w.write("menuFramerateIndex=" + menuIndex + "\n");
          }
       } catch (Exception e) {
@@ -183,11 +191,17 @@ public final class FrameCap {
          Log.warn("could not read " + ini + ": " + e);
          return;
       }
+      boolean inRange = lock >= MIN_FPS && lock <= MAX_FPS;
       if (uncapped == null || !uncapped) {
-         return; // Core already applied the capped value
+         // Core already applied the capped value, unless it is one of the pzopt caps above 244:
+         // its IntegerConfigOption rejects those and the lock fell back to the option's value.
+         if (inRange && lock > STOCK_MAX_FPS) {
+            PerformanceSettings.setLockFPS(lock);
+         }
+         return;
       }
       PerformanceSettings.instance.setFramerateUncapped(true);
-      if (lock >= 24 && lock <= 244) {
+      if (inRange) {
          PerformanceSettings.setLockFPS(lock); // keep the saved value instead of the 60 Core reset it to
       }
    }
