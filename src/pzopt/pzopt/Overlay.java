@@ -32,8 +32,8 @@ import zombie.ui.UIFont;
  * top of the menus, the loading screen and the world alike. (After {@code states.render()} in
  * {@code GameWindow.renderInternal} is too late: the hand-off has happened.)
  *
- * What it shows, over a sliding window of {@link #WINDOW_NS}: fps and mean frame time, p99 / p99.9 /
- * max, 1 %-low fps, frame-to-frame jitter, spikes (frames above twice the median), and the
+ * What it shows, over a sliding window of {@link #WINDOW_NS}: fps (coloured against the cap, see
+ * {@link #fpsColor}) and mean frame time, p99 / p99.9 / max, 1 %-low fps, frame-to-frame jitter, spikes (frames above twice the median), and the
  * utilization the objective asks for: GPU busy share (timer queries), the game thread's and the
  * render thread's CPU share of one core, the process's share of all cores and the whole machine's
  * (JMX), plus the heap. A verdict line names what is saturated when the frame rate is under the
@@ -96,11 +96,15 @@ public final class Overlay {
    private static final float[] GREEN = {0.45f, 1f, 0.45f};
    private static final float[] AMBER = {1f, 0.8f, 0.3f};
    private static final float[] RED = {1f, 0.45f, 0.45f};
+   private static final float[] BLUE = {0.45f, 0.7f, 1f};
    private static volatile boolean visible = Config.OVERLAY;
    private static boolean fontFailed;
    private static UIFont font;
    private static long lastStatsNs;
    private static String[] lines = new String[0];
+   /** The "NNN fps" token of the first line, drawn in {@link #fpsColor}; the rest of that line follows it in white. */
+   private static String fpsText = "";
+   private static float[] fpsColor = WHITE;
    private static float[] verdictColor = WHITE;
    private static String verdict = "";
    private static float budgetMs = 1000f / 240f;
@@ -395,6 +399,7 @@ public final class Overlay {
       }
       if (count == 0) {
          lines = new String[] {"performance overlay: waiting for frames"};
+         fpsText = "";
          verdict = "";
          return;
       }
@@ -417,8 +422,10 @@ public final class Overlay {
       float heapMax = rt.maxMemory() / 1073741824f;
       int cores = rt.availableProcessors();
       String gpu = gpuState < 0 ? "n/a" : String.format(java.util.Locale.ROOT, "%.0f %%", gpuLoad);
+      fpsText = String.format(java.util.Locale.ROOT, "%3.0f fps", fps);
+      fpsColor = fpsColor(fps, cap);
       lines = new String[] {
-            String.format(java.util.Locale.ROOT, "%3.0f fps   %5.2f ms   cap %s", fps, mean, cap > 0 ? cap + " fps" : "none"),
+            String.format(java.util.Locale.ROOT, "   %5.2f ms   cap %s", mean, cap > 0 ? cap + " fps" : "none"),
             String.format(java.util.Locale.ROOT, "p50 %.2f   p99 %.2f   p99.9 %.2f   max %.1f ms   (%d frames / %d s)", p50, p99, p999, max, count, (int)(WINDOW_NS / 1_000_000_000L)),
             String.format(java.util.Locale.ROOT, "1%%-low %.0f fps   jitter %.2f ms   spikes >2x median %d", p99 > 0 ? 1000f / p99 : 0f, count > 1 ? jitter / (count - 1) : 0f, spikes),
             String.format(java.util.Locale.ROOT, "GPU %s   game thread %.0f %%   render thread %.0f %%   process %.0f %% of %d cores   machine %.0f %%   heap %.1f/%.1f GB",
@@ -439,6 +446,18 @@ public final class Overlay {
             verdictColor = RED;
          }
       }
+   }
+
+   /**
+    * Colour of the fps number. Capped: blue at the cap (same 2 % tolerance as the verdict, the limiter
+    * never lands exactly on it), green within 10 % of it, yellow within 50 %, red further below.
+    * Uncapped: blue above 300 fps, green 150-300, yellow 100-150, red under 100.
+    */
+   static float[] fpsColor(float fps, int cap) {
+      if (cap > 0) {
+         return fps >= cap * 0.98f ? BLUE : fps >= cap * 0.9f ? GREEN : fps >= cap * 0.5f ? AMBER : RED;
+      }
+      return fps > 300f ? BLUE : fps >= 150f ? GREEN : fps >= 100f ? AMBER : RED;
    }
 
    private static float pct(float[] sorted, float p) {
@@ -463,8 +482,9 @@ public final class Overlay {
       int graphH = lineH * 4;
       int graphW = GRAPH_BARS * 2;
       int textW = 0;
-      for (String l : lines) {
-         textW = Math.max(textW, tm.MeasureStringX(font, l));
+      int fpsW = fpsText.isEmpty() ? 0 : tm.MeasureStringX(font, fpsText);
+      for (int i = 0; i < lines.length; i++) {
+         textW = Math.max(textW, (i == 0 ? fpsW : 0) + tm.MeasureStringX(font, lines[i]));
       }
       textW = Math.max(textW, tm.MeasureStringX(font, verdict));
       int w = Math.max(textW, graphW) + pad * 2;
@@ -478,8 +498,13 @@ public final class Overlay {
       SpriteRenderer sr = SpriteRenderer.instance;
       sr.renderi(null, x, y, w, h, 0f, 0f, 0f, 0.65f, null);
       int ty = y + pad;
-      for (String l : lines) {
-         tm.DrawString(font, x + pad, ty, l, 1.0, 1.0, 1.0, 1.0);
+      for (int i = 0; i < lines.length; i++) {
+         int tx = x + pad;
+         if (i == 0 && fpsW > 0) {
+            tm.DrawString(font, tx, ty, fpsText, fpsColor[0], fpsColor[1], fpsColor[2], 1.0);
+            tx += fpsW;
+         }
+         tm.DrawString(font, tx, ty, lines[i], 1.0, 1.0, 1.0, 1.0);
          ty += lineH;
       }
       if (!verdict.isEmpty()) {
