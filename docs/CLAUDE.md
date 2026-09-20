@@ -15,6 +15,7 @@ classes are described in words.
 | `plan-vulkan-renderer.md` | plan to move from OpenGL to Vulkan |
 | `plan-wayland.md` | 2026-09-19 native Wayland vs XWayland A/B: a wash at the cap, XWayland stays default |
 | `plan-400fps.md` | 2026-09-20 evening uncapped pass on the spinning route: 273 → ~500 fps, run table, GPU section breakdown, what locking 400 still needs |
+| `plan-500fps.md` | 2026-09-20 night: where the game thread still spends its frame after the 400 pass, untouched hot code, never-profiled areas (render thread, composite), ordered work list |
 | `plan-diagram.md` | plan at a glance |
 | `proton-run-prep-2026-09-19.md` | command sequence for the pending Proton comparison |
 | `windows-test.md` | installing the prebuilt class zip on a Windows depot and testing it; 2026-09-19 results of the first Windows bench (stock vs optimized, utilization) |

@@ -138,7 +138,8 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   ~0.3-0.5 ms a frame). `harness/gametree.py` prints the game-thread call tree from a JFR run.
   Never build or decompile while a run is going; check `pzopt.sh status` says installed before a launch.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
-  `docs/plan-400fps.md` (the locked-400 structural items).
+  `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
+  still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under
   GLX). `docs/plan-wayland.md`.
