@@ -11,7 +11,8 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   BuildingRoomsEditor, GameLoadingState, se.krka LuaCompiler, AnimationSet,
   AnimationAssetManager, TexturePackDevice, scripting.objects.Item, PerformanceSettings
   (frame limiter, 2026-09-19), and skinnedmodel.model.Model (shader cache, issue #1, 2026-09-19
-  night). Inner classes are shadowed too.
+  night), and core.textures.ImageData (byte[] mipmap loops, issue #2, 2026-09-20). Inner classes
+  are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md` and marked `// pzopt:` in the
   source.** After a game update, `scripts/regen-overrides.sh` decompiles the new jar so the
   edits can be re-applied on top.
@@ -35,6 +36,7 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
 | `LoadTrace` | stamps console lines with epoch ms into `pzopt-loadtrace.out` |
 | `BootAsync` / `BootPump` / `LuaPrecompiler` / `AnimClipCache` + `CachedAnimationTask` / `PackIndex` / `ScriptText` / `LotHeaders` / `FileTaskStats` / `ScriptDump` | boot and load work (2026-09-19 evening): FMOD init and animation-set parse on boot threads, file-pool pump during init, parallel Lua precompile cache, animation clip and texture-pack index caches under `~/Zomboid/pzopt/`, linear script text passes, per-cell lot-header memo, file-task timing, item field dump for equivalence checks |
 | `ModelShaders` | shaders already created by a `Model`, so `Model.CreateShader` skips the blocking render-thread round trip for repeat shader names (`shaderCache`; issue #1: 73 animal models were 16.5 s of a laptop load); summary logged at load start and world ready |
+| `MipMaps` | row-based texture mipmap generation and alpha premultiply on `byte[]` copies (`mipmapArrays`; issue #2: the stock per-byte direct-buffer loop was C2-miscompiled into a SIGSEGV on a file-pool thread); byte-identical to stock, `tests/pzopt/MipMapsTest` |
 | `Overrides` / `Guard` / `BuildInfo` / `Log` | install checks, build stamp, logging |
 
 Design notes carried from memory:

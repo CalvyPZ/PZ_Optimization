@@ -329,6 +329,7 @@ comments: `src/pzopt/pzopt/Config.java`.
 | `animClipCache` | `true` | cache imported animation clips under `Zomboid/pzopt/` |
 | `packIndex` | `true` | cache texture-pack page offsets |
 | `shaderCache` | `true` | reuse model shaders instead of one render step per model |
+| `mipmapArrays` | `true` | texture mipmaps on byte[] rows instead of per-byte direct-buffer loops (issue #2; the crash itself was the laptop) |
 | `loadWorkers` | `max(workers, cores/2)` | recalc pool width while a world loads |
 | `noLoadFade` | `true` | skip the loading screen's fade to black |
 | `uncappedFps` | `auto` | `true`/`false` force the cap off/on for a run |
@@ -531,6 +532,13 @@ thread and waited one loading-screen step per model. On a laptop whose
 loading-screen step is 220 ms the 73 animal models cost 16.5 s (GitHub issue #1).
 Repeat shaders now come from a cache.
 
+**Mipmaps on byte arrays** (`mipmapArrays`). Mip levels and alpha premultiply are built row
+by row on `byte[]` copies instead of per-byte direct-buffer accesses, byte-identical to stock.
+Written for GitHub issue #2 (a JVM SIGSEGV in `ImageData.scaleMipLevelMaxAlpha` on a laptop),
+whose crash log shows a plain stack reload faulting on a 32-bit-truncated address alongside
+two other truncated-address faults on that machine the same evening: a hardware or kernel
+problem there, not the game code.
+
 **Wider recalc pool while loading** (`loadWorkers`). The 361 chunks of the initial
 chunk map recalc on half the cores, then the pool shrinks back.
 
@@ -568,7 +576,7 @@ Shadowed classes (24 game classes plus one from-scratch shim):
 | Area | Classes |
 |---|---|
 | Streaming and render | `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`, `zombie.iso.ChunkSaveWorker`, `zombie.iso.IsoMetaCell`, `zombie.core.VBO.GLVertexBufferObject`, `zombie.iso.fboRenderChunk.FBORenderCell`, `zombie.GameWindow`, `zombie.core.PerformanceSettings` |
-| Boot and load | `zombie.fileSystem.FileSystemImpl`, `zombie.fileSystem.TexturePackDevice`, `zombie.tileDepth.TileDepthTextures`, `zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`, `zombie.iso.IsoMetaGrid`, `zombie.gameStates.GameLoadingState`, `zombie.buildingRooms.BuildingRoomsEditor`, `zombie.core.skinnedmodel.advancedanimation.AnimationSet`, `zombie.core.skinnedmodel.model.AnimationAssetManager`, `zombie.core.skinnedmodel.model.Model`, `zombie.scripting.ScriptParser`, `zombie.scripting.objects.Item`, `se.krka.kahlua.luaj.compiler.LuaCompiler` |
+| Boot and load | `zombie.fileSystem.FileSystemImpl`, `zombie.fileSystem.TexturePackDevice`, `zombie.tileDepth.TileDepthTextures`, `zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`, `zombie.iso.IsoMetaGrid`, `zombie.gameStates.GameLoadingState`, `zombie.buildingRooms.BuildingRoomsEditor`, `zombie.core.skinnedmodel.advancedanimation.AnimationSet`, `zombie.core.skinnedmodel.model.AnimationAssetManager`, `zombie.core.skinnedmodel.model.Model`, `zombie.core.textures.ImageData`, `zombie.scripting.ScriptParser`, `zombie.scripting.objects.Item`, `se.krka.kahlua.luaj.compiler.LuaCompiler` |
 | Window shims | `org.lwjglx.opengl.Display`, `org.lwjglx.input.Mouse` |
 | From scratch | `zombie.gameStates.TISLogoState` |
 

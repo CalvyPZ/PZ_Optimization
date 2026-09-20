@@ -643,3 +643,46 @@ ready", so the trace shows the stall on any machine. The cache is safe
 because `ShaderManager` never removes shaders and a shader reloaded by the
 debug file watcher recompiles in place. Config key `shaderCache` (default
 true). The class-load marker goes in a static initializer like the others.
+
+## zombie.core.textures.ImageData (added 2026-09-20, texture load; GitHub issue #2)
+
+A file-pool worker (`pool-1-thread-18`, `FileTask_LoadPackImage.call` →
+`initMipMaps` → `generateMipMaps`) crashed the JVM on the laptop
+`diego-flip` with a SIGSEGV inside the C2-compiled
+`scaleMipLevelMaxAlpha`. Nothing at the Java level can produce it: the
+`ImageData` is local to the task, its `MipMapLevel` buffers are freshly
+malloc'd and only ever read through bounds-checked `ByteBuffer.get(int)` /
+`put(int, byte)`, and no other thread sees the object until `call` returns.
+Reading the `hs_err` (copied from the laptop over SSH) settles it: the
+faulting instruction is a plain reload of a spill slot from the thread's own
+stack, `mov r14d, [rsp+0x88]`, with no address-size prefix; the reported
+fault address is exactly that stack address truncated to 32 bits, and the
+stack page was mapped (the crash log dumps it a few lines later). Eight
+seconds after the JVM died, `systemd-coredump` (compressing the core, in
+libzstd) segfaulted on the same laptop with a 32-bit-truncated address too,
+and fifteen minutes earlier the same laptop's previous game process had
+aborted inside the C2 register allocator (`PhaseChaitin::Simplify`, a
+`SIGABRT` coredump with an empty `hs_err_pid3802.log`), after which the
+machine was rebooted. Three faults in three unrelated code bases within
+fifteen minutes, two with truncated addresses, is the machine (CPU, memory
+or its `7.2.4-1-cachyos-custom` clang-built kernel, while the packaged
+7.2.6 kernels are installed but not booted), not the game or the overrides.
+A 5-minute, 18-thread hammer of the stock mipmap loops on the laptop's own
+Zulu 25 JRE (`tools`-style reflection driver, see the issue) did not
+reproduce it.
+
+The override still exists because it was written before the crash log was
+readable and is harmless: when `mipmapArrays` is on and the
+`worldMipmapColors` debug option is off, `scaleMipLevelMaxAlpha`,
+`scaleMipLevelAverage` and `performPreMultipliedAlpha(MipMapLevel)` return
+early into `pzopt.MipMaps`, which reads each parent row pair with one bulk
+`get`, builds the sub row in a thread-local `byte[]` with plain array
+indexing, and writes it with one bulk `put`; the compiled loop has no
+per-byte direct-buffer access left. The sub buffer is still rewound first,
+as in stock. Output is byte-identical (`tests/pzopt/MipMapsTest` drives the
+jar's own private methods by reflection over 40 size/alpha variants) and
+the speed is the same (2048² → level 1: stock 14.3 ms, ours 13.5 ms,
+warmed). Config key `mipmapArrays` (default true); off, or with the debug
+colours on, the stock loops run untouched. Class-load marker in a static
+initializer. It is not a fix for the laptop: if the crash recurs there, boot
+the packaged kernel and run a memory test before touching the code.

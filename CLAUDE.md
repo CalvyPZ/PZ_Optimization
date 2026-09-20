@@ -15,7 +15,7 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
 ## Hard rules
 
 - **`decompiled/` stays local** (gitignored, 24 MB CFR output of the whole jar). Never `git add`
-  it. `src/overrides/` (the 23 shadowed classes with our `// pzopt:` edits) IS committed since
+  it. `src/overrides/` (the 24 shadowed classes with our `// pzopt:` edits) IS committed since
   2026-09-19: Diego confirmed the sources may ship. Every edit is still described in prose in
   `docs/override-edits.md`, and the `// pzopt:` markers stay on every changed line.
 - **Shared machine.** Several Claude sessions and Diego use the one game install and `~/Zomboid`.
