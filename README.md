@@ -267,6 +267,11 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1
 (`install.ps1` is also on the
 [release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases).)
 
+The same files are mirrored as a Steam Workshop item (subscribe, then run the `install.ps1`
+that sits next to the unpacked classes in the item folder; the Workshop cannot write into the
+game folder, so this step stays). Layout, validator rules and the upload procedure:
+[docs/workshop.md](docs/workshop.md).
+
 The script locates the game through Steam's library list (pass `-Dir <folder>` if it
 cannot), reads the game revision from the jar, downloads `pzopt-<revision>-classes.zip`
 from the matching release, refuses to run if the launcher classpath would not load

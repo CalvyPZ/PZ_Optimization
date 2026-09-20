@@ -5,10 +5,13 @@ Install, remove or inspect the PZ_Optimization class overrides on Windows from a
 .DESCRIPTION
 Standalone: needs Windows PowerShell 5.1 or newer. Nothing is compiled. The zip is fetched
 from the GitHub releases ($env:GITHUB_TOKEN is used if set; the gh CLI if logged in);
--Zip skips the download.
+-Zip skips the download. -From installs the same tree from an unpacked folder (no network);
+a pzopt-classes folder next to this script (the Steam Workshop item layout) is used
+automatically.
 
   .\install.ps1                                  # find the game, download the zip for its revision, install
   .\install.ps1 -Zip "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip"
+  .\install.ps1 -From "D:\SteamLibrary\steamapps\workshop\content\108600\<id>\mods\PZ_Optimization\42\pzopt-classes"
   .\install.ps1 -Dir "D:\SteamLibrary\steamapps\common\ProjectZomboid"
   .\install.ps1 -Status
   .\install.ps1 -Uninstall
@@ -23,6 +26,7 @@ If scripts are blocked: powershell -ExecutionPolicy Bypass -File .\install.ps1
 param(
   [string]$Dir,
   [string]$Zip,
+  [string]$From,
   [string]$Tag,
   [switch]$Uninstall,
   [switch]$Status
@@ -139,7 +143,14 @@ if (($cp.IndexOf('.') -lt 0) -or ($cp.IndexOf('projectzomboid.jar') -lt 0) -or (
 }
 
 $tmp = $null
-if (-not $Zip) {
+if (-not $Zip -and -not $From) {
+  $sibling = Join-Path $PSScriptRoot 'pzopt-classes'
+  if (Test-Path (Join-Path $sibling 'pzopt\build-info.properties')) { $From = $sibling }
+}
+if ($From) {
+  if (-not (Test-Path (Join-Path $From 'pzopt\build-info.properties'))) { Fail "$From is not an unpacked PZ_Optimization release (no pzopt\build-info.properties)" }
+  Write-Host "installing from folder $From"
+} elseif (-not $Zip) {
   $pattern = "pzopt-$Rev-classes.zip"
   $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("pzopt-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
   New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -171,21 +182,37 @@ if (-not $Zip) {
   }
   $Zip = Join-Path $tmp $pattern
 }
-if (-not (Test-Path -LiteralPath $Zip)) { Fail "zip not found: $Zip" }
-
-$z = [System.IO.Compression.ZipFile]::OpenRead($Zip)
-try { $files = @($z.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object { $_.FullName } | Sort-Object) } finally { $z.Dispose() }
-if ($files -notcontains 'pzopt/build-info.properties') { Fail "$Zip is not a PZ_Optimization release zip" }
-$bi = [System.Text.Encoding]::UTF8.GetString((Read-ZipEntry $Zip 'pzopt/build-info.properties'))
+if ($From) {
+  $Source = $From
+  $fromRoot = (Resolve-Path -LiteralPath $From).Path.TrimEnd('\','/')
+  # relative paths with '/' separators, the manifest format the zip path produces
+  $files = @(Get-ChildItem -LiteralPath $fromRoot -Recurse -File | ForEach-Object { $_.FullName.Substring($fromRoot.Length + 1).Replace('\', '/') } | Sort-Object)
+  $bi = Get-Content -Raw (Join-Path $fromRoot 'pzopt\build-info.properties')
+} else {
+  if (-not (Test-Path -LiteralPath $Zip)) { Fail "zip not found: $Zip" }
+  $Source = $Zip
+  $z = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+  try { $files = @($z.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object { $_.FullName } | Sort-Object) } finally { $z.Dispose() }
+  if ($files -notcontains 'pzopt/build-info.properties') { Fail "$Zip is not a PZ_Optimization release zip" }
+  $bi = [System.Text.Encoding]::UTF8.GetString((Read-ZipEntry $Zip 'pzopt/build-info.properties'))
+}
 $zipRev = ([regex]::Match($bi, '(?m)^revision=(\S+)')).Groups[1].Value
-if ($zipRev -ne $Rev) { Fail "zip was built for game revision $zipRev but this game is $Rev; the classes would disable themselves. Get the zip for $Rev" }
+if ($zipRev -ne $Rev) { Fail "$Source was built for game revision $zipRev but this game is $Rev; the classes would disable themselves. Get the build for $Rev" }
 foreach ($rel in $files) {
   $p = Join-Path $Dir ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
   if (Test-Path -LiteralPath $p) { Fail "refusing to overwrite existing file: $p (a previous install? run -Uninstall)" }
 }
 
 $jarBefore = Get-Sha256 $Jar
-[System.IO.Compression.ZipFile]::ExtractToDirectory($Zip, $Dir)
+if ($From) {
+  foreach ($rel in $files) {
+    $dst = Join-Path $Dir ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
+    New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $fromRoot ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)) -Destination $dst
+  }
+} else {
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($Zip, $Dir)
+}
 $out = @('# files written by install.ps1 - do not edit', "# revision=$zipRev installed=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))")
 foreach ($rel in $files) { $out += "$rel $(Get-Sha256 (Join-Path $Dir ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))" }
 [System.IO.File]::WriteAllLines($Manifest, $out)

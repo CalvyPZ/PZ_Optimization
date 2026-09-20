@@ -42,3 +42,14 @@ Rules and gotchas:
   linux-x64 tarball from PowerShell's GitHub releases) runs `install.ps1` on Linux.
 - Building does not touch the game dir, so no peer-session check is needed for a build-only
   run. It does not install either; use `build-install` for that.
+
+## Steam Workshop mirror
+
+After `--publish`, `scripts/workshop.sh --zip build/pzopt-<rev>-classes.zip` stages the same
+zip as a Workshop item under `~/Zomboid/Workshop/PZ_Optimization/` (pure distribution: the
+tree unpacked under `42/pzopt-classes/` plus `install.ps1` and `install.bash`, which is
+`install.sh` renamed because the uploader bans `.sh`, `.zip`, `.bat`, `.exe`, `.dll`, `.so`).
+The upload itself is in the game launched through Steam (Workshop > Create/Update item);
+the first upload writes `id=` into `workshop.txt`, which goes to `docs/workshop/workshop.txt`.
+Both installers auto-detect a `pzopt-classes/` sibling, so the Workshop instructions are one
+line per OS. Details: `docs/workshop.md`.

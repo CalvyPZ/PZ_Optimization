@@ -4,6 +4,7 @@
 #
 #   ./install.sh                     # find the game, download the zip for its revision, install
 #   ./install.sh --zip pzopt-b0bbce05d5-classes.zip
+#   ./install.sh --from /path/to/pzopt-classes   # an unpacked zip, e.g. the Steam Workshop item
 #   ./install.sh --dir /path/to/ProjectZomboid/projectzomboid
 #   ./install.sh --status
 #   ./install.sh --uninstall
@@ -16,18 +17,21 @@
 #
 # The zip is fetched from the GitHub releases with curl (GITHUB_TOKEN is used if set, to
 # avoid API rate limits) or with the gh CLI when it is logged in; --zip skips the download.
+# --from installs the same tree from a folder instead (no network, no unzip); a pzopt-classes/
+# folder next to this script (the Steam Workshop item layout) is used automatically.
 set -euo pipefail
 
 REPO_SLUG="DiegoVillalobosFlores/PZ_Optimization"
-mode=install; zip=""; dir="${PZ_DIR:-}"; tag=""
+mode=install; zip=""; from=""; dir="${PZ_DIR:-}"; tag=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --zip) zip="$2"; shift ;;
+    --from) from="$2"; shift ;;
     --dir) dir="$2"; shift ;;
     --tag) tag="$2"; shift ;;
     --uninstall) mode=uninstall ;;
     --status) mode=status ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -129,7 +133,14 @@ else
   tr -d '\n ' < "$JSON" | grep -q '"classpath":\[".","projectzomboid.jar"' || die "$JSON classpath does not put \".\" before projectzomboid.jar"
 fi
 
-if [[ -z "$zip" ]]; then
+if [[ -z "$zip" && -z "$from" ]]; then
+  sibling="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pzopt-classes"
+  [[ -f "$sibling/pzopt/build-info.properties" ]] && from="$sibling"
+fi
+if [[ -n "$from" ]]; then
+  [[ -f "$from/pzopt/build-info.properties" ]] || die "$from is not an unpacked PZ_Optimization release (no pzopt/build-info.properties)"
+  echo "installing from folder $from"
+elif [[ -z "$zip" ]]; then
   pattern="pzopt-${REV}-classes.zip"
   tmp=$(mktemp -d)
   if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
@@ -160,7 +171,7 @@ EOF2
   fi
   zip="$tmp/$pattern"
 fi
-[[ -f "$zip" ]] || die "zip not found: $zip"
+[[ -n "$from" || -f "$zip" ]] || die "zip not found: $zip"
 
 list_zip() {
   if command -v unzip >/dev/null; then unzip -Z1 "$1"
@@ -172,22 +183,40 @@ extract_zip() {
   else python3 -c 'import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$1" "$2"; fi
 }
 
-files=$(list_zip "$zip" | grep -v '/$' | LC_ALL=C sort)
-echo "$files" | grep -qx 'pzopt/build-info.properties' || die "$zip is not a PZ_Optimization release zip"
 read_zip_entry() {
   if command -v unzip >/dev/null; then unzip -p "$1" "$2"
   else python3 -c 'import zipfile,sys; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' "$1" "$2"; fi
 }
-zip_rev=$(read_zip_entry "$zip" pzopt/build-info.properties | sed -n 's/^revision=//p')
+# the same three operations on a folder: list, read one entry, copy without overwriting
+list_dir() { (cd "$1" && find . -type f | sed 's#^\./##'); }
+copy_dir() {
+  local rel
+  while IFS= read -r rel; do
+    [[ -z "$rel" ]] && continue
+    mkdir -p "$2/$(dirname "$rel")"
+    cp -n "$1/$rel" "$2/$rel"
+  done < <(list_dir "$1")
+}
+
+if [[ -n "$from" ]]; then
+  src="$from"
+  files=$(list_dir "$from" | LC_ALL=C sort)
+  zip_rev=$(sed -n 's/^revision=//p' "$from/pzopt/build-info.properties")
+else
+  src="$zip"
+  files=$(list_zip "$zip" | grep -v '/$' | LC_ALL=C sort)
+  echo "$files" | grep -qx 'pzopt/build-info.properties' || die "$zip is not a PZ_Optimization release zip"
+  zip_rev=$(read_zip_entry "$zip" pzopt/build-info.properties | sed -n 's/^revision=//p')
+fi
 if [[ "$zip_rev" != "$REV" ]]; then
-  die "zip was built for game revision $zip_rev but this game is $REV; the classes would disable themselves. Get the zip for $REV"
+  die "$src was built for game revision $zip_rev but this game is $REV; the classes would disable themselves. Get the build for $REV"
 fi
 while IFS= read -r rel; do
   [[ -e "$dir/$rel" ]] && die "refusing to overwrite existing file: $dir/$rel (a previous install? run --uninstall)"
 done <<< "$files"
 
 jar_before=$(sha256sum "$JAR" | cut -d' ' -f1)
-extract_zip "$zip" "$dir"
+if [[ -n "$from" ]]; then copy_dir "$from" "$dir"; else extract_zip "$zip" "$dir"; fi
 {
   echo "# files written by install.sh — do not edit"
   echo "# revision=$zip_rev installed=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
