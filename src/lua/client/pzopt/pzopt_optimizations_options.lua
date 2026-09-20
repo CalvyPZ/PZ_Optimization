@@ -309,6 +309,9 @@ function MainOptions:pzoptAddOptimizationsPanel()
         end
     end
     self:addHorizontalLine(y, "Changes take effect on the next launch. File: Zomboid/pzopt/options.ini")
+    -- Same as the stock pages: without a scroll height the panel never scrolls, so the
+    -- controls below the window edge are unreachable.
+    self.mainPanel:setScrollHeight(y + self.addY + 20)
     self:centerTabChildrenX(TAB)
     print("[pzopt] options tab: " .. added .. " controls, " .. pinned .. " pinned by pzopt.properties or -D")
 end
