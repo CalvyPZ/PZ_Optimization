@@ -79,8 +79,10 @@ results-card capture from 25 s, a square crop centred on the character (the game
 them, so the crop is fixed), "PZ Optimized" on a band at the top and the performance overlay
 pasted live along the bottom (the left 747x305 of the panel at 0.6x: fps / ms, percentiles,
 1 %-low / jitter / spikes, loads, verdict, graph; text ~14 px, not denoised). 448x448, 6 fps,
-28 frames (4.6 s: the shot, then the in-game zoom-out and the walk), 96 colours, median-3
-denoise on the game part, gifsicle `--lossy=90`: 987 KB under Steam's 1 MB preview limit. The asphalt
+26 frames (4.4 s: the shot, then the in-game zoom-out and the walk), 96 colours, median-3
+denoise on the game part, gifsicle `--lossy=100`: ~917,000 bytes. Steam's preview limit is
+1,000,000 bytes, not 1 MiB (the game's own check says 1,024,000): a 1,011,209-byte GIF came back
+from steamcmd with `Failed to update workshop item (Limit exceeded)`. The asphalt
 grain is what costs (plain LZW is ~145 KB a frame at 512 px whatever the palette); ImageMagick's
 fuzz transparency ghosts on the panning camera and dither triples the size, so neither is used.
 Needs `gifsicle` (`pacman -S gifsicle`, or `GIFSICLE=<binary>`). `GIF_END=x:y:w` gives the

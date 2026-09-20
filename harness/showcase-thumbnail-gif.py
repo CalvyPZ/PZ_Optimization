@@ -6,12 +6,12 @@ corner stays outside it), "PZ Optimized" on a dark band at the top. GIF_END= tur
 zoom-and-pan variant (hold, ease from GIF_START to GIF_END, hold).
 
   harness/showcase-thumbnail-gif.py [out.gif]
-  env: THUMB_SRC (video), GIF_T0 (default 25), GIF_LEN seconds (default 4.6), GIF_SIZE (default 448),
+  env: THUMB_SRC (video), GIF_T0 (default 25), GIF_LEN seconds (default 4.4), GIF_SIZE (default 448),
        GIF_FPS (default 6), GIF_START x:y:w (square crop, default 1750:440:1620 = the character centred between the header and the banner),
        GIF_END x:y:w (zoom target; unset = static), GIF_HOLD1 / GIF_ZOOM seconds for the zoom variant
        (default 1.6 / 1.4, the rest of GIF_LEN is the end hold), GIF_COLORS (default 96),
        GIF_DITHER (default none), GIF_MEDIAN (median filter size, 0 = off, default 3),
-       GIF_LOSSY (gifsicle --lossy level, 0 = off, default 90; binary from GIFSICLE or PATH),
+       GIF_LOSSY (gifsicle --lossy level, 0 = off, default 100; binary from GIFSICLE or PATH),
        GIF_LABEL (default "PZ Optimized"), GIF_LABEL_POS top|bottom (default top),
        GIF_BANNER x:y:w:h (source rectangle of the overlay pasted live along the bottom, default
        0:0:747:305 = fps / percentiles / loads / verdict / graph; empty = none), GIF_BANNER_SCALE
@@ -21,8 +21,9 @@ The Steam preview limit is 1 MB; the script prints the size and fails above it. 
 noise is what costs: plain LZW at 512 px is ~145 KB a frame whatever the palette, so a moving
 clip needs the median filter (kills the grain, keeps edges), gifsicle's lossy LZW and a modest
 size / frame count. ImageMagick's fuzz transparency was tried and ghosts badly on a panning
-camera; dither triples the size. Both stay off. The defaults (448 px, 6 fps, 4.6 s = 28 frames,
-96 colours, median 3, lossy 90, the overlay banner) land at ~987 KB. The in-game uploader only takes preview.png: a GIF
+camera; dither triples the size. Both stay off. The defaults (448 px, 6 fps, 4.4 s = 26 frames,
+96 colours, median 3, lossy 100, the overlay banner) land at ~917,000 bytes. The limit Steam
+enforces is 1,000,000 bytes, not 1 MiB: a 1,011,209-byte file was refused with "Limit exceeded". The in-game uploader only takes preview.png: a GIF
 preview goes up with steamcmd (docs/workshop.md).
 """
 import os, subprocess, sys
@@ -33,7 +34,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, 'docs/workshop/images/00-showcase-thumbnail.gif')
 src = os.environ.get('THUMB_SRC', os.path.expanduser('~/Videos/Project Zomboid/Video_2026-09-20_19-10-46.mp4'))
 t0 = float(os.environ.get('GIF_T0', '25'))
-total = float(os.environ.get('GIF_LEN', '4.6'))
+total = float(os.environ.get('GIF_LEN', '4.4'))
 S = int(os.environ.get('GIF_SIZE', '448'))
 fps = int(os.environ.get('GIF_FPS', '6'))
 hold1, zoom = float(os.environ.get('GIF_HOLD1', '1.6')), float(os.environ.get('GIF_ZOOM', '1.4'))
@@ -42,7 +43,7 @@ end = os.environ.get('GIF_END')
 x1, y1, w1 = (int(v) for v in end.split(':')) if end else (x0, y0, w0)
 colors = int(os.environ.get('GIF_COLORS', '96'))
 median = int(os.environ.get('GIF_MEDIAN', '3'))
-lossy = int(os.environ.get('GIF_LOSSY', '90'))
+lossy = int(os.environ.get('GIF_LOSSY', '100'))
 gifsicle = os.environ.get('GIFSICLE', 'gifsicle')
 dither = os.environ.get('GIF_DITHER', 'none')          # none: smallest and no crawling on the game noise
 label = os.environ.get('GIF_LABEL', 'PZ Optimized')
@@ -114,5 +115,5 @@ if lossy:
 size = os.path.getsize(out)
 print(f'lzw {raw_size // 1024} KB -> lossy {lossy} {size // 1024} KB')
 print(f'wrote {out}: {len(frames)} frames, {S}x{S}, {fps} fps, {size // 1024} KB')
-if size > 1024000:
-    sys.exit(f'{size} bytes is over the 1 MB Steam preview limit: lower GIF_SIZE / GIF_COLORS / GIF_FPS')
+if size > 1000000:
+    sys.exit(f'{size} bytes is over the 1,000,000-byte Steam preview limit (SubmitItemUpdate says "Limit exceeded"): lower GIF_LEN / GIF_SIZE / raise GIF_LOSSY')
