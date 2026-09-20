@@ -137,6 +137,11 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   from ~450 fps (`pzopt.GpuSections`, `--prop gpuSections=true`: chunk composite ~0.6 ms, bakes
   ~0.3-0.5 ms a frame). `harness/gametree.py` prints the game-thread call tree from a JFR run.
   Never build or decompile while a run is going; check `pzopt.sh status` says installed before a launch.
+- JVM matrix on the desktop (2026-09-20 13:35, `docs/results.md`): GraalVM 25.0.3 is 7-9 % behind
+  Zulu/C2 uncapped on the spinning route (copy kept at `jre64_graal`); Zulu + the tuned G1 JSON
+  (`config/launcher/ProjectZomboid64.g1.json`, now installed) has the tightest tail (508 fps, p99 7.3 ms,
+  game thread 81 %). The ~500 fps numbers need `persistentVbo=true translucentTilesInChunkTexture=true`
+  (tab file or `--prop`); with both off the same route is 184 fps, so check the console `settings:` line.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
   still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).

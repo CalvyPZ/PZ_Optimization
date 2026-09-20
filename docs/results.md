@@ -649,3 +649,41 @@ mean is past 400 but the frame is not locked; ~13 % of frames exceed 2.5 ms, all
 streaming on the game thread (loot roll, new-row bakes, cutaway data) or the UI FBO refresh,
 and from ~450 fps the GPU (chunk composite + bakes) is saturated, so the machine is now used to
 the max on both sides at this resolution.
+
+## 2026-09-20 (13:35–13:47): desktop JVM matrix — Zulu vs GraalVM 25.0.3, stock ZGC vs tuned G1 JSON
+
+Same spinning route and conditions as the 400 fps pass (`--flag route=S:450 --flag turn=90
+--route-seconds 25`, max zoom, uncapped, `--option uiRenderOffscreen=true`, in-game overlay log,
+`--no-mangohud`, no dashboard, Steam launcher). This time the MangoHud HUD was really absent
+(`harness: MangoHud is NOT loaded`), so the absolute numbers sit above the 400 fps pass table.
+GraalVM is Oracle GraalVM JDK 25.0.3+9.1 (Graal JIT on by default) unpacked to the game dir;
+the tuned JSON is `config/launcher/ProjectZomboid64.g1.json` (4 GB fixed heap, 25 ms pause
+goal, pretouch, no hsperfdata). Every run passes `--prop persistentVbo=true --prop
+translucentTilesInChunkTexture=true --prop hotsaveStaged=false` explicitly, see the caveat.
+
+| run | JRE | launcher JSON | fps mean | p50 | p90 | p99 | p99.9 | max | 1 %-low | < 240 fps | game thread | GPU | cpu | GC in window |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| jvm-zulu-vbo-1 | Zulu 25.0.1 (C2) | stock, ZGC 3 GB | 508.5 | 1.6 | 3.1 | 7.7 | 15.2 | 52.6 | 131 | 3.7 % | 87 % | 95 % | 28 % | ZGC 3 cycles |
+| jvm-graal-1 | GraalVM 25.0.3 | stock, ZGC 3 GB | 463.0 | 1.7 | 3.5 | 9.9 | 19.7 | 64.2 | 101 | 5.7 % | 89 % | 91 % | 36 % | ZGC 6 cycles |
+| jvm-graal-g1-1 | GraalVM 25.0.3 | tuned G1 4 GB | 474.3 | 1.6 | 3.4 | 9.3 | 18.7 | 54.5 | 107 | 5.2 % | 85 % | 92 % | 39 % | G1 17 events, max 407 ms wall |
+| jvm-zulu-g1-1 | Zulu 25.0.1 (C2) | tuned G1 4 GB | 508.7 | 1.6 | 3.0 | 7.3 | 16.7 | 49.1 | 137 | 3.4 % | 81 % | 96 % | 30 % | G1 10 events, max 333 ms wall |
+
+- **GraalVM is 7–9 % behind HotSpot C2 on the desktop too**, on either collector, with a worse
+  tail (p99 7.7 → 9.9 ms, 1 %-low 131 → 101). Its compiler threads show as process CPU 28 → 36–39 %.
+  Same verdict as the laptop matrix; not adopted. The copy stays at `jre64_graal`.
+- **Zulu + tuned G1 JSON is the best of the four**: the mean is GPU-bound at 96 % either way, but
+  the tail is a little tighter than ZGC (p99 7.3 vs 7.7 ms, max 49 vs 53, 1 %-low 137 vs 131) and
+  the game thread drops 87 → 81 % (no ZGC load barriers / concurrent cycles competing with it).
+  Adopted: the game dir now runs Zulu with the G1 JSON; re-apply it from `config/launcher/` after
+  a game update.
+- **Caveat that cost two runs (jvm-zulu-1, jvm-zulu-2: 184 fps, p50 4.3 ms, game thread 99 %).**
+  The ~500 fps numbers depend on `persistentVbo=true` and `translucentTilesInChunkTexture=true`,
+  which are OFF by default (artifacts, 2026-09-19) and were only on through the maintainer's
+  Optimizations-tab file `~/Zomboid/pzopt/options.ini`. That file was rewritten at 13:32 (now only
+  `hotsaveStaged=true`) and the same route dropped to 184 fps; `u120-mine-1` (148 vs 558 fps) is the
+  same effect earlier in the day. Forcing the two keys via `--prop` restores 508. One of them
+  (almost certainly the persistent VBO mapping) is worth ~2.7x uncapped, so the artifact question
+  is worth solving instead of leaving the key off. Comparisons across runs must check the
+  `settings:` line in console.txt. Also: the launcher JSON had carried `-Dzomboid.steam=0` since
+  an earlier run; steam=1 vs 0 made no difference (jvm-zulu-1 vs -2), the G1 JSON in the game dir
+  keeps steam=0.
