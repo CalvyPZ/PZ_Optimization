@@ -6,6 +6,7 @@ the zip built on Linux carries the finished class files, and the runtime guard
 class it shadows against the Windows jar. If anything differs it logs one line and
 the game runs as stock, so the worst case of a mismatch is "no effect".
 
+2026-09-20 release from `e398ce5` (master switch) is 607 KB, 114 files plus the manifest
 2026-09-20 release from `aa9482b` is 606 KB, 114 files plus the manifest
 2026-09-20 release from `2d34aa9` is 543 KB, 104 files plus the manifest
 `pzopt-files.txt`; the 2026-09-19 test build from `a202778` had 97) for game
