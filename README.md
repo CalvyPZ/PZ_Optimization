@@ -24,10 +24,11 @@ a machine you play on.
 5. [Uninstall](#uninstall)
 6. [After a game update](#after-a-game-update)
 7. [How the optimizations work](#how-the-optimizations-work)
-8. [How the install works without touching the jar](#how-the-install-works-without-touching-the-jar)
-9. [Known limitations](#known-limitations)
-10. [Benchmark harness](#benchmark-harness)
-11. [Repository layout](#repository-layout)
+8. [Roadmap](#roadmap)
+9. [How the install works without touching the jar](#how-the-install-works-without-touching-the-jar)
+10. [Known limitations](#known-limitations)
+11. [Benchmark harness](#benchmark-harness)
+12. [Repository layout](#repository-layout)
 
 ---
 
@@ -623,6 +624,116 @@ noise); G1 instead of ZGC (p99 -13 % but 3x the frames over 33 ms); Mesa Zink
 instead of NVIDIA GL (blocks 1.8 ms per frame in swap); a 256 MB texture upload
 buffer (a 5 s frame a few seconds into the world); native Wayland (a wash at the
 240 cap).
+
+---
+
+## Roadmap
+
+Where the frame goes today, after everything above: on NVIDIA GL at max zoom the
+machine is GPU-bound (fill for the 12800x5400 zoom-out buffer, 69 Mpixel per frame);
+everywhere else, lower zoom, a smaller screen, a slower card, or Windows, the
+**game thread** is the limit (93 % of wall on the Windows bench with the GPU at half
+load). Items 1 and 2 attack that in order of value, each with a plan document
+holding the measurements, the design and a go/no-go gate that is measured before any
+work starts. Item 3 is a standalone experiment that runs independently of the other
+two. Dates are not promised.
+
+### 1. Game thread (next)
+
+`docs/plan-driving-frame-time.md` §3, `docs/plan-resource-use.md` §4.3.
+
+Measured shares of game-thread CPU on a CPU-visible run: `IsoCell.render` 58 %,
+of which the translucent pass (windows, glass doors, `Translucent` tiles, wall
+lighting) is still about 35 % of the whole thread; the Lua UI 25 to 34 %; the
+view-cone stencil (`VisibilityPolygon2`) about 7 %; cutaway occlusion recompute
+every frame while any chunk texture is dirty.
+
+- **Translucent list built once per invalidation, not once per frame**
+  (`translucentCache`, off today). The per-frame walk over every object of every
+  chunk level is the largest single cost left; the list only changes when a chunk
+  level is invalidated, which the bake path already tracks.
+- **View-cone polygon off the game thread.** `calculateVisibilityPolygon` reads
+  only state that changes in `logic()`, so it can start on the game's own fork-join
+  pool right after `logic()` and be joined in `renderMain`. Gate: vertex-list
+  parity, then the frame-time compare on a zoom-1.0 route, where the CPU is the limit.
+- **Cutaway skip while driving outdoors** and the remaining per-frame lookups
+  (`TilePropertyAliasMap` string lookups per object, per-sprite uniform HashMap
+  lookups, `IOpenGLState` redundant sets, 5 %).
+- **Lua UI** stays where it is: the stock `uiRenderOffscreen` option already moves
+  it to its own rate, and the Lua VM itself is out of scope.
+- **`Translucent`-flagged tiles bake** once the tile set that bakes opaque black
+  is filtered (the flag exists, off by default).
+
+Gate for each: byte-identical recalc parity where it applies, `harness/compare.py`
+on the bench route, and the visual verify run on a real-save copy.
+
+### 2. Vulkan renderer (measured gate first)
+
+`docs/plan-vulkan-renderer.md`.
+
+The inventory is done: LWJGL 3.4.1 is bundled without the `vulkan` module (loose
+classes can carry it the same way the overrides load), the window is GLFW so a
+`VkSurfaceKHR` is one call, the game thread already records commands that a
+second thread replays (55 `TextureDraw` types), and about 1,800 direct GL call sites
+in 119 files plus 61 raw-GL escape hatches would have to go through a backend seam.
+
+What Vulkan can buy: the driver's CPU share of the render thread, ownership of
+presentation (the Zink swap stall goes away, native Wayland), parallel command
+recording for the offscreen world and the chunk passes, one draw per chunk level
+through descriptor indexing, and exact per-frame GPU timestamps. What it cannot
+buy: cheaper fragments (the fill cost is identical) or a faster game thread.
+
+- **Phase 0, go/no-go:** native-frame profile of the render thread on the route.
+  The port only starts if driver plus swap is **at least 20 % of the frame** on
+  NVIDIA GL (30 % on Zink). Under that, the effort goes to GL-level batching
+  (array textures, bindless, the persistent ring the VBO override already has)
+  and to item 1.
+- **Phase 1 regardless:** the backend seam with a GL implementation, pixel-parity
+  tested (mean error at most 1/255 outside UI text). It is where the batching work
+  lives either way.
+- **Phases 2 to 5 on a go:** sprite path, then 3D and effects, then the reasons to
+  have done it (parallel recording, bindless, timeline semaphores), then the tail.
+  Every phase ends in a runnable, benchmarkable game. Native Linux first; nothing in
+  the design blocks Windows later.
+
+Targets at completion: GPU busy at least 95 % when not at the cap, game thread
+blocked on the ready slot at most 10 % (39 % on Zink today), p99 better than the
+GL baseline by at least the driver share Phase 0 measured.
+
+### 3. Rust interop (standalone experiment)
+
+A separate track, not sequenced behind items 1 and 2 and not a dependency of
+either: does moving a whole pass from Java to Rust make it faster than the JIT,
+by enough to pay for a native library in the install? No plan document yet; this is
+the shape of the experiment.
+
+The game already runs native code next to the JVM (lighting, pathfinding and
+networking are C++ through JNI), and its bundled JRE is Java 25, so the Foreign
+Function & Memory API is available without JNI glue. A Rust library installed
+beside the loose classes, one build per platform, behind its own `Config` key so it
+is off unless chosen. Candidate passes, one at a time, each a self-contained
+experiment with its own result in `docs/results.md`:
+
+- the translucent list build and the cutaway occluder scan (flat arrays, SIMD,
+  no allocation, no GC pressure on the game thread);
+- the view-cone polygon and `IsOnScreen` culling;
+- chunk-texture bake preparation and texture decode / mipmaps on the loader threads;
+- the sprite command replay on the render thread, later, if item 2's seam exists.
+
+The JIT is already good at this kind of loop, so the gain has to be measured, not
+assumed. Per pass: a microbenchmark against the Java version on the same input,
+byte-identical output through the existing parity harness, then a bench-route
+compare. A pass that does not beat Java by a clear margin is written up and
+dropped. What the experiment has to answer before anything ships: the cost of a
+native toolchain in the build, per-platform artifacts in each release, and the new
+crash surface (a JVM fault in native code is not recoverable).
+
+### Not on the roadmap
+
+Lower render resolution or a smaller zoom-out buffer (meets the GPU target by
+lowering the objective; only if Diego wants that trade), multiplayer, moving
+`IsoCell.render` to another thread wholesale (GL context ownership), and further
+chunk-streamer work (latency is at 4 to 5 ms median; done).
 
 ---
 
