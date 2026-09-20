@@ -20,7 +20,10 @@ local RESTART_NOTE = "Takes effect on the next launch."
 local MASTER = { key = "enabled", label = "Optimizations enabled (master switch)",
   tip = "Off = the game runs stock: every override takes its original code path and the settings below are ignored. On = the settings below apply." }
 
--- Keys, labels and tooltips. `choices` makes an integer combo; `note[value]` annotates an entry.
+-- Colour names pzopt.Overlay.color knows (a RRGGBB hex typed into options.ini also works).
+local FPS_COLOURS = { "blue", "green", "yellow", "red", "white", "cyan", "lime", "orange", "magenta", "purple" }
+
+-- Keys, labels and tooltips. `choices` makes a combo (integer or string); `note[value]` annotates an entry.
 local SECTIONS = {
     {
         title = "Chunk textures: what bakes",
@@ -108,6 +111,45 @@ local SECTIONS = {
             { key = "overlayFont", label = "Overlay font",
               choices = { "CodeMedium", "CodeSmall", "CodeLarge", "Small", "Medium", "Large" },
               tip = "The UI font the overlay text uses." },
+        },
+    },
+    {
+        title = "Performance overlay: fps colour",
+        entries = {
+            { key = "overlayFpsColor", label = "Colour the fps number",
+              tip = "The fps number takes one of four colours by how close it is to the target; off = white like the rest of the line." },
+            { key = "overlayFpsFollowCap", label = "Follow the framerate cap",
+              tip = "On: with a framerate cap the thresholds are percentages of it (the three \"% of the cap\" values). Off, or uncapped: the three fixed fps thresholds apply." },
+            { key = "overlayFpsCapBluePct", label = "Blue: at the cap (% of the cap)",
+              choices = { "100", "99", "98", "95", "90" },
+              tip = "At or above this share of the cap counts as at the cap. The limiter rarely lands exactly on it, so 100 is stricter than it looks." },
+            { key = "overlayFpsCapGreenPct", label = "Green: at or above (% of the cap)",
+              choices = { "95", "90", "85", "80", "75" },
+              tip = "Green from this share of the cap up to the blue threshold." },
+            { key = "overlayFpsCapYellowPct", label = "Yellow: at or above (% of the cap)",
+              choices = { "75", "66", "50", "33", "25" },
+              tip = "Yellow from this share of the cap up to the green threshold; red below it." },
+            { key = "overlayFpsBlueAbove", label = "Blue: above (fps, uncapped)",
+              choices = { "500", "400", "300", "240", "200", "165", "144", "120", "60" },
+              tip = "Uncapped, or with follow-cap off: blue above this many fps." },
+            { key = "overlayFpsGreenAbove", label = "Green: at or above (fps, uncapped)",
+              choices = { "300", "240", "200", "150", "120", "100", "60", "45" },
+              tip = "Uncapped, or with follow-cap off: green from this many fps up to the blue threshold." },
+            { key = "overlayFpsYellowAbove", label = "Yellow: at or above (fps, uncapped)",
+              choices = { "200", "150", "120", "100", "75", "60", "45", "30" },
+              tip = "Uncapped, or with follow-cap off: yellow from this many fps up to the green threshold; red below it." },
+            { key = "overlayFpsColorBlue", label = "Colour for \"at the cap\"",
+              choices = FPS_COLOURS,
+              tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
+            { key = "overlayFpsColorGreen", label = "Colour for \"near the cap\"",
+              choices = FPS_COLOURS,
+              tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
+            { key = "overlayFpsColorYellow", label = "Colour for \"well below\"",
+              choices = FPS_COLOURS,
+              tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
+            { key = "overlayFpsColorRed", label = "Colour for \"far below\"",
+              choices = FPS_COLOURS,
+              tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
         },
     },
     {

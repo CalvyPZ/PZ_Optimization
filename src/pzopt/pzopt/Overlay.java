@@ -97,6 +97,11 @@ public final class Overlay {
    private static final float[] AMBER = {1f, 0.8f, 0.3f};
    private static final float[] RED = {1f, 0.45f, 0.45f};
    private static final float[] BLUE = {0.45f, 0.7f, 1f};
+   /** The four fps tints from the options tab; names or RRGGBB hex, see {@link #color}. */
+   private static final float[] FPS_BLUE = color(Config.OVERLAY_FPS_COLOR_BLUE, BLUE);
+   private static final float[] FPS_GREEN = color(Config.OVERLAY_FPS_COLOR_GREEN, GREEN);
+   private static final float[] FPS_YELLOW = color(Config.OVERLAY_FPS_COLOR_YELLOW, AMBER);
+   private static final float[] FPS_RED = color(Config.OVERLAY_FPS_COLOR_RED, RED);
    private static volatile boolean visible = Config.OVERLAY;
    private static boolean fontFailed;
    private static UIFont font;
@@ -449,15 +454,54 @@ public final class Overlay {
    }
 
    /**
-    * Colour of the fps number. Capped: blue at the cap (same 2 % tolerance as the verdict, the limiter
-    * never lands exactly on it), green within 10 % of it, yellow within 50 %, red further below.
-    * Uncapped: blue above 300 fps, green 150-300, yellow 100-150, red under 100.
+    * Colour of the fps number (Config {@code overlayFps*}). Defaults: with a cap and follow-cap on,
+    * blue at the cap (98 %: the verdict's tolerance, the limiter never lands exactly on it), green
+    * within 10 % of it, yellow within 50 %, red further below. Uncapped, or follow-cap off: blue above
+    * 300 fps, green 150-300, yellow 100-150, red under 100. Off: white like the rest of the line.
     */
    static float[] fpsColor(float fps, int cap) {
-      if (cap > 0) {
-         return fps >= cap * 0.98f ? BLUE : fps >= cap * 0.9f ? GREEN : fps >= cap * 0.5f ? AMBER : RED;
+      if (!Config.OVERLAY_FPS_COLOR) {
+         return WHITE;
       }
-      return fps > 300f ? BLUE : fps >= 150f ? GREEN : fps >= 100f ? AMBER : RED;
+      if (cap > 0 && Config.OVERLAY_FPS_FOLLOW_CAP) {
+         float pct = fps * 100f / cap;
+         return pct >= Config.OVERLAY_FPS_CAP_BLUE_PCT ? FPS_BLUE
+               : pct >= Config.OVERLAY_FPS_CAP_GREEN_PCT ? FPS_GREEN
+               : pct >= Config.OVERLAY_FPS_CAP_YELLOW_PCT ? FPS_YELLOW : FPS_RED;
+      }
+      return fps > Config.OVERLAY_FPS_BLUE_ABOVE ? FPS_BLUE
+            : fps >= Config.OVERLAY_FPS_GREEN_ABOVE ? FPS_GREEN
+            : fps >= Config.OVERLAY_FPS_YELLOW_ABOVE ? FPS_YELLOW : FPS_RED;
+   }
+
+   /** A colour name from the options tab or RRGGBB hex; {@code fallback} for anything else. */
+   static float[] color(String spec, float[] fallback) {
+      if (spec == null) {
+         return fallback;
+      }
+      switch (spec.trim().toLowerCase(java.util.Locale.ROOT)) {
+         case "blue": return BLUE;
+         case "green": return GREEN;
+         case "yellow": return AMBER;
+         case "red": return RED;
+         case "white": return WHITE;
+         case "cyan": return new float[] {0.45f, 1f, 1f};
+         case "lime": return new float[] {0.7f, 1f, 0.3f};
+         case "orange": return new float[] {1f, 0.6f, 0.3f};
+         case "magenta": return new float[] {1f, 0.5f, 1f};
+         case "purple": return new float[] {0.7f, 0.5f, 1f};
+         default:
+            String hex = spec.trim().startsWith("#") ? spec.trim().substring(1) : spec.trim();
+            if (hex.length() == 6) {
+               try {
+                  int rgb = Integer.parseInt(hex, 16);
+                  return new float[] {((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f};
+               } catch (NumberFormatException ignored) {
+               }
+            }
+            Log.warn("overlay: unknown colour '" + spec + "', using the default");
+            return fallback;
+      }
    }
 
    private static float pct(float[] sorted, float p) {

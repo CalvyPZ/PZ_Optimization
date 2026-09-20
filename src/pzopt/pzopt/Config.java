@@ -179,6 +179,18 @@ public final class Config {
    public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent
    public static final String OVERLAY_FONT = string("overlayFont", "CodeMedium");
    public static final String OVERLAY_CORNER = string("overlayCorner", "tl");
+   public static final boolean OVERLAY_FPS_COLOR = bool("overlayFpsColor", true); // colour the fps number (see Overlay.fpsColor)
+   public static final boolean OVERLAY_FPS_FOLLOW_CAP = bool("overlayFpsFollowCap", true); // thresholds are % of the cap when one is set; else the fixed fps ones
+   public static final int OVERLAY_FPS_CAP_BLUE_PCT = integer("overlayFpsCapBluePct", 98); // "at the cap": at or above this % of it
+   public static final int OVERLAY_FPS_CAP_GREEN_PCT = integer("overlayFpsCapGreenPct", 90);
+   public static final int OVERLAY_FPS_CAP_YELLOW_PCT = integer("overlayFpsCapYellowPct", 50); // below: red
+   public static final int OVERLAY_FPS_BLUE_ABOVE = integer("overlayFpsBlueAbove", 300); // uncapped / follow-cap off: fixed fps thresholds
+   public static final int OVERLAY_FPS_GREEN_ABOVE = integer("overlayFpsGreenAbove", 150);
+   public static final int OVERLAY_FPS_YELLOW_ABOVE = integer("overlayFpsYellowAbove", 100); // below: red
+   public static final String OVERLAY_FPS_COLOR_BLUE = string("overlayFpsColorBlue", "blue"); // a name Overlay.color knows or RRGGBB hex
+   public static final String OVERLAY_FPS_COLOR_GREEN = string("overlayFpsColorGreen", "green");
+   public static final String OVERLAY_FPS_COLOR_YELLOW = string("overlayFpsColorYellow", "yellow");
+   public static final String OVERLAY_FPS_COLOR_RED = string("overlayFpsColorRed", "red");
 
    private Config() {
    }
