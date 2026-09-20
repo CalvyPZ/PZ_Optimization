@@ -811,19 +811,23 @@ Runs `flip-spin-uncap-gp-ac-{perf,balanced,powersave}[-stock]-*`.
 Thermals over the same route windows (`sysmon.csv`; on this APU `gpu_c` is the edge sensor and
 `gpu_w` the package draw, CPU included):
 
-| profile | build | temp start → end (max) °C | package W | GPU clock first 5 s → last 5 s |
-|---|---|---|---|---|
-| balanced | optimized | 66 → 72 (74) | 41 | 1256 → 2076 MHz |
-| balanced | stock | 67 → 68 (70) | 38 | 1321 → 1476 |
-| performance | optimized | 70 → 77 (77) | 41 | 1105 → 2070 |
-| performance | stock | 70 → 72 (74) | 38 | 1342 → 1450 |
-| power-saver | optimized | 63 → 64 (65) | 23 | 1536 → 1749 |
-| power-saver | stock | 60 → 64 (65) | 20 | 1308 → 1525 |
+| profile | build | temp start → end (max) °C | package W | fps / W | GPU clock first 5 s → last 5 s |
+|---|---|---|---|---|---|
+| balanced | optimized | 66 → 72 (74) | 40.6 | 3.08 | 1256 → 2076 MHz |
+| balanced | stock | 67 → 68 (70) | 38.4 | 1.47 | 1321 → 1476 |
+| performance | optimized | 70 → 77 (77) | 40.5 | 3.10 | 1105 → 2070 |
+| performance | stock | 70 → 72 (74) | 37.7 | 1.49 | 1342 → 1450 |
+| power-saver | optimized | 63 → 64 (65) | 23.2 | 2.77 | 1536 → 1749 |
+| power-saver | stock | 60 → 64 (65) | 20.3 | 2.01 | 1308 → 1525 |
 
 - **No thermal throttling in any run**: peak 77 °C and the clocks rise over the route rather than
   sag. performance-opt started 4 °C warmer than balanced-opt (back to back) and matched it, so
   heat is not what equalised the two profiles; both sit at the same ~41 W package cap.
 - power-saver is a **power cap, not a thermal one**: ~21 W, 12 °C cooler; that is the whole
   125 → 64 fps drop.
+- **Efficiency**: the overrides roughly double frames per joule at the same package power
+  (balanced 1.47 → 3.08 fps/W, performance 1.49 → 3.10); under power-saver 2.01 → 2.77. The
+  optimized build on power-saver is still more efficient than stock on any profile, at 57 % of the
+  power.
 - 25 s is not steady state on a thin laptop; whether sustained play throttles needs the 100 s
   route on `performance` (the sysmon CSV already logs everything needed).
