@@ -27,5 +27,5 @@ during someone else's run.
 Checks when a CSV is missing: `launcher=` and `renderer=` in run.opts, `LC_NUMERIC=C`,
 console.txt "OpenGL version" (Mesa = Zink), `ls harness/runs/<run>/*.csv`, whether the route
 ever started (`route` lines in console.txt), whether verify mode was used (nothing starts).
-HUD appearance knobs: `config/CLAUDE.md`. Diego wants the overlay visible and the game to close
+HUD appearance knobs: `config/CLAUDE.md`. The maintainer wants the overlay visible and the game to close
 itself; no `no_display`.

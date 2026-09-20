@@ -168,7 +168,7 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
    2026-09-19 (evening): the flag is the tileset property `Translucent`
    (road decals, dirt patches, puddles), and baked into the opaque chunk
    texture those tiles come out as opaque black one-tile rectangles on the
-   floor (Diego's screenshot, walking, not only at speed). The per-frame
+   floor (the maintainer's screenshot, walking, not only at speed). The per-frame
    pass draws about 20 of them per frame; not worth it.
 5. **Dev counters** (only with `instrument=true`): `renderTranslucent(IsoObject)`
    and `renderTranslucent(IsoGridSquare)` count what the per-frame pass draws
@@ -664,7 +664,7 @@ thread and waits for it, even when `ShaderManager` already holds the shader.
 Every `Model` constructor calls it, and the render thread only drains that
 queue once per render step, so each model built off the render thread costs
 one loading-screen frame. On the desktop that is ~1 ms; on the laptop
-`diego-flip` (issue #1) the loading-screen step is ~220 ms and the 73 animal
+the laptop of issue #1 the loading-screen step is ~220 ms and the 73 animal
 models `AnimalDefinitions.loadAnimalDefinitions` builds (all `animalEffect`)
 were 16.5 s of the 31 s load. Now, when `shaderCache` is on, the method first
 asks `pzopt.ModelShaders` for a shader an earlier model already created for
@@ -682,7 +682,7 @@ true). The class-load marker goes in a static initializer like the others.
 
 A file-pool worker (`pool-1-thread-18`, `FileTask_LoadPackImage.call` →
 `initMipMaps` → `generateMipMaps`) crashed the JVM on the laptop
-`diego-flip` with a SIGSEGV inside the C2-compiled
+the issue #2 laptop with a SIGSEGV inside the C2-compiled
 `scaleMipLevelMaxAlpha`. Nothing at the Java level can produce it: the
 `ImageData` is local to the task, its `MipMapLevel` buffers are freshly
 malloc'd and only ever read through bounds-checked `ByteBuffer.get(int)` /

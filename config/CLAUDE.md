@@ -6,7 +6,7 @@ MangoHud 0.8.4 profiles passed with `harness/run.sh --mangohud-config`.
 |---|---|
 | `mangohud-benchmark.conf` | measurement runs: CSV log, `control=mangoapp` |
 | `mangohud-showcase.conf` | big HUD (font 64), top-center, offset_y=560 = screen middle, gpu_list=0 |
-| `mangohud-showcase-graph.conf` | frame_timing + frame_timing_detailed + `dynamic_frame_timing` (Diego's "variable frame time graph"); graph height is hard-coded in 0.8.4 |
+| `mangohud-showcase-graph.conf` | frame_timing + frame_timing_detailed + `dynamic_frame_timing` (the "variable frame time graph"); graph height is hard-coded in 0.8.4 |
 | `mangohud-showcase-stock.conf` / `-opt.conf` | left/right labelled variants for the quad video; right-anchored positions need a NEGATIVE offset_x (-48), left-anchored +48 |
 | `mangohud-flip.conf` | swap-probe experiments |
 

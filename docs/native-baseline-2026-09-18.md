@@ -1,6 +1,6 @@
 # Findings, 2026-09-18: harness re-validation on the native build, first frame-time baseline
 
-Objective restated by Diego this session: **consistent frame time, and the CPU
+Objective restated by the maintainer this session: **consistent frame time, and the CPU
 and GPU driven to the max whenever the game is not smoothly pegged at 240 fps.**
 Everything below is what the harness measured after it was made trustworthy
 again; nothing is from observation. Run directories are under `harness/runs/`,
@@ -22,7 +22,7 @@ summaries under `harness/baseline/native/`.
   `compare.py` now refuses silently comparing across a different
   "OpenGL version" / "Desktop resolution" line (warning per candidate).
 - Env vars from `run.sh` never reach a game started through the running Steam
-  client. Diego set the game's Steam launch options to
+  client. The maintainer set the game's Steam launch options to
   `<repo>/harness/steam-launch.sh %command%`; `run.sh` writes
   `~/Zomboid/pzopt-launch.env` for the run (deleted afterwards). Without the
   file the wrapper is a no-op.
@@ -45,7 +45,7 @@ summaries under `harness/baseline/native/`.
   `native-stock-2-20260918-171900/`) happened on 1 of 7 launches. `run.sh`
   keeps the hs_err, records `crashed=`/`attempts=` in `run.opts` and retries a
   start-up crash (`--retries`, default 2).
-- Diego's previous launch options forced **Mesa Zink** on the RTX 4090. Two
+- The previous launch options forced **Mesa Zink** on the RTX 4090. Two
   runs on Zink (`native-stock-1`, `native-stock-2`) are kept for contrast; via
   the wrapper Zink now dies silently at "VSync: OFF" (`native-zink-1`), so it
   is not an A/B leg yet.

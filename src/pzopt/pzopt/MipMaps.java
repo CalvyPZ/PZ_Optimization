@@ -10,7 +10,7 @@ import java.nio.ByteBuffer;
  * scaleMipLevelAverage and performPreMultipliedAlpha(MipMapLevel), pixel for
  * pixel (tests/pzopt/MipMapsTest checks that against the game jar's class).
  * Written for GitHub issue #2 (a SIGSEGV in the C2-compiled
- * scaleMipLevelMaxAlpha on a file-pool thread of the laptop diego-flip) before
+ * scaleMipLevelMaxAlpha on a file-pool thread of the issue #2 laptop) before
  * the crash log could be read. The log shows the fault on a plain stack spill
  * reload (mov r14d,[rsp+0x88]) at a 32-bit-truncated stack address, with two
  * other truncated-address faults on that machine the same evening, so the

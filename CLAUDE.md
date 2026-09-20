@@ -2,7 +2,7 @@
 
 Class overrides for Project Zomboid Build 42 (Java, LWJGL/OpenGL) that improve chunk
 streaming and driving frame time, plus a hands-off benchmark harness that measures them.
-Public repo (DiegoVillalobosFlores/PZ_Optimization). Owner: Diego (they/them).
+Public repo (DiegoVillalobosFlores/PZ_Optimization). Maintainer: the repository owner (they/them).
 
 ## Objective (stated 2026-09-18)
 
@@ -16,13 +16,13 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
 
 - **`decompiled/` stays local** (gitignored, 24 MB CFR output of the whole jar). Never `git add`
   it. `src/overrides/` (the 25 shadowed classes with our `// pzopt:` edits) IS committed since
-  2026-09-19: Diego confirmed the sources may ship. Every edit is still described in prose in
+  2026-09-19: the maintainer confirmed the sources may ship. Every edit is still described in prose in
   `docs/override-edits.md`, and the `// pzopt:` markers stay on every changed line.
-- **Shared machine.** Several Claude sessions and Diego use the one game install and `~/Zomboid`.
+- **Shared machine.** Several Claude sessions and the maintainer use the one game install and `~/Zomboid`.
   Before a launch or a reinstall check both `pgrep -f '[P]rojectZomboid64'` and
   `pgrep -f '[h]arness/run.sh'` (excluding your own). Message busy peers (ListAgents /
   SendMessage) before reinstalling or starting a batch. See `.claude/skills/bench-run`.
-- **Run etiquette.** Diego is usually at the machine. Say a run is about to start before
+- **Run etiquette.** The maintainer is usually at the machine. Say a run is about to start before
   launching, one run at a time, never long batches. Never edit `harness/run.sh` while a run is in
   progress (bash reads it incrementally; a mid-edit launch died and its EXIT trap corrupted
   `latestSave.ini`). Launch from a copy (`harness/.run-snapshot.sh`) if someone else edits it.
@@ -117,7 +117,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under
   GLX). `docs/plan-wayland.md`.
-- Proton run prepared but blocked on Diego forcing a compat tool in Steam.
+- Proton run prepared but blocked on the maintainer forcing a compat tool in Steam.
 - Boot/load (2026-09-19 evening, `docs/plan-instant-load.md`): launch → menu 7.35 → 5.00 s,
   Continue → world 6.53 → 4.03 s, via boot threads (FMOD, anim sets), a boot-time file-pool
   pump, Lua precompile, animation clip + pack index caches (`~/Zomboid/pzopt/`), linear script

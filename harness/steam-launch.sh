@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Steam launch wrapper for Project Zomboid. Set the game's Steam launch options to:
 #
-#   /home/diegov/Documents/ZedProjects/PZ_Optimization/harness/steam-launch.sh %command%
+#   <repo>/harness/steam-launch.sh %command%
 #
 # Environment variables cannot be handed to a game started through the running
 # Steam client, so harness/run.sh writes the ones a run needs (the renderer

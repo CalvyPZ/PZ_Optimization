@@ -731,7 +731,7 @@ crash surface (a JVM fault in native code is not recoverable).
 ### Not on the roadmap
 
 Lower render resolution or a smaller zoom-out buffer (meets the GPU target by
-lowering the objective; only if Diego wants that trade), multiplayer, moving
+lowering the objective; only if the maintainer wants that trade), multiplayer, moving
 `IsoCell.render` to another thread wholesale (GL context ownership), and further
 chunk-streamer work (latency is at 4 to 5 ms median; done).
 

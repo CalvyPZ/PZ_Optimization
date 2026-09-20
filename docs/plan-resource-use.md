@@ -1,6 +1,6 @@
 # Plan: use the whole GPU and CPU at 5120x2160 (2026-09-19, afternoon)
 
-Question from Diego after the frame cap was removed: the game still does not
+Question from the maintainer after the frame cap was removed: the game still does not
 use all of the GPU and CPU at 5120x2160. This document is the sweep of the
 game's frame pipeline that answers where the idle time goes, the measurements
 that back it, and the plan that follows. Every number points at a run
@@ -46,7 +46,7 @@ window. Native samples at 1 ms show the GL calls the driver blocks in.
 
 | run | renderer / display | route | fps mean | frame mean / p99 | GPU busy | game thread busy | GL thread busy | game thread blocked in the ready-slot wait |
 |---|---|---|---|---|---|---|---|---|
-| `uncap-wl-zink-opt120-1` (Diego's run) | Zink, Wayland | 122 km/h, complete | 381 | 2.6 / 6.5 ms | 60 % | 59 % | 30 % | (no JFR) |
+| `uncap-wl-zink-opt120-1` (the maintainer's run) | Zink, Wayland | 122 km/h, complete | 381 | 2.6 / 6.5 ms | 60 % | 59 % | 30 % | (no JFR) |
 | `waits-uncap-1` | Zink, Wayland | 122 km/h, complete | 378 | 2.6 / 6.4 ms | 60 % | 60 % | 30 % | **39 %** (1.0 ms per frame) |
 | `waits-uncap-zinkx11-1` | Zink, XWayland | 122 km/h, off road at 380 tiles | 293 moving / 195 parked | 3.4 / 7.2 ms | 51 % | 68 % | – | – |
 | `waits-uncap-gl-1` | **NVIDIA GL**, XWayland | 122 km/h, off road at 380 tiles | **629 moving** / 718 parked | 1.6 / 5.7 ms | **93 %** | 85 % | 59 % | 13 % (0.2 ms per frame) |
@@ -80,7 +80,7 @@ Where the GL thread's time goes (native samples inside the route window):
    game's zoom design and the only lever that would raise fps further on
    this machine; rendering the zoomed-out view at screen size would cut GPU
    fill 6× but changes the look (the 2.5× buffer is a supersample). Not
-   planned unless Diego wants that trade.
+   planned unless the maintainer wants that trade.
 3. **The CPU is idle because the GPU is the limit.** With NVIDIA GL the game
    thread is 57–69 % busy and 13 of 16 threads idle; that is the correct
    state for a GPU-bound frame, not a stall. The one thing that makes the
@@ -88,7 +88,7 @@ Where the GL thread's time goes (native samples inside the route window):
    the stock **offscreen UI** option (`uiRenderOffscreen=true` in options.ini,
    "Render UI offscreen" in Display options): the Lua UI (25–34 % of
    game-thread CPU, `KahluaTableImpl.rawget`, `luaMainloop`) then renders at
-   `uiRenderFPS` (120 in Diego's options) into an FBO instead of 570 times a
+   `uiRenderFPS` (120 in the maintainer's options) into an FBO instead of 570 times a
    second. Game thread 69 → 57 % busy; frames from both recordings at the
    same route time are identical (HUD, inventory bar, clock, world).
 4. **Per-frame blocking calls that are fine.** `invokeOnRenderContext` from
@@ -113,7 +113,7 @@ Ordered by what moves the objective ("CPU and GPU maxed unless pegged at
 
 1. **Renderer for uncapped play: NVIDIA GL** (done, measured). Showcase and
    A/B runs default to `--renderer nvidia` (already the harness default). The
-   Zink swap stall is documented here; if Diego wants Zink, the next
+   Zink swap stall is documented here; if the maintainer wants Zink, the next
    experiment is Mesa's kopper behaviour on the NVIDIA Vulkan WSI
    (`MESA_VK_WSI_PRESENT_MODE` does not apply to a non-Mesa Vulkan driver), a
    driver question, not a game one.
@@ -141,7 +141,7 @@ Ordered by what moves the objective ("CPU and GPU maxed unless pegged at
    c. Sprite ring depth as a setting (`ringBuffers`, override of
       `SpriteRenderer$RingBuffer`): only if Zink is kept.
 4. **GPU cost per frame (the only lever left on this machine)**: optional,
-   Diego's call because it changes the picture. A `zoomRenderScale` that
+   the maintainer's call because it changes the picture. A `zoomRenderScale` that
    renders the zoomed-out view at screen size (or 1.5×) instead of 2.5×.
    Gate: side-by-side stills at max zoom.
 

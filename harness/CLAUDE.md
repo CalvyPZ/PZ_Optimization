@@ -115,8 +115,8 @@ focused. Reference numbers in `baseline/windows/`, findings in `docs/windows-tes
 ## Pitfalls that already cost runs
 
 - EXIT trap under `set -e`: a failing last command of an `&&` list aborts the restore.
-  `restore()` does `set +e`. Diego's original MangoHud.conf was lost that way once.
+  `restore()` does `set +e`. The maintainer's original MangoHud.conf was lost that way once.
 - Another session's run.sh EXIT trap can fire after you launched behind their game and strip
   your flags (game sits at the main menu). Check for run.sh processes, not just the game.
-- Do not add `no_display` or long lingers: Diego wants the overlay visible and the game to
+- Do not add `no_display` or long lingers: The maintainer wants the overlay visible and the game to
   close by itself after a run.

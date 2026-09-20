@@ -1,6 +1,6 @@
 # Plan: instant boot and instant load
 
-Goal (Diego, 2026-09-19): launch → main menu under 1 s, Continue → world under
+Goal (2026-09-19): launch → main menu under 1 s, Continue → world under
 1 s, on a Crucial T705 (14 GB/s). The disk is not the limit anywhere below: every
 phase is single-thread CPU or a serial wait. This plan lists every boot and
 load step with its measured cost, what to change, and the measured result per
@@ -115,7 +115,7 @@ only way past the ~2 s of boot Lua and is out of scope for overrides.
 
 ## Addendum 2026-09-19 (night): laptop load, GitHub issue #1
 
-On `diego-flip` (Radeon 890M, on battery) the load after Continue was 31 s,
+On the issue #1 laptop (Radeon 890M, on battery) the load after Continue was 31 s,
 16.5 s of it inside `loadAnimalDefinitions`. The loop itself only reads Lua
 tables; the cost is `Model.CreateShader`, which posts to the render thread and
 waits once per model (73 animal models, one shader), and each wait is one

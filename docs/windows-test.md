@@ -207,7 +207,7 @@ Quitting from the main menu of boot 1 crashed on exit: `EXCEPTION_ACCESS_VIOLATI
 folders after the Steam API is gone). Stock code path; a menu quit of a later boot did not
 reproduce it. Dump kept as `harness/runs/win-boot-20260919/hs_err_pid3536-boot1-quit.log`.
 
-Frame-cap combos: Diego confirmed Uncapped, 300–500 and the separate Menu framerate combo; a
+Frame-cap combos: the maintainer confirmed Uncapped, 300–500 and the separate Menu framerate combo; a
 500 fps choice survived a relaunch (`framecap.ini`, `[pzopt] frame cap: game 500 fps`).
 
 ### Bench route, optimized vs stock switches
@@ -254,7 +254,7 @@ run-win.ps1 now splits on commas itself).
 Not yet done from the list above: the manual drive at max zoom, walking through buildings,
 quit-to-menu-and-Continue, and the visible-fps reading with the in-game limiter at Uncapped.
 
-### Zoom 2.5 (same evening, after Diego added the 250 % zoom level)
+### Zoom 2.5 (same evening, after the 250 % zoom level was added)
 
 Same machine, cap and route; options.ini `zoomLevels2x` now starts at 250, so `zoom=max`
 gives 2.5 and the zoom-out buffer is 12800x5400, the Linux configuration. Two stock runs

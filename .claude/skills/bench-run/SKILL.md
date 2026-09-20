@@ -19,7 +19,7 @@ that. Keep the Steam performance monitor off (caps at ~160 fps).
 
 ## 2. Announce
 
-Tell Diego in the message before the launch: a run is starting, leave the game alone (no
+Tell the user in the message before the launch: a run is starting, leave the game alone (no
 clicking Continue, no launching, no screen lock). One run at a time, never a batch.
 
 ## 3. Launch

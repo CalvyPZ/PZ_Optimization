@@ -25,7 +25,7 @@ Rules and gotchas:
 
 - **Publish only from a pushed, clean commit.** The script refuses if `src/` or `build.sh`
   has uncommitted changes or HEAD is not on `origin/master`; the tag must describe the bytes
-  in the zip. Commit and push first (only when Diego asked for the commit).
+  in the zip. Commit and push first (only when asked for the commit).
 - **Never overwrite an earlier asset.** Each build gets its own release; the previous test
   build (`win-test-b0bbce05d5`) stays as the reference the Windows results were taken on.
 - Put what changed since the last Windows build in `--notes` (read `git log <last tag>..HEAD`).
