@@ -13,6 +13,18 @@ they log one line and the game behaves as stock.
 Single-player only. Read [Known limitations](#known-limitations) before installing on
 a machine you play on.
 
+> **Important: turn off Steam's in-game performance monitor.** The newer FPS /
+> performance overlay in Steam's settings (Settings > In Game > "In-game
+> performance monitor"), not the classic Shift+Tab overlay, hooks every GL call
+> and serialises the render thread. With it on, the optimized game stops at
+> roughly 160 fps and the render thread sits at 90 % of a core, so the headroom
+> these patches recover is hidden. The classic Steam overlay is harmless. Stock is
+> GPU-bound at max zoom either way, so the monitor only hides the difference; it
+> does not change the stock numbers. Every result below and every harness run was
+> taken with it off (A/B/A on the 120 km/h route: 164 fps with it on, 237 fps off;
+> see `docs/results.md`, 2026-09-19). Use MangoHud, RivaTuner or the in-game FPS
+> counter instead.
+
 ---
 
 ## Contents
@@ -372,7 +384,11 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `cutawayFast` | `true` | replay the stored occluder mask on clean levels |
 | `treeBakeDirect` | `true` | bake trees through the plain sprite path (the batched path dropped JUMBO trees near buildings) |
 | `textureBufferMb` | `50` | texture upload buffer size |
-| `lightingRebakeMs` / `cutawayRadius` / `gridStackInterval` | `0` | measured and not adopted (see below); `0` = stock |
+| `rebakeBudget` / `rebakeMaxFrames` | `4` / `3` | re-bakes of on-screen chunk textures per frame for lighting, redraw and cutaway changes; the previous image stays up to that many frames (`0` = every re-bake lands the same frame) |
+| `lightingRebakeMs` | `250` | a texture dirtied only by lighting drift is not re-baked more often than this (`0` = stock) |
+| `cutawayRadius` / `gridStackInterval` | `6` / `8` | cutaway wall visits only within 6 chunks of the camera; buildings-in-front scan at most every 8 frames while square and facing are unchanged (`0` = stock) |
+| `weatherMaskIdleSkip` | `true` | skip the per-frame weather-mask view scan when it cannot add a mask; scan only the player's building when it can |
+| `lightSwitchCheckFrames` | `15` | a light switch reuses its has-electricity answer for this many frames (`0` = stock) |
 | `persistentVbo` | `false` | persistently mapped sprite buffers |
 | `fileThreads` / `fileInflight` | `max(4, cores/2)` / `4x` | async file system width and queue depth |
 | `parallelDepthMaps` | `true` | decode depth-map tilesets concurrently |
@@ -593,6 +609,22 @@ thread and waited one loading-screen step per model. On a laptop whose
 loading-screen step is 220 ms the 73 animal models cost 16.5 s (GitHub issue #1).
 Repeat shaders now come from a cache.
 
+**Game-thread trims on the Rosewood route** (2026-09-20). A 25 s teleport route south
+through Rosewood at max zoom with the player facing spinning (`--flag turn=90`, 55 chunks
+per second loaded) is the heaviest bench route now. On it the game thread was 92 % busy at
+199 fps; the wins, all on that thread: the weather-mask view scan skipped when it can add
+nothing and limited to the player's building when it can (`weatherMaskIdleSkip`); the
+cutaway visit radius and grid-stack interval adopted (6 chunks, 8 frames); lighting-only
+re-bakes held 250 ms; a re-bake budget of 4 per frame for textures dirtied by lighting,
+redraw or cutaways with the previous image shown for at most 3 frames (`rebakeBudget`,
+87 % of bakes on that route were re-bakes); the light-switch electricity check cached for
+15 frames (`lightSwitchCheckFrames`); the Kahlua table read done with one hash lookup; the
+exact occluder masks stored on the chunk. Together: 199 → 229 fps mean, p90 8.1 → 5.4 ms,
+p99 16.9 → 10.2 ms on the spinning route; on the plain 100 s south route 230 → 238.5 fps,
+p99 10.5 → 7.3 ms, frames under the 240 cap 24 → 21 %. Recordings with the keys off show
+the same frames. What is left on the game thread is broad: chunk texture bakes (20 %), the
+world update (23 %: player, zombies, vehicles, chunk hand-off) and the Lua UI (10 %).
+
 **Mipmaps on byte arrays** (`mipmapArrays`). Mip levels and alpha premultiply are built row
 by row on `byte[]` copies instead of per-byte direct-buffer accesses, byte-identical to stock.
 Written for GitHub issue #2 (a JVM SIGSEGV in `ImageData.scaleMipLevelMaxAlpha` on a laptop),
@@ -619,8 +651,7 @@ in-game choice survives the game's own rewrite of `options.ini`.
 
 ### What was measured and not adopted
 
-Lighting re-bake hold-off, cutaway visit radius, grid-stack interval (all within
-noise); G1 instead of ZGC (p99 -13 % but 3x the frames over 33 ms); Mesa Zink
+G1 instead of ZGC (p99 -13 % but 3x the frames over 33 ms); Mesa Zink
 instead of NVIDIA GL (blocks 1.8 ms per frame in swap); a 256 MB texture upload
 buffer (a 5 s frame a few seconds into the world); native Wayland (a wash at the
 240 cap).
@@ -804,6 +835,9 @@ Safety rails:
   and on the native Linux depot with NVIDIA GL under XWayland (Mesa Zink and
   native Wayland too). On Windows the bench route was run and the frame-cap
   combos checked; the long free-play soak above is open there as well.
+- **Steam performance monitor.** Steam's in-game performance monitor caps the
+  optimized game at ~160 fps by pinning the GL thread (see the notice at the top).
+  Keep it off; the classic overlay is fine.
 - **Development install contents.** The build also carries the harness classes
   (`pzopt.Harness`, `pzopt.AutoStart`, `pzopt.Parity`, `pzopt.Stats`,
   `pzopt.ScriptDump`). They are inert unless the harness launches the game.
