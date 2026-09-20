@@ -43,36 +43,39 @@ W=3840; H=1920; CW=1920; CH=810
 TITLE_H=110; LABEL_H=50; PAD=$(( (H - TITLE_H - 2*LABEL_H - 2*CH) / 3 ))
 Y1L=$TITLE_H; Y1=$((Y1L + LABEL_H)); Y2L=$((Y1 + CH + PAD)); Y2=$((Y2L + LABEL_H))
 
-cell() { echo "[$1:v]scale=${CW}:${CH}:flags=lanczos,setsar=1,fps=60,format=yuv420p"; }
-label() { echo "drawtext=fontfile=$FONT:text='$1':fontsize=36:fontcolor=white:x=$2:y=$3"; }
+# HDR end to end: the captures are AV1 10-bit PQ / BT.2020 and so is the output (no tone-map).
+# PQ-space colours: full white is the display's peak, so text uses ~60 % code values.
+TXT=0xb4b4b8; DIM=0x8a8a90; RED=0xb85c5c; AMB=0xb89a5c; GRN=0x5cb878
+cell() { echo "[$1:v]scale=${CW}:${CH}:flags=lanczos,setsar=1,fps=60,format=yuv420p10le"; }
+label() { echo "drawtext=fontfile=$FONT:text='$1':fontsize=36:fontcolor=$TXT:x=$2:y=$3"; }
 ptext() { # $1=text $2=y $3=size $4=color
   echo "drawtext=fontfile=$FONT:text='$1':fontsize=$3:fontcolor=$4:x=${CW}+(${CW}-tw)/2:y=${Y2}+$2"
 }
 
 filter="
-color=c=0x0d0d10:s=${W}x${H}:r=60:d=${LEN}[bg];
+color=c=0x0d0d10:s=${W}x${H}:r=60:d=${LEN},format=yuv420p10le[bg];
 $(cell 0)[s];
 $(cell 1)[o];
 $(cell 2)[g];
 [bg][s]overlay=0:${Y1}:shortest=1[b1];
 [b1][o]overlay=${CW}:${Y1}[b2];
 [b2][g]overlay=0:${Y2},drawbox=x=${CW}-2:y=0:w=4:h=${Y2}+${CH}:color=0x303038:t=fill,drawbox=x=${CW}:y=${Y2}:w=${CW}:h=${CH}:color=0x16161c:t=fill[b3];
-[b3]drawtext=fontfile=$FONT:text='Project Zomboid B42  \\|  game-thread pass  \\|  stock vs optimized vs optimized + game-thread pass':fontsize=56:fontcolor=white:x=(w-tw)/2:y=28,
+[b3]drawtext=fontfile=$FONT:text='Project Zomboid B42  \\|  game-thread pass  \\|  stock vs optimized vs optimized + game-thread pass':fontsize=56:fontcolor=$TXT:x=(w-tw)/2:y=28,
 $(label 'STOCK SETTINGS' "(${CW}-tw)/2" "${Y1L}+6"),
 $(label 'OPTIMIZED  (2026-09-19)' "${CW}+(${CW}-tw)/2" "${Y1L}+6"),
 $(label 'OPTIMIZED + GAME-THREAD PASS  (2026-09-20)' "(${CW}-tw)/2" "${Y2L}+6"),
 $(label 'RESULTS  -  25 s route, 55 chunks/s' "${CW}+(${CW}-tw)/2" "${Y2L}+6"),
-$(ptext 'Teleport route south through Rosewood, max zoom, player facing spinning 90 deg/s' 40 34 0xd0d0d8),
-$(ptext 'STOCK SETTINGS' 130 40 0xff8080),
-$(ptext "$RES_STOCK" 180 34 white),
-$(ptext 'OPTIMIZED (2026-09-19)' 270 40 0xffd080),
-$(ptext "$RES_OPT" 320 34 white),
-$(ptext 'OPTIMIZED + GAME-THREAD PASS (2026-09-20)' 410 40 0x80ff9c),
-$(ptext "$RES_GT" 460 34 white),
-$(ptext 'What the pass added (all game thread) - weather-mask scan gate, re-bake budget for lighting / redraw / cutaway' 560 30 0xa0a0a8),
-$(ptext 'changes, lighting-only re-bakes held 250 ms, cutaway radius 6 chunks, light-switch power check cached,' 600 30 0xa0a0a8),
-$(ptext 'single-lookup Lua table reads, occluder masks kept on the chunk. Same save, route, hardware and MangoHud overlay.' 640 30 0xa0a0a8),
-drawtext=fontfile=$FONT:text='Ryzen 7 9800X3D, 32 GB DDR5 8000 MT/s, RTX 4090, 5120x2160, NVIDIA GL, 240 fps cap  -  the HUD shows frame time and FPS live':fontsize=30:fontcolor=0xa0a0a8:x=(w-tw)/2:y=h-th-22[v]
+$(ptext 'Teleport route south through Rosewood, max zoom, player facing spinning 90 deg/s' 40 34 $TXT),
+$(ptext 'STOCK SETTINGS' 130 40 $RED),
+$(ptext "$RES_STOCK" 180 34 $TXT),
+$(ptext 'OPTIMIZED (2026-09-19)' 270 40 $AMB),
+$(ptext "$RES_OPT" 320 34 $TXT),
+$(ptext 'OPTIMIZED + GAME-THREAD PASS (2026-09-20)' 410 40 $GRN),
+$(ptext "$RES_GT" 460 34 $TXT),
+$(ptext 'What the pass added (all game thread) - weather-mask scan gate, re-bake budget for lighting / redraw / cutaway' 560 30 $DIM),
+$(ptext 'changes, lighting-only re-bakes held 250 ms, cutaway radius 6 chunks, light-switch power check cached,' 600 30 $DIM),
+$(ptext 'single-lookup Lua table reads, occluder masks kept on the chunk. Same save, route, hardware and MangoHud overlay.' 640 30 $DIM),
+drawtext=fontfile=$FONT:text='Ryzen 7 9800X3D, 32 GB DDR5 8000 MT/s, RTX 4090, 5120x2160, NVIDIA GL, 240 fps cap  -  the HUD shows frame time and FPS live':fontsize=30:fontcolor=$DIM:x=(w-tw)/2:y=h-th-22,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=tv[v]
 "
 
 mkdir -p "$(dirname "$out")"
@@ -81,10 +84,11 @@ ffmpeg -hide_banner -y \
   -ss "$ST_OPT"   -t "$LEN" -i "$O" \
   -ss "$ST_GT"    -t "$LEN" -i "$G" \
   -filter_complex "$filter;[2:a]atrim=0:${LEN},loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=out:st=$((LEN-3)):d=3[a]" -map '[v]' -map '[a]' -c:a aac -b:a 192k \
-  -c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq 19 -b:v 0 -maxrate 80M -bufsize 160M \
-  -profile:v high -pix_fmt yuv420p -movflags +faststart -r 60 \
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 22 -b:v 0 -maxrate 100M -bufsize 200M \
+  -pix_fmt p010le -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range tv \
+  -movflags +faststart+write_colr -r 60 \
   "$out"
 
-ffmpeg -hide_banner -v error -y -ss 12 -i "$out" -frames:v 1 -q:v 2 "${out%%.mp4}.jpg"
+ffmpeg -hide_banner -v error -y -ss 12 -i "$out" -frames:v 1 -vf "zscale=tin=smpte2084:pin=bt2020:min=bt2020nc:t=linear:npl=200,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709,format=yuv420p" -q:v 2 "${out%%.mp4}.jpg"
 echo "clip starts: stock $ST_STOCK  opt $ST_OPT  gt $ST_GT"
-echo "wrote $out and ${out%%.mp4}.jpg"
+echo "wrote $out (AV1 10-bit HDR PQ/BT.2020) and ${out%%.mp4}.jpg"

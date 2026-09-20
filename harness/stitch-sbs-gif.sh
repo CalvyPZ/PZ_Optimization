@@ -15,7 +15,8 @@ prefix="${2:-${in%.mp4}}"
 ROUTE=21.07; DRIVE="${DRIVE:-10.0}"; TAIL_FROM=59.6; END=63.43
 gif() { # $1=filter producing [v]  $2=out
   local tmp; tmp=$(mktemp --suffix=.mp4)
-  ffmpeg -hide_banner -v error -y -i "$in" -filter_complex "$1" -map '[v]' -an -c:v h264_nvenc -cq 19 "$tmp"
+  # the source is AV1 10-bit HDR (PQ/BT.2020) since 2026-09-20: tone-map to SDR for the GIF
+  ffmpeg -hide_banner -v error -y -i "$in" -filter_complex "$1;[v]zscale=tin=smpte2084:pin=bt2020:min=bt2020nc:t=linear:npl=200,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709,format=yuv420p[vs]" -map '[vs]' -an -c:v h264_nvenc -cq 19 "$tmp"
   ffmpeg -hide_banner -v error -y -i "$tmp" -filter_complex "
 [0:v]fps=8,scale=830:-1:flags=lanczos,split[a][b];
 [a]palettegen=max_colors=128:stats_mode=diff[p];

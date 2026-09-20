@@ -142,13 +142,21 @@ real above twice that.
 | `flicker.py <run>/recording.mp4 START END [--scale W] [--heat png]` | `--record` of a `--flag hold=N` run | per-frame appear / disappear metric (pixels that change and revert within 3 frames), busiest screen cells, heat map |
 | `flicker-triple.py <run>/recording.mp4 FRAME` | same | crops of one frame triple with the A-B-A pixels marked (frame-numbered; use `-ss` times for anything compared with flicker.py) |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
-| `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe) |
+| `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe); its quad6 captures are SDR H.264, composed in SDR and mapped to PQ/BT.2020 (reference white 203 nits) at the end |
+| `stitch-storm-sbs.sh` | stock + optimized 120 km/h thunderstorm recordings (`sbs-storm120-*`, in-game overlay on) | side-by-side aligned at the car's motion onset, each run's overlay inset at full resolution |
+| `encode-av1-hdr.sh in out [width]` | any mp4 | AV1 10-bit HDR re-encode (HDR input kept, SDR input mapped to PQ/BT.2020), optional downscale; used for the 60 km/h video and the `-1080` README copies |
 | `stitch-triple.sh` | three bench recordings (stock settings, optimized 2026-09-19, optimized + game-thread pass) | 2:1 quad video with a results panel; clip starts derived from run.opts launch_epoch and pzopt-schedule.out (recorder starts ~1 s after launch_epoch) |
 | `stitch-triple-hdr.sh` | three uncapped bench recordings (stock settings, optimized before the 2026-09-20 evening pass, all optimizations) | 2:1 quad video kept in HDR end to end (NVENC AV1 10-bit, PQ/BT.2020 tags via `setparams` + `write_colr`); the in-game overlay region of each capture is pasted 1:1 (x1.25) into its panel so the numbers stay readable; results panel from env `RES_*`. Recordings: `--record --no-mangohud --env MANGOHUD_CONFIG=no_display --prop overlay=true --prop overlayFont=Large` (the maintainer's Steam launch options are `steam-launch.sh mangohud %command%`, so MangoHud is injected on every Steam launch and must be hidden explicitly) |
 | `stitch-sbs.sh` | stock + optimized 120 km/h recordings | side-by-side video with live boot/load counters and a hardware panel; header explains the HUD-clock sync. The first ~2.3 s of every capture show the desktop: never start a pane before the game window appears |
 | `stitch-sbs-gif.sh` | the stitch-sbs.sh mp4 | two README GIFs under GitHub's 10 MB limit: `-load.gif` (boot + load, real time) and `-drive.gif` (10 s of the route + the result lines) |
 | `proton-preflight.sh` | Steam manifests | read-only Proton readiness report |
 | `simulate.py` | | streamer queue simulation |
+
+**Every published video under `docs/media/` is AV1 10-bit HDR (PQ / BT.2020, NVENC `av1_nvenc`,
+`setparams` + `write_colr` tags), like the gpu-screen-recorder captures; the stitch scripts keep HDR
+sources 10-bit end to end (no tone-map) and map SDR sources to PQ. Text colours in the HDR
+compositions are PQ code values (~60 % = comfortable white). Posters (`.jpg`) and the README GIFs
+are tone-mapped (hable, 200 nits) from the HDR file (2026-09-20 night).**
 
 Use `--record` on drive runs and read frames from `recording.mp4` with ffmpeg (tile contact
 sheet) before concluding anything about visuals; it is a monitor capture, so the game window

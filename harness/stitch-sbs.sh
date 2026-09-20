@@ -58,10 +58,11 @@ OWAIT=$(f "$O_READY - $O_START")
 FONT=/usr/share/fonts/noto/NotoSans-Bold.ttf
 MONO=/usr/share/fonts/noto/NotoSansMono-Bold.ttf
 W=3840; H=1450; CW=1920; CH=810; PY=170
-GREY=0xa0a0a8; WHITE=white; STOCK_C=0xffb347; OPT_C=0x39f900
+# PQ-space colours (the output is HDR): full white is the display's peak, so ~60 % code values
+GREY=0x8a8a90; WHITE=0xb4b4b8; STOCK_C=0xb88a40; OPT_C=0x40b840
 
-# HDR (PQ / BT.2020, AV1 10-bit) capture -> SDR BT.709 pane
-tm="scale=${CW}:${CH}:flags=lanczos,zscale=tin=smpte2084:pin=bt2020:min=bt2020nc:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p,fps=60,setsar=1"
+# HDR (PQ / BT.2020, AV1 10-bit) capture kept as is: the output is HDR too (no tone-map)
+tm="scale=${CW}:${CH}:flags=lanczos,format=yuv420p10le,fps=60,setsar=1"
 
 txt() { # $1=text $2=x $3=y $4=size $5=color [$6=font] [$7=extra]
   echo "drawtext=fontfile=${6:-$FONT}:text='$1':fontsize=$4:fontcolor=$5:x=$2:y=$3${7:+:$7}"
@@ -76,7 +77,7 @@ VX_S=$((CW-90)); VX_O=$((2*CW-90))   # right edges of the counter values
 LY1=$((PY+CH+32)); LY2=$((LY1+66)); LY3=$((LY2+70))
 
 filter="
-color=c=0x0d0d10:s=${W}x${H}:r=60:d=${LEN}[bg];
+color=c=0x0d0d10:s=${W}x${H}:r=60:d=${LEN},format=yuv420p10le[bg];
 [0:v]${tm}[s];
 [1:v]split[o1][o2];
 [o1]trim=0:${O_ARRIVE},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${HOLD}[oA];
@@ -104,7 +105,7 @@ $(txt 'CPU    AMD Ryzen 7 9800X3D  ·  8 cores / 16 threads  ·  up to 5.45 GHz'
 $(txt 'GPU    NVIDIA GeForce RTX 4090  ·  24 GB  ·  driver 615.71' 260 $((LY3+170)) 40 $WHITE),
 $(txt 'RAM    32 GB DDR5  ·  8000 MT/s' 2060 $((LY3+108)) 40 $WHITE),
 $(txt 'SSD    Crucial T705 2 TB  ·  PCIe 5.0 x4  ·  13.5 GB/s sequential read (measured)' 2060 $((LY3+170)) 40 $WHITE),
-$(txt 'same save, same route, same machine  ·  CachyOS, native Linux build, NVIDIA GL under XWayland  ·  5120x2160 at max zoom  ·  MangoHud overlay shows live frame time and fps  ·  boot and load counters come from the game log' '(w-tw)/2' 'h-th-30' 30 $GREY)[v]
+$(txt 'same save, same route, same machine  ·  CachyOS, native Linux build, NVIDIA GL under XWayland  ·  5120x2160 at max zoom  ·  MangoHud overlay shows live frame time and fps  ·  boot and load counters come from the game log' '(w-tw)/2' 'h-th-30' 30 $GREY),setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=tv[v]
 "
 
 mkdir -p "$(dirname "$out")"
@@ -114,9 +115,10 @@ ffmpeg -hide_banner -y \
   -i "$MUSIC" \
   -filter_complex "$filter;[2:a]atrim=0:${LEN},asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:d=1.5,afade=t=out:st=$(f "$LEN - 4"):d=4[a]" \
   -map '[v]' -map '[a]' -c:a aac -b:a 192k \
-  -c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq 19 -b:v 0 -maxrate 80M -bufsize 160M \
-  -profile:v high -pix_fmt yuv420p -movflags +faststart -r 60 -t "$LEN" \
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 22 -b:v 0 -maxrate 100M -bufsize 200M \
+  -pix_fmt p010le -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range tv \
+  -movflags +faststart+write_colr -r 60 -t "$LEN" \
   "$out"
 
-ffmpeg -hide_banner -v error -y -ss "$(f "$T_R + 15")" -i "$out" -frames:v 1 -q:v 2 "${out%.mp4}.jpg"
-echo "wrote $out and ${out%.mp4}.jpg (route start at ${T_R}s, length ${LEN}s)"
+ffmpeg -hide_banner -v error -y -ss "$(f "$T_R + 15")" -i "$out" -frames:v 1 -vf "zscale=tin=smpte2084:pin=bt2020:min=bt2020nc:t=linear:npl=200,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709,format=yuv420p" -q:v 2 "${out%.mp4}.jpg"
+echo "wrote $out (AV1 10-bit HDR PQ/BT.2020) and ${out%.mp4}.jpg (route start at ${T_R}s, length ${LEN}s)"

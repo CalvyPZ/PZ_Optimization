@@ -63,11 +63,13 @@ ffmpeg -hide_banner -y \
   -ss "$ST_O60"  -t "$LEN60"  -i "$O60" \
   -ss "$ST_S120" -t "$LEN120" -i "$S120" \
   -ss "$ST_O120" -t "$LEN60"  -i "$O120" \
-  -filter_complex "$filter;[3:a]atrim=0:${LEN60},loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=out:st=$((LEN60-3)):d=3[a]" -map '[v]' -map '[a]' -c:a aac -b:a 192k \
-  -c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq 19 -b:v 0 -maxrate 80M -bufsize 160M \
-  -profile:v high -pix_fmt yuv420p -movflags +faststart -r 60 \
+  -filter_complex "$filter;[v]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,zscale=t=linear:npl=203,format=gbrpf32le,zscale=pin=bt709:tin=linear:p=bt2020:t=smpte2084:m=bt2020nc:r=tv:npl=203,format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=tv[vh];[3:a]atrim=0:${LEN60},loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=out:st=$((LEN60-3)):d=3[a]" -map '[vh]' -map '[a]' -c:a aac -b:a 192k \
+  `# the quad6 captures are SDR H.264: the composed SDR frame is mapped to PQ/BT.2020 (reference white 203 nits) so every published video is AV1 HDR` \
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 22 -b:v 0 -maxrate 100M -bufsize 200M \
+  -pix_fmt p010le -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range tv \
+  -movflags +faststart+write_colr -r 60 \
   "$out"
 
 # Thumbnail: frame ~30 s in (all four cells moving).
-ffmpeg -hide_banner -v error -y -ss 30 -i "$out" -frames:v 1 -q:v 2 "${out%.mp4}.jpg"
-echo "wrote $out and ${out%.mp4}.jpg"
+ffmpeg -hide_banner -v error -y -ss 30 -i "$out" -frames:v 1 -vf "zscale=tin=smpte2084:pin=bt2020:min=bt2020nc:t=linear:npl=200,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709,format=yuv420p" -q:v 2 "${out%.mp4}.jpg"
+echo "wrote $out (AV1 10-bit HDR PQ/BT.2020 from SDR captures) and ${out%.mp4}.jpg"

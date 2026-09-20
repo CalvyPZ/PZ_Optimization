@@ -29,6 +29,11 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
 - **Never kill with a self-matching pattern.** `pkill -f '<pattern>'` where the pattern appears in
   your own command line kills the tool shell (exit 144). Use bracket patterns like
   `[P]rojectZomboid64` or a saved PID.
+- **All recordings and videos are AV1 HDR.** Every `--record` capture (gpu-screen-recorder
+  `-k av1_hdr`: AV1 10-bit PQ / BT.2020) and every video published under `docs/media/` (the
+  stitch scripts, `harness/encode-av1-hdr.sh`, the `-1080` README copies) is encoded AV1 10-bit
+  with PQ / BT.2020 tags; never tone-map to SDR H.264. SDR sources are mapped to PQ; posters and
+  GIFs are the only tone-mapped derivatives. See `harness/CLAUDE.md`.
 - **Real saves are never loaded or written** by a harness run. Runs use the copied bench save
   `Saves/Sandbox/pzopt-bench` and must quit on their own. Launching the game via
   `harness/run.sh` is authorized without asking.
