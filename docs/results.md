@@ -772,3 +772,38 @@ hour, weather and torch at world-ready; `harness/CLAUDE.md`). 240 cap, `--no-das
 - First run (`preset-night-torch-1`) hung at the loading screen: `ClimateManager.forceDayInfoUpdate()`
   before the first climate tick NPEs every frame in `WAIT_WORLD`; removed, and a scene exception now
   rejects the run instead of looping.
+
+## 2026-09-20 (15:15–15:31): laptop on AC, power profile x stock/optimized on the spinning route
+
+Machine: the laptop again (`diego-flip`, Ryzen AI 9 HX 370 / Radeon 890M, Mesa 26.2.3, 1920x1080),
+this time **on AC** with `powerprofilesctl` set to each profile by the maintainer between pairs.
+Every run: spinning Rosewood route (`--flag route=S:450 --flag turn=90 --flag zoom=max
+--route-seconds 25`), `--prop uncappedFps=true`, `--option uiRenderOffscreen=true`, `--launcher
+direct` (no Steam), `--game-profiler`, `--no-mangohud --no-dashboard`, tuned G1 launcher JSON
+(`config/launcher/ProjectZomboid64.g1.json`, already installed there). Stock = `--prop
+enabled=false` (the master switch: stock code path everywhere, harness only). One run per cell.
+Runs `flip-spin-uncap-gp-ac-{perf,balanced,powersave}[-stock]-*`.
+
+| profile | build | fps mean | mean | p99 | p99.9 | max | >33 ms | jitter | CPU (24 c) | GPU | game thread |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| performance | stock | 56.2 | 17.8 | 39.3 | 57.5 | 74 | 24 | - | 21 % | 24 % | 99 % |
+| performance | optimized | **125.6** | 8.0 | 22.4 | 33.2 | 61 | 4 | 2.4 | 21 % | 42 % | 99 % |
+| balanced | stock | 56.4 | 17.7 | 40.3 | 68.0 | 121 | 34 | - | 21 % | 25 % | 99 % |
+| balanced | optimized | **124.9** | 8.0 | 22.3 | 33.9 | 62 | 4 | 2.5 | 21 % | 38 % | 99 % |
+| power-saver | stock | 40.8 | 24.5 | 63.1 | 97.8 | 126 | 176 | - | 29 % | 19 % | 98 % |
+| power-saver | optimized | **64.3** | 15.6 | 42.2 | 75.5 | 105 | 47 | 5.1 | 30 % | 20 % | 98 % |
+
+(ms unless stated; jitter = overlay frame-to-frame; stock runs have no overlay log, so no jitter.)
+
+- **performance and balanced are the same run** on this laptop, stock and optimized alike: the
+  game thread is pegged at 99 % of one core either way, so balanced is not clocking the busy core
+  down. power-saver is: optimized 125 → 64 fps, 1 %-low 41 → 22 fps, and the tail doubles.
+- **Overrides: 2.2x on AC** (56 → 125 fps, p99 40 → 22 ms, spikes 24-34 → 4), 1.6x under
+  power-saver, where the side threads (Lighting 78 %, four recalc workers ~10 % each) share the
+  smaller power budget with the game thread.
+- **Hardware not saturated in any cell** (the objective's own finding): ~20 % of 24 cores, GPU
+  ≤ 42 % at 38-41 W. Single game thread is the wall, as on the desktop (~500 fps on this route),
+  scaled down by the laptop's clock/IPC. GameProfiler on the slow frames (≥ 20 ms, ~41 per run):
+  all of the extra time is `GameWindow.logic` (23 vs 4.7 ms) that its own sub-sections do not cover.
+- GC is not it: `gc.log` in the route window shows five stop-the-world pauses of 0.1-17.6 ms; the
+  ~300 ms entries `analyze.py` sums are the concurrent mark cycle (background threads).
