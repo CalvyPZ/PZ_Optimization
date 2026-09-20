@@ -21,7 +21,7 @@
 # folder next to this script (the Steam Workshop item layout) is used automatically.
 set -euo pipefail
 
-REPO_SLUG="DiegoVillalobosFlores/PZ_Optimization"
+REPO_SLUG="xD3I/PZ_Optimization"
 mode=install; zip=""; from=""; dir="${PZ_DIR:-}"; tag=""
 while [[ $# -gt 0 ]]; do
   case "$1" in

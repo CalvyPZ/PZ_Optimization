@@ -78,9 +78,9 @@ chmod +x "$MOD/install.bash"
   echo "id=PZ_Optimization"
   echo "modversion=${commit:-$rev}"
   echo "versionMin=${version:-42.20.0}"
-  echo "author=DiegoVillalobosFlores"
+  echo "author=xD3I"
   echo "poster=poster.png"
-  echo "description=Not a Lua mod: enabling it here does nothing. <LINE> Run install.ps1 (Windows) or install.bash (Linux) from this item's folder under steamapps/workshop/content/108600/, then launch the game. <LINE> Built for game revision $rev${version:+ (Build $version)}. Source and releases: github.com/DiegoVillalobosFlores/PZ_Optimization"
+  echo "description=Not a Lua mod: enabling it here does nothing. <LINE> Run install.ps1 (Windows) or install.bash (Linux) from this item's folder under steamapps/workshop/content/108600/, then launch the game. <LINE> Built for game revision $rev${version:+ (Build $version)}. Source and releases: github.com/xD3I/PZ_Optimization"
 } > "$MOD/mod.info"
 
 # images: preview.png for the Workshop page (square, <= 1 MB), poster.png for the mod list

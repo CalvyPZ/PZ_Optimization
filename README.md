@@ -260,12 +260,12 @@ The overrides are read when the game starts.
 Open PowerShell (Start menu, type `powershell`) and run:
 
 ```powershell
-Invoke-WebRequest https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases/latest/download/install.ps1 -OutFile "$env:USERPROFILE\Downloads\install.ps1"
+Invoke-WebRequest https://github.com/xD3I/PZ_Optimization/releases/latest/download/install.ps1 -OutFile "$env:USERPROFILE\Downloads\install.ps1"
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1"
 ```
 
 (`install.ps1` is also on the
-[release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases).)
+[release page](https://github.com/xD3I/PZ_Optimization/releases).)
 
 The same files are mirrored as a Steam Workshop item (subscribe, then run the `install.ps1`
 that sits next to the unpacked classes in the item folder; the Workshop cannot write into the
@@ -355,7 +355,7 @@ or the `gh` CLI, and `unzip` (or `python3`). No JDK.
 ### 2. Run the installer
 
 ```sh
-curl -fsSLO https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases/latest/download/install.sh
+curl -fsSLO https://github.com/xD3I/PZ_Optimization/releases/latest/download/install.sh
 chmod +x install.sh
 ./install.sh
 ```
@@ -403,7 +403,7 @@ sudo dnf install java-latest-openjdk-devel
 ```
 
 ```sh
-git clone https://github.com/DiegoVillalobosFlores/PZ_Optimization.git
+git clone https://github.com/xD3I/PZ_Optimization.git
 cd PZ_Optimization
 scripts/build.sh
 scripts/pzopt.sh install

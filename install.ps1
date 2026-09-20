@@ -32,7 +32,7 @@ param(
   [switch]$Status
 )
 $ErrorActionPreference = 'Stop'
-$RepoSlug = 'DiegoVillalobosFlores/PZ_Optimization'
+$RepoSlug = 'xD3I/PZ_Optimization'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Fail($msg) { Write-Host "error: $msg" -ForegroundColor Red; exit 1 }

@@ -3,15 +3,15 @@
 Class overrides for Project Zomboid Build @VERSION@ (game revision @REV@) that shorten chunk-streaming stalls and tighten the frame time, plus a full options tab (Options > Optimizations) and an in-game frame-time overlay (F9). Single player and multiplayer, client side only; nothing to install on a server. Works with the Steam version on Windows and Linux (both depots ship the same jar).
 
 Source, measurements, videos and the same files as a GitHub release:
-https://github.com/DiegoVillalobosFlores/PZ_Optimization
+https://github.com/xD3I/PZ_Optimization
 
-[url=https://github.com/DiegoVillalobosFlores/PZ_Optimization#readme][img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.gif[/img][/url]
+[url=https://github.com/xD3I/PZ_Optimization#readme][img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.gif[/img][/url]
 [i]Uncapped at 5120x2160 with the overrides on; the strip at the bottom is the in-game overlay (F9), live. The stock-vs-optimized video is on the repository page.[/i]
 
 [h1]What it does[/h1]
 Project Zomboid loads and bakes the map in chunks; on stock, the loading, baking and lighting work of a busy screen lands in the same frame and shows as stutter while driving or turning. These overrides move that work off the game thread, spread it over frames, and cache what stock recomputes every frame (puddles, rain, cutaways, light info, sound zones). Bench numbers on the repository page; the short version at 5120x2160 on an RTX 4090: driving p99 frame time 19 -> 8 ms, uncapped ~270 -> ~500 fps, thunderstorms 83 -> 188 fps.
 
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/07-results.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/07-results.jpg[/img]
 
 [h1]How it works[/h1]
 The launcher (ProjectZomboid64.json) searches the game folder before projectzomboid.jar, so a loose .class file with the same name as one in the jar replaces it. The item holds those files (@NFILES@ entries: @NOVERRIDES@ shadowed game classes, the pzopt helper package, three Lua files for the options tab and a manifest) under [b]pzopt-classes[/b]. projectzomboid.jar is never modified. A guard compares your game revision and the sha256 of every stock class it shadows against the jar at start-up; if anything differs (another game build) it logs one line to console.txt and the game runs as stock, so a mismatch has no effect.
@@ -32,7 +32,7 @@ Without the script: copy the contents of the item's pzopt-classes folder into th
 (Steam Workshop items cannot contain .sh files, hence .bash.) Same flags: --status, --uninstall, --dir <game folder>.
 
 [h1]Performance overlay (F9)[/h1]
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/09-performance-overlay.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/09-performance-overlay.jpg[/img]
 Presented frame time, p50 / p99 / p99.9 / max, 1 %-low, jitter and spikes over the last 5 s, GPU busy (GL timer query), game-thread and render-thread load, process and machine CPU, heap, a verdict line (GPU bound / game thread bound / at the cap) and the frame graph. Same numbers on Windows and Linux, no MangoHud or RivaTuner needed; every run also logs it to Zomboid/pzopt-overlay.out.
 
 [h1]Settings[/h1]
@@ -43,12 +43,12 @@ The files are built for one game revision. When the game updates, the guard turn
 
 [h1]Stock vs optimized, frame by frame[/h1]
 Left pane stock with every optimization off and the frame cap removed, right pane the overrides on, uncapped. The big number is the 1 s average from the overlay log, the small block the whole-route result.
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/01-boot-load.jpg[/img]
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/02-drive-120kmh.jpg[/img]
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/04-rosewood-spin.jpg[/img]
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/05-fog-drive.jpg[/img]
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/06-storm-drive.jpg[/img]
-[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/08-options-optimizations-tab-closeup.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/01-boot-load.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/02-drive-120kmh.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/04-rosewood-spin.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/05-fog-drive.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/06-storm-drive.jpg[/img]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/08-options-optimizations-tab-closeup.jpg[/img]
 
 [h1]This build[/h1]
 Game revision @REV@ (Build @VERSION@), repository commit @COMMIT@, @NFILES@ files, zip sha256 @SHA@ (same bytes as the GitHub release pzopt-@REV@-classes.zip).
