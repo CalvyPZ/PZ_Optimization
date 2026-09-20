@@ -1000,6 +1000,106 @@ parts are serialised a few frames apart while chunks keep loading, so `map_meta.
 that night turned out to be pre-existing in the bench save (present in every run), but the
 consistency risk stands and the gain was one 55 ms frame per 30 s, so it stays opt-in.
 
+## zombie.core.opengl.VBORenderer (added 2026-09-20 evening, thunderstorm pass)
+
+Two edits in the immediate-mode line/quad renderer that every VBORenderer user shares (weather
+particles, model atlases, shadows, trees, the vision polygon, debug lines). Both behind Config
+keys; with `enabled=false` the stock values apply.
+
+**Batch buffer size** (`vboBatchKb`, default 1024, 4 = stock). The element buffer, its index
+buffer and the two GL buffer objects are created at the configured size instead of 4 KB / 1 KB,
+and `setFormat` derives the element count from that size. Stock flushed (a `glBufferData` and a
+draw) every 113 vertices, i.e. every 28 textured quads; the rain FX at 5120x2160 add ~100k
+particle quads a frame (104 tiles of a 512x512 cell of 1024 particles), which was 73 % of the
+render thread's busy time in a thunderstorm (`storm-jfr` JFR, `gametree.py --thread main`). The
+size is capped at 1.5 MB so every vertex index still fits the 16-bit index buffer.
+
+**Single-advance quad** (`vboFastQuads`, default true). The 4-vertex branch of the textured
+`addQuad` (the one that is not lines and not triangles) writes the four vertices, the four
+indices and one buffer-position advance in a private helper instead of four `addElement` calls
+that each re-check `isFull`, look up the current run and read the buffer position. Same bytes at
+the same format offsets (vertex, colour, uv1; other slots left as `addElement` leaves them),
+same flush condition, same vertex count bookkeeping.
+
+Result on the storm route (uncapped, direct launcher): render thread submission
+(`buildStateDrawBuffer`) 8.7 -> 6.1 ms; 108 -> 131 fps once the game thread stopped being the
+wall (runs `storm-rec-vbostock` / `storm-rec-cur`).
+
+## zombie.iso.IsoPuddles (added 2026-09-20 evening, thunderstorm pass)
+
+No behaviour change in the existing methods. Four public `pzopt*` methods expose the pieces of
+`render(grid, z)` separately for `pzopt.PuddleCache`: the guard chain (`pzoptCanRender(z)`:
+debug option, shader enabled, shaders in use, puddle quality, level clamp, wet-ground /
+puddle-size non-zero), the packing loop without the draw (`pzoptPack`, the identical
+shouldRender / updateLighting / addSquare sequence), the draw (`pzoptDraw`), and
+`pzoptAppend(packed, count, z)` which grows the per-state RenderData like `addSquare` does and
+copies pre-packed squares in, keeping the per-level counters. `pzoptNumSquares` / `pzoptData`
+read the current main-state RenderData.
+
+## zombie.iso.IsoChunk (third edit, 2026-09-20 evening, puddle cache slot)
+
+One public field `pzoptPuddles`, a `pzopt.PuddleCache.Slot` holding the packed puddle batches
+of this chunk per player and level; lazily created by the cache, dropped with the chunk.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, puddle cache)
+
+`renderPuddles(playerIndex)`: after the stock guards (puddles enabled, no snow, level clamp for
+the medium/low quality) and before the per-level loop, when `Config.puddleCache` is on the
+method hands the on-screen chunk list and `maxZ` to `pzopt.PuddleCache.render` and returns; the
+stock loop is untouched below it. In the bake path, right after `clearCachedSquares(level)` is
+called for a chunk level, `pzopt.PuddleCache.invalidate(chunk, level)` marks that level's
+batches for a rebuild (the puddle square list is refilled by the same bake). The periodic
+`[pzopt] FBORenderCell` log line gets the cache counters (built / reused / rebuilt by bake,
+cutaway change, expiry).
+
+What the cache does (`pzopt.PuddleCache`, committed): stock re-filters, re-lights and re-packs
+every wet square of every on-screen chunk level every frame (`FBORenderCell.puddles` 4.5 ms of a
+13 ms thunderstorm frame at max zoom). Of the 32 floats per square only the four vertex lights,
+the camera's sub-pixel jiggle on x/y and the depth change between frames, and the depth depends
+on the camera's chunk only (`IsoDepthHelper.getSquareDepthData` floors the camera position to a
+chunk), shifting by one constant for every square when the camera crosses a chunk edge. So a
+chunk level is packed once with the stock code, the block is kept on the chunk, and later frames
+copy it into RenderData and patch those three slots (lights from `getVertLight`, jiggle delta,
+depth delta from two `getChunkDepthData` calls). Rebuilt when the bake clears the square list,
+when the level's cutaway `squareFlags` visibility bits change, or after `puddleCacheFrames`
+frames (default 60, staggered per chunk). The per-square `IsOnScreen` cull is not applied to
+cached batches (the GPU clips the squares outside the viewport; same picture). Result: puddles
+4.5 -> 0.96 ms, storm route 70 -> 109 fps with the profiler on (`storm-vbo` -> `storm-puddle`).
+
+## zombie.iso.weather.fx.ParticleRectangle (added 2026-09-20 night, rain tiles)
+
+`render()`: after the stock cell arithmetic and `StartShader`, when `Config.rainTiles` is on and
+the debug bounds are off, the method renders every particle with `renderAlpha > 0` once at the
+origin into the rectangle's drawer between `pzoptBeginTile` / `pzoptEndTile`, adds one origin per
+screen cell (the same `-1..cellsW` x `-1..cellsH` grid the stock loops walk) to that tile, and
+returns; the stock per-cell loop with its per-particle `isOnScreen` cull is below it, untouched.
+Every subclass `render(offsetx, offsety)` (rain, snow, cloud, fog) adds its quad at the offset
+plus the particle's own position, so a cell's picture is the origin picture translated by the
+cell origin.
+
+## zombie.iso.weather.fx.WeatherParticleDrawer (added 2026-09-20 night, rain tiles)
+
+Keeps a list of tiles for the frame (cleared in `startFrame`): a tile records, per texture
+index, the range of particle-list indices added between `pzoptBeginTile` and `pzoptEndTile`, and
+its origins. `render()` (render thread) first hands the tiles, the particle buffer, the texture
+list and the per-texture index lists to `pzopt.RainTiles.Gl.draw` (one buffer object and staging
+buffer per drawer), then runs the stock VBORenderer loop only over the particles no tile covers
+(a fully tiled texture list is skipped). `pzopt.RainTiles.Gl.draw`: uses VBORenderer's own
+`vboRenderer_PositionColorUV` shader (new accessor `VBORenderer.pzoptShaderPositionColorUv`),
+sets its ModelViewProjection from the current matrix stacks like `VertexBufferObject` does,
+packs the template quads once in the same 36-byte position/colour/uv layout, uploads them with
+`glBufferData` (stream), binds the texture, and issues one `glDrawArrays(GL_QUADS)` per origin
+with the ModelViewProjection uniform translated by the origin; then restores the uniform,
+unbinds the buffer, re-enables the attribute arrays 0..4 and the depth test as
+`VBORenderer.flush` leaves them, and sets the sprite ring buffer's restore flags. Depth test
+off and `userDepth` 0 as VBORenderer's default run. The per-particle on-screen cull of the stock
+loop becomes GPU clipping. Counters (tiles, template quads, draws) in the periodic
+`[pzopt] FBORenderCell` line.
+
+## zombie.core.opengl.VBORenderer (second edit, 2026-09-20 night)
+
+Public accessor `pzoptShaderPositionColorUv()` returning the lazily created
+`vboRenderer_PositionColorUV` shader the class already uses for that format.
 ## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, per-frame lists survive a held re-bake)
 
 The maintainer reported objects inside buildings, doors, windows and corpses flickering
@@ -1038,3 +1138,19 @@ level of every player's `FBORenderLevels`. Stock relied on the load-time invalid
 those lists; with the FBORenderCell edit above that invalidation keeps them, so a chunk object
 going back to the pool drops them here instead (the corpse and flies lists are iterated for every
 on-screen level, baked or not).
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 night, lighting-only re-bake spread)
+
+In the re-bake budget block (`REBAKE_BUDGET`), a texture whose only dirty reason is lighting
+(flag 32 alone: daylight drift, the ramp of a lightning flash) now uses its own per-frame start
+budget `lightingRebakeBudget` (default 8) and its own longest hold `lightingRebakeMaxFrames`
+(default 30) instead of `rebakeBudget` / `rebakeMaxFrames` (4 / 3), which stay for the redraw
+reason (1024: light switches must answer within a few frames). Why: a lightning strike dirties
+every on-screen chunk texture; with the 3-frame cap they all landed in one frame, five times per
+strike (flash on, flash off, then every `lightingRebakeMs` of the fade), a 50-90 ms stall each
+that the maintainer saw as the rain freezing and jumping every ~6 s (`docs/findings-scene-presets-2026-09-20.md`
+§6). With the spread the same bakes land over ~25 frames: storm drive p99.9 57 -> 12.5 ms, max
+88 -> 19 ms, no frame over 33 ms, at the price of a faint chunk checkerboard for ~90 ms while a
+flash ramps (chunks baked at different points of the ramp). `lightingRebakeMs=100` was tried
+with budgets 8 and 16 and is worse on the tail (chunks become eligible about as often as the
+cap, so the cap keeps dumping the backlog).

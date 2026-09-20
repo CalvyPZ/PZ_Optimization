@@ -60,8 +60,11 @@ import zombie.vehicles.BaseVehicle;
  */
 public final class Harness {
    /** True when the flag file asks for a bench run; decided once at class init so the frame hook stays a boolean test. */
-   public static final boolean REQUESTED = "bench".equals(HarnessFlags.get("mode")) || "parity".equals(HarnessFlags.get("mode")) || "drive".equals(HarnessFlags.get("mode"));
-   private static final int IDLE = 0, WAIT_WORLD = 1, SETTLE = 2, RUN = 3, LINGER = 5, DONE = 4;
+   public static final boolean REQUESTED = "bench".equals(HarnessFlags.get("mode")) || "parity".equals(HarnessFlags.get("mode")) || "drive".equals(HarnessFlags.get("mode"))
+         || "play".equals(HarnessFlags.get("mode"));
+   /** play: a copy of a real save with the scene flags applied (weather, hour, torch) and the player left alone: no god mode, no ghost, no route, no quit. */
+   private static final boolean PLAYING = "play".equals(HarnessFlags.get("mode"));
+   private static final int IDLE = 0, WAIT_WORLD = 1, SETTLE = 2, RUN = 3, LINGER = 5, DONE = 4, PLAY = 6;
    private static long lingerUntilEpochMs;
    /** Instant the route starts (unix ms), fixed at world-ready: max(route_start_epoch, world ready + settle). */
    private static long plannedStartEpochMs;
@@ -216,13 +219,25 @@ public final class Harness {
       float dt = lastFrameNs == 0L ? 0f : (nowNs - lastFrameNs) / 1e9f;
       lastFrameNs = nowNs;
       IsoPlayer p = IsoPlayer.getInstance();
-      if (p != null && (state == SETTLE || state == RUN)) {
+      if (p != null && (state == SETTLE || state == RUN || state == PLAY)) {
          Scene.tick(p, nowNs); // keeps the forced weather pinned and fires the scheduled lightning
       }
       switch (state) {
          case WAIT_WORLD -> {
             if (p != null && p.getCurrentSquare() != null) {
                 HarnessFlags.markStarted();
+                if (PLAYING) {
+                   // play mode: the scene is forced, the player keeps their save's state and the game stays open
+                   try {
+                      Scene.apply(p);
+                   } catch (Exception e) {
+                      Log.warn("harness: scene setup failed: " + e);
+                   }
+                   Log.info("harness: play mode, world ready at " + p.getXi() + "," + p.getYi() + "," + (int)p.getZ() + "; scene applied, no route, quit when you like");
+                   state = PLAY;
+                   stateSinceNs = nowNs;
+                   return;
+                }
                 p.setGodMod(true, true);
                 p.setInvisible(true, true);
                 // scene presets (time of day, weather, torch): forced now, at the start of the settle time,
@@ -426,6 +441,9 @@ public final class Harness {
                Stats.flush();
                quitWhenLogsAreDone();
             }
+         }
+         case PLAY -> {
+            // nothing: Scene.tick above keeps the weather pinned and fires the lightning
          }
          case LINGER -> {
             // run.sh drops pzopt-logdone once it has closed the external log itself (control socket)

@@ -759,8 +759,31 @@ hour, weather and torch at world-ready; `harness/CLAUDE.md`). 240 cap, `--no-das
   1112: the storm's per-frame ambient/daylight changes dirty the chunk lighting continuously, and every
   lightning strike sets `dirtyRecalcGridStackTime=1` for ~100 frames), plus the rain FX pass. Game
   thread 94 % of a core, render thread 69 %, GPU 76 % (overlay) / 49 % (nvidia-smi): neither is at
-  the wall, so this is a "fps < 240 and hardware not saturated" finding. Not yet profiled; a JFR run of
-  `--preset storm` is the next step (`harness/gametree.py`).
+  the wall, so this is a "fps < 240 and hardware not saturated" finding.
+- GameProfiler A/B, uncapped, direct launcher (15:34, runs `storm-prof-stock` / `storm-prof-opt`,
+  `docs/findings-scene-presets-2026-09-20.md` §3): stock 32 fps (p99 143 ms), optimized 70 fps
+  (p99 39 ms; the probes cost ~8 %). Game thread 28.9 → 13.4 ms; the bakes are down to 1.4 ms but
+  **`FBORenderCell.puddles` stays at 4.5 ms/frame (34 % of the game thread)** — stock
+  `renderPuddles` re-filters, re-lights and re-packs every wet square on every level every frame,
+  and the render thread re-uploads and redraws them (8.7 ms `buildStateDrawBuffer`, 4.4 ms waiting
+  on the game thread). Not the lighting rebakes: the puddle pass is the storm's structural item.
+  `sections.py` is per thread now (`--thread game|render`); it used to merge both recordings.
+- Fixes (15:42–16:02, `docs/findings-scene-presets-2026-09-20.md` §4): JFR put 73 % of the render
+  thread in the rain quads (`VBORenderer` 4 KB buffer, a flush every 28 quads); `vboBatchKb=1024` +
+  `vboFastQuads` (new `VBORenderer` override) → submission 8.7 → 6.1 ms. `puddleCache`
+  (`pzopt.PuddleCache`, `IsoPuddles` override, slot on `IsoChunk`): packed puddle vertices kept per
+  chunk level, lights / jiggle / depth patched per frame → puddles 4.5 → 0.96 ms. Storm route
+  uncapped: **83 → 131 fps** (p99 43 → 25 ms), game thread 13.4 → ~7 ms, GPU 71 %. Remaining: the
+  rain particle path itself (~100k quads a frame at 5120x2160, walked twice on the game thread).
+- Rain tiles + the 6 s rain freeze (16:20–17:00, `docs/findings-scene-presets-2026-09-20.md` §5):
+  `rainTiles` (template once, one draw per screen cell) → desktop spinning storm 111 → 188 fps,
+  laptop 120 km/h storm drive 84 → 106 (70 before today), laptop clear drive unchanged (~200 fps).
+  The rain "vanishing" every ~6 s the maintainer saw was five 50-90 ms stalls per lightning
+  strike: the re-bake budget's 3-frame cap released every flash-dirtied chunk texture in one
+  frame. Lighting-only re-bakes now have `lightingRebakeBudget=8` / `lightingRebakeMaxFrames=30`:
+  storm drive p99.9 57 → 12.5 ms, max 88 → 19, 0 frames over 33 ms (was 48); `lightingRebakeMs=100`
+  tried and worse. Runs `storm120-rec` / `-spread` / `-lrb100` / `-lrb100b16` (recorded), `storm-tiles`
+  / `storm-notiles`, laptop `lap-*`.
 - Torch: the beam was visible on screen in every night-torch run (maintainer watching), with the
   default invisible bench player, and costs nothing measurable (283 vs 282 fps). The `--shot-at`
   captures never show it: torch and dark shots were pixel-identical after the 2 s stand-still hold, so
@@ -870,3 +893,15 @@ so they always match the texture on screen), clear them when a chunk object retu
 and never hold cutaway (2048) re-bakes (their per-frame draws re-test live flags). Cost on the
 uncapped spinning route: `flickfix-u-1` 488.7 fps mean, p99 7.2 ms, ~15 % more bakes per period
 (`jvm-zulu-g1-1` reference 508.7 / 7.3), GPU 96 % in both.
+
+## 2026-09-20 (17:05–17:15): side-by-side video, stock vs optimized, 120 km/h thunderstorm drive
+
+`harness/stitch-storm-sbs.sh` -> `docs/media/drive-120kmh-storm-stock-vs-optimized.mp4` (3840x810,
+42 s, both panes aligned at the car's motion onset, each run's in-game overlay inset at full
+resolution). Direct launcher (no Steam), `--flag weather=storm`, `--no-mangohud --no-dashboard`,
+`--prop overlay=true overlayFont=Large`.
+
+| run | build | cap | fps mean | p50 / p99 / p99.9 / max ms | >33 ms | GPU / game / render |
+|---|---|---|---|---|---|---|
+| `sbs-storm120-stock-1` | every pzopt render key off (the `u400show-stock` set + today's keys off) | 300 (framecap.ini won over `--option frameRate=244`; moot at 71 fps) | 71.5 | 13.1 / 67 / 87 / 103 | 42 | 96 % / 83 % / 84 % |
+| `sbs-storm120-opt-1` | defaults incl. rain tiles, puddle cache, lighting re-bake spread | none | 268.7 | 3.3 / 8.8 / 12.7 / 19.9 | 0 | 98 % / 61 % / 97 % |

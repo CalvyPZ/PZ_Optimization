@@ -14,7 +14,10 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   night), and core.textures.ImageData (byte[] mipmap loops, issue #2, 2026-09-20), and the game-thread
   trims of 2026-09-20: iso.weather.fx.WeatherFxMask (mask scan gate), iso.objects.IsoLightSwitch
   (electricity check cache), se.krka KahluaTableImpl (single-lookup rawget), and
-  core.opengl.RenderThread (performance-overlay hooks, 2026-09-20). Inner classes
+  core.opengl.RenderThread (performance-overlay hooks, 2026-09-20), and the thunderstorm pass
+  (2026-09-20 evening): core.opengl.VBORenderer (batch buffer size, single-advance quad) and
+  iso.IsoPuddles (pack / append / draw pieces for the puddle cache), iso.weather.fx.ParticleRectangle and
+  WeatherParticleDrawer (rain tiles: template once, one draw per screen cell). Inner classes
   are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md` and marked `// pzopt:` in the
   source.** After a game update, `scripts/regen-overrides.sh` decompiles the new jar so the
@@ -49,6 +52,8 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
 | `BootAsync` / `BootPump` / `LuaPrecompiler` / `AnimClipCache` + `CachedAnimationTask` / `PackIndex` / `ScriptText` / `LotHeaders` / `FileTaskStats` / `ScriptDump` | boot and load work (2026-09-19 evening): FMOD init and animation-set parse on boot threads, file-pool pump during init, parallel Lua precompile cache, animation clip and texture-pack index caches under `~/Zomboid/pzopt/`, linear script text passes, per-cell lot-header memo, file-task timing, item field dump for equivalence checks |
 | `ModelShaders` | shaders already created by a `Model`, so `Model.CreateShader` skips the blocking render-thread round trip for repeat shader names (`shaderCache`; issue #1: 73 animal models were 16.5 s of a laptop load); summary logged at load start and world ready |
 | `MipMaps` | row-based texture mipmap generation and alpha premultiply on `byte[]` copies (`mipmapArrays`; issue #2: the stock per-byte direct-buffer loop was C2-miscompiled into a SIGSEGV on a file-pool thread); byte-identical to stock, `tests/pzopt/MipMapsTest` |
+| `PuddleCache` | packed puddle vertices per chunk level kept on `IsoChunk.pzoptPuddles`; per frame copies the block into IsoPuddles' RenderData and patches the vertex lights, camera jiggle and depth delta; rebuilt on bake, cutaway change or every `puddleCacheFrames` (`puddleCache`; storm route puddles 4.5 → 0.96 ms, 2026-09-20 evening) |
+| `RainTiles` | weather particle tiles (`rainTiles`): the game thread renders a `ParticleRectangle`'s particles once at the origin plus the screen-cell origins; the render thread packs and uploads that template once and draws it once per cell with a translated ModelViewProjection through VBORenderer's PositionColorUV shader (2026-09-20 night) |
 | `GpuSections` | GPU time per named frame section from `GL_TIMESTAMP` queries riding the sprite stream (`gpuSections=true`, measurement only; printed in the periodic FBORenderCell log line) |
 | `Overrides` / `Guard` / `BuildInfo` / `Log` | install checks, build stamp, logging |
 

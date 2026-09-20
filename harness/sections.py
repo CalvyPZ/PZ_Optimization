@@ -2,7 +2,15 @@
 """Per-frame section times from the game's own GameProfiler recording, as a
 second opinion next to the JFR attribution (harness/attribute.py).
 
-  harness/sections.py <run-dir> [--threshold-ms 20] [--top 15] [--json out.json]
+  harness/sections.py <run-dir> [--thread game|render] [--threshold-ms 20] [--top 15] [--json out.json]
+
+The game records one file set per profiled thread, named after the Java thread:
+"MainThread" is the game thread (GameWindow.frameStep) and "main" the render thread
+(RenderThread.renderStep). --thread game (default) / render picks one (the raw
+names work too); older recordings without a thread name in the file names are read
+as a whole. The route window is applied by frame number on the game thread; for the
+render thread, whose frame counter is its own, it is applied by recording time
+(the game-thread route frames' first start / last end).
 
 Reads <run-dir>/profiler/, the Zomboid/Recording files a run made with
 harness/run.sh --game-profiler (GameProfiler.Enabled=true in debug-options.ini):
@@ -26,9 +34,12 @@ from collections import defaultdict
 from pathlib import Path
 
 
-def load_recording(pdir):
+def load_recording(pdir, thread=None):
     pdir = Path(pdir)
-    header = next(pdir.glob("*_header.csv"))
+    tag = f"_{thread}" if thread else ""
+    if thread and not any(pdir.glob(f"*{tag}_header.csv")):
+        raise SystemExit(f"no GameProfiler recording for thread {thread!r} in {pdir}")
+    header = next(pdir.glob(f"*{tag}_header.csv"))
     names = {}
     in_keys = False
     for line in header.read_text().splitlines():
@@ -39,7 +50,7 @@ def load_recording(pdir):
             idx, name = line.split(",", 1)
             names[int(idx)] = name
     times = {}
-    tfile = next(p for p in pdir.glob("*_times.csv") if not re.search(r"_times_\d+\.csv$", p.name))
+    tfile = next(p for p in pdir.glob(f"*{tag}_times.csv") if not re.search(r"_times_\d+\.csv$", p.name))
     for line in tfile.read_text().splitlines():
         parts = line.split(",")
         if len(parts) < 4 or not parts[0].lstrip("-").isdigit():
@@ -47,7 +58,7 @@ def load_recording(pdir):
         fno, start, end = int(parts[0]), int(parts[1]), int(parts[2])
         times[fno] = (start * 100, end * 100)  # ns
     frames = {}  # frameNo -> list of (key, depth, start_ns, len_ns)
-    for seg in sorted(pdir.glob("*_times_*.csv")):
+    for seg in sorted(pdir.glob(f"*{tag}_times_*.csv")):
         for line in seg.read_text().splitlines():
             parts = line.rstrip(",").split(",")
             if len(parts) < 5 or not parts[0].lstrip("-").isdigit():
@@ -78,12 +89,28 @@ def route_frame_ids(run):
     return None
 
 
-def analyse(run, threshold_ms=20.0):
-    names, times, spans = load_recording(Path(run) / "profiler")
+THREADS = {"game": "MainThread", "render": "main"}
+
+
+def analyse(run, threshold_ms=20.0, thread="game"):
+    pdir = Path(run) / "profiler"
+    thread = THREADS.get(thread, thread)
+    if not any(pdir.glob(f"*_{thread}_header.csv")):
+        thread = None  # single-thread recording from before the per-thread file names
+    names, times, spans = load_recording(pdir, thread)
     window = route_frame_ids(run)
+    twindow = None
+    if window and thread == "main":
+        # the render thread counts its own frames: take the game thread's route window by recording time
+        _, gtimes, _ = load_recording(pdir, "MainThread")
+        inside = [gtimes[f] for f in gtimes if window[0] <= f <= window[1]]
+        twindow = (min(s for s, _ in inside), max(e for _, e in inside)) if inside else None
     rows = []
     for fno, (start, end) in sorted(times.items()):
-        if window and not (window[0] <= fno <= window[1]):
+        if twindow:
+            if not (twindow[0] <= start and end <= twindow[1]):
+                continue
+        elif window and not (window[0] <= fno <= window[1]):
             continue
         total = end - start
         top = defaultdict(int)
@@ -96,7 +123,7 @@ def analyse(run, threshold_ms=20.0):
     thr = threshold_ms * 1e6
     groups = {"slow": [r for r in rows if r["total_ns"] >= thr], "ordinary": [r for r in rows if r["total_ns"] < thr],
               "spike33": [r for r in rows if r["total_ns"] >= 33.333e6], "spike50": [r for r in rows if r["total_ns"] >= 50e6]}
-    out = {"run": Path(run).name, "threshold_ms": threshold_ms, "frames": len(rows), "window": window, "groups": {}}
+    out = {"run": Path(run).name, "thread": thread or "all", "threshold_ms": threshold_ms, "frames": len(rows), "window": window, "groups": {}}
     keys = sorted({k for r in rows for k in r["incl"]})
     for g, rs in groups.items():
         if not rs:
@@ -115,7 +142,7 @@ def analyse(run, threshold_ms=20.0):
 
 
 def print_report(a, top=15):
-    print(f"== {a['run']}: {a['frames']} profiled frames" + (f" in route frames {a['window'][0]}..{a['window'][1]}" if a["window"] else ""))
+    print(f"== {a['run']} [{a['thread']}]: {a['frames']} profiled frames" + (f" in route frames {a['window'][0]}..{a['window'][1]}" if a["window"] else ""))
     s, o = a["groups"]["slow"], a["groups"]["ordinary"]
     for g, title in (("slow", f"SLOW (>= {a['threshold_ms']:g} ms)"), ("ordinary", "ORDINARY"), ("spike33", "SPIKES >= 33 ms"), ("spike50", "SPIKES >= 50 ms")):
         d = a["groups"][g]
@@ -136,12 +163,14 @@ def print_report(a, top=15):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    threshold, top, out_json = 20.0, 15, None
+    threshold, top, out_json, thread = 20.0, 15, None, "game"
     runs = []
     i = 0
     while i < len(args):
         if args[i] == "--threshold-ms":
             threshold = float(args[i + 1]); i += 2
+        elif args[i] == "--thread":
+            thread = args[i + 1]; i += 2
         elif args[i] == "--top":
             top = int(args[i + 1]); i += 2
         elif args[i] == "--json":
@@ -149,7 +178,7 @@ if __name__ == "__main__":
         else:
             runs.append(args[i]); i += 1
     for r in runs:
-        a = analyse(r, threshold)
+        a = analyse(r, threshold, thread)
         print_report(a, top)
         if out_json:
             Path(out_json).write_text(json.dumps(a, indent=1))

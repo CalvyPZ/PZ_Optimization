@@ -145,6 +145,26 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   (`config/launcher/ProjectZomboid64.g1.json`, now installed) has the tightest tail (508 fps, p99 7.3 ms,
   game thread 81 %). The ~500 fps numbers need `persistentVbo=true translucentTilesInChunkTexture=true`
   (tab file or `--prop`); with both off the same route is 184 fps, so check the console `settings:` line.
+- Thunderstorm pass (2026-09-20 evening, `docs/findings-scene-presets-2026-09-20.md` §3-5): the storm
+  preset was 83 fps uncapped with nothing saturated. GameProfiler A/B (`--game-profiler`, `sections.py
+  --thread game|render`, the file names are `MainThread` = game thread, `main` = render thread) and JFR
+  showed puddles (4.5 ms/frame, stock re-packs every wet square) and the rain quads (73 % of the render
+  thread, `VBORenderer` flushing every 28 quads). Adopted: `puddleCache` (`pzopt.PuddleCache`, packed
+  puddle vertices per chunk level, lights/jiggle/depth patched per frame; `IsoPuddles` override, slot
+  on `IsoChunk`) and `vboBatchKb=1024` + `vboFastQuads` (`VBORenderer` override). Storm route 83 → 131
+  fps, p99 43 → 25 ms. Left: the rain particle path (~100k quads a frame at 5120x2160, walked twice on
+  the game thread), splashes, `GameWindow.logic`. The 15:49 build with the VBORenderer change is on a
+  peer session's suspect list for interior-object flicker; recordings `storm-rec-cur` vs
+  `storm-rec-vbostock` are the A/B.
+- Rain tiles + re-bake spread (2026-09-20 night, findings §5): `rainTiles` (`pzopt.RainTiles`,
+  `ParticleRectangle` + `WeatherParticleDrawer` overrides: particle cell packed once, drawn once per
+  screen cell) → desktop spinning storm 111 → 188 fps, laptop storm drive 84 → 106. The rain
+  "vanishing" every 6 s in storms was five 50-90 ms stalls per lightning strike (all flash-dirtied
+  chunk textures re-baked in one frame); lighting-only re-bakes now spread with
+  `lightingRebakeBudget=8` / `lightingRebakeMaxFrames=30` (storm drive p99.9 57 → 12.5 ms, faint
+  chunk checkerboard for ~90 ms while a flash ramps). Laptop runs go through
+  `/tmp/pzopt-laptop-run.sh` on diego-flip (`~/PZ_Optimization-rain` worktree). The interior-object
+  flicker itself was the peer's find, fixed in 100f441 (held re-bakes drew empty per-frame lists).
 - Flicker fix (2026-09-20 evening, `docs/results.md`): objects inside buildings, doors, windows and
   corpses blinked out for 1-3 frames because stock `FBORenderLevels.invalidate()` empties the per-frame
   square lists and every pzopt held re-bake (`lightingRebakeMs`, `rebakeBudget`) drew the previous

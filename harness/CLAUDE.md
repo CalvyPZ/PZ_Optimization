@@ -8,7 +8,7 @@ in `harness/baseline/` (committed).
 ## run.sh
 
 ```
-harness/run.sh --label <name> [--mode verify|bench|drive|parity] [--flag k=v]... [--prop k=v]...
+harness/run.sh --label <name> [--mode verify|bench|drive|parity|play] [--flag k=v]... [--prop k=v]...
                [--route-seconds N] [--source-save Mode/Name] [--renderer nvidia|zink]
                [--launcher auto|steam|direct] [--env K=V]... [--option key=value]...
                [--mod ID]... [--vmarg ARG]...
@@ -23,6 +23,13 @@ What it does: installs the pzopt-harness Lua mod, creates/points at the bench sa
 into the run dir, restores `latestSave.ini`. `run.opts` records launcher, renderer, flags.
 
 Modes:
+- `play` (2026-09-20 night): a copy of a real save for the maintainer to play in with the scene flags
+  applied — `--mode play --source-save Apocalypse/<save> --flag weather=storm` (also `time_of_day=`,
+  `torch=`, `thunder_secs=`): click-to-start is pressed, `pzopt.Scene` is applied at world-ready and
+  kept pinned every frame, the player keeps their save's state (no god mode, no ghost), no route, no
+  quit; run.sh returns when the game is quit from its menu, `latestSave.ini` restored. Pass
+  `--retries 0`. The real save is never written (the template copy is `pzopt-template-<save>`, the
+  played copy `<Mode>/pzopt-bench`).
 - `verify`: nobody presses "Click to Start"; the game sits at the loading screen. Only for
   install smoke checks. Do not use it for HUD, Wayland or input tests.
 - `bench`: fixed camera route on the bench save, ~100 s. `--flag turn=90` spins the player facing
@@ -121,7 +128,7 @@ real above twice that.
 | `compare.py --baseline <dir> <runs>` | analyze output | deltas vs stock with noise verdict |
 | `dashboard.py` | all runs | `docs/benchmark-progress.html`; regenerate after every run |
 | `waits.py <run>` | JFR wait events (`--jfr --jfr-setting jdk.JavaMonitorWait#threshold=0ms` etc.) | per-thread blocking sites in the route window |
-| `attribute.py` / `sections.py` | JFR samples / GameProfiler recording (`--game-profiler`) | where slow-frame time goes (the GameProfiler probes themselves cost ~8 % of the game thread; prefer JFR) |
+| `attribute.py` / `sections.py` | JFR samples / GameProfiler recording (`--game-profiler`) | where slow-frame time goes (`sections.py --thread game\|render`: the game records `MainThread` = game thread and `main` = render thread; the probes themselves cost ~8 % of the game thread; prefer JFR) |
 | `gametree.py <run>` | JFR samples (`--jfr --jfr-period 1`) | inclusive call tree of the game thread over the route (`--root`, `--thread main` for the GL thread, `--callers method`, `--min-pct`) |
 | `loadtime.py <runs>` | pzopt-loadtrace.out | load-after-Continue phases side by side |
 | `loadsheet.sh <run>` | recording.mp4 + loadtrace | contact sheet around the load |

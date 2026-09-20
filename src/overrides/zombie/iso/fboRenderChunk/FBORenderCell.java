@@ -1695,7 +1695,13 @@ public final class FBORenderCell {
                if (!pzoptDefer && pzoptRebakeBudget > 0 && pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom)
                      && !renderLevels.isDirty(level, ~(32L | 1024L), zoom)) {
                   int pzoptNow = IsoWorld.instance.getFrameNo();
-                  if (this.pzoptRebakesThisFrame >= pzoptRebakeBudget) {
+                  // pzopt: lighting-only dirt (32 alone: daylight drift, a lightning flash ramp) may stay stale for
+                  // LIGHTING_REBAKE_MAX_FRAMES with LIGHTING_REBAKE_BUDGET starts per frame, so a flash that dirties every
+                  // on-screen texture lands over ~25 frames instead of one; a redraw (1024) keeps the short cap.
+                  boolean pzoptLightingDirt = !renderLevels.isDirty(level, ~32L, zoom);
+                  int pzoptMaxFrames = pzoptLightingDirt ? pzopt.Config.LIGHTING_REBAKE_MAX_FRAMES : pzopt.Config.REBAKE_MAX_FRAMES;
+                  int pzoptFrameBudget = pzoptLightingDirt ? pzopt.Config.LIGHTING_REBAKE_BUDGET : pzoptRebakeBudget;
+                  if (this.pzoptRebakesThisFrame >= pzoptFrameBudget) {
                      Integer since = this.pzoptRebakeHeldSince.get(pzoptRc);
                      if (since == null) {
                         if (this.pzoptRebakeHeldSince.size() > 4096) {
@@ -1703,7 +1709,7 @@ public final class FBORenderCell {
                         }
                         this.pzoptRebakeHeldSince.put(pzoptRc, pzoptNow);
                         pzoptDefer = true;
-                     } else if (pzoptNow - since < pzopt.Config.REBAKE_MAX_FRAMES) {
+                     } else if (pzoptNow - since < pzoptMaxFrames) {
                         pzoptDefer = true;
                      }
                   }
@@ -1781,6 +1787,7 @@ public final class FBORenderCell {
             try {
                if (level == renderLevels.getMinLevel(level)) {
                   renderLevels.clearCachedSquares(level);
+                  pzopt.PuddleCache.invalidate(c, level); // pzopt: the puddle square list is rebuilt below
                }
 
                if (level == 0) {
@@ -3777,6 +3784,8 @@ public final class FBORenderCell {
          .append(" | occlusion rebuilds skipped=").append(pzoptOcclusionRebuildsSkipped)
          .append(" light info skipped=").append(pzoptLightInfoSkipped).append(" levels gated=").append(pzoptLightInfoLevelsGated);
       sb.append(pzopt.GpuSections.summary()); // pzopt: GPU sections (Config.GPU_SECTIONS)
+      if (pzopt.PuddleCache.enabled()) { sb.append(" | ").append(pzopt.PuddleCache.stats()); } // pzopt
+      if (pzopt.RainTiles.enabled()) { sb.append(" | ").append(pzopt.RainTiles.stats()); } // pzopt
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));
@@ -5023,6 +5032,10 @@ public final class FBORenderCell {
             }
 
             FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
+            if (pzopt.PuddleCache.enabled()) { // pzopt: cached packed vertices per chunk level
+               pzopt.PuddleCache.render(playerIndex, perPlayerData1.onScreenChunks, maxZ);
+               return;
+            }
 
             for (int z = 0; z <= maxZ; z++) {
                this.waterSquares.clear();
