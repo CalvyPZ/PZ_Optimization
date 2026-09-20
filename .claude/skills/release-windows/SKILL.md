@@ -35,8 +35,8 @@ Rules and gotchas:
 - The game revision in the tag comes from `build-info.properties`; after a game update run the
   `game-update` skill first, otherwise the guard on Windows disables the overrides.
 - The installers (`install.sh`, `install.ps1`) are standalone: they find the game via Steam's
-  library list, read the revision from the jar, download the matching zip (`gh` or
-  `GITHUB_TOKEN`, the repo is private) and write `pzopt-installed.txt` in the `pzopt.sh`
+  library list, read the revision from the jar, download the matching zip (curl, or `gh`
+  when logged in) and write `pzopt-installed.txt` in the `pzopt.sh`
   format. Test them against a temp folder holding a symlinked jar and a copied launcher JSON,
   never the real game dir; portable PowerShell (`/tmp/pwsh/pwsh` when present, else the
   linux-x64 tarball from PowerShell's GitHub releases) runs `install.ps1` on Linux.

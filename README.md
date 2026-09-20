@@ -161,13 +161,15 @@ The overrides are read when the game starts.
 
 ### 2. Download the installer and run it
 
-Get `install.ps1` from the
-[release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
-into your Downloads folder. Open PowerShell (Start menu, type `powershell`) and run:
+Open PowerShell (Start menu, type `powershell`) and run:
 
 ```powershell
+Invoke-WebRequest https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases/latest/download/install.ps1 -OutFile "$env:USERPROFILE\Downloads\install.ps1"
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1"
 ```
+
+(`install.ps1` is also on the
+[release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases).)
 
 The script locates the game through Steam's library list (pass `-Dir <folder>` if it
 cannot), reads the game revision from the jar, downloads `pzopt-<revision>-classes.zip`
@@ -176,9 +178,8 @@ loose classes or if any file it would write already exists, unpacks the zip, and
 records every file in `pzopt-installed.txt` so the uninstall is exact. It never
 touches `projectzomboid.jar`.
 
-The repository is private, so the download needs the [gh CLI](https://cli.github.com)
-logged in or a token in `$env:GITHUB_TOKEN`. Without either, download
-`pzopt-b0bbce05d5-classes.zip` (543 KB) from the release page yourself and pass it:
+Offline, or to use a zip you already have, download `pzopt-b0bbce05d5-classes.zip`
+(543 KB) from the release page and pass it:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1" -Zip "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip"
@@ -253,7 +254,7 @@ or the `gh` CLI, and `unzip` (or `python3`). No JDK.
 ### 2. Run the installer
 
 ```sh
-gh release download -R DiegoVillalobosFlores/PZ_Optimization -p install.sh   # or save it from the release page in a browser
+curl -fsSLO https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases/latest/download/install.sh
 chmod +x install.sh
 ./install.sh
 ```
@@ -262,9 +263,8 @@ It finds the game through Steam's `libraryfolders.vdf` (or `--dir <folder>` /
 `PZ_DIR`), reads the game revision from the jar, downloads
 `pzopt-<revision>-classes.zip` from the matching release, checks the launcher
 classpath and that no file it would write exists, unpacks, and records what it wrote
-in `pzopt-installed.txt`. The jar is never modified. The repository is private, so the
-download needs `gh` logged in or `GITHUB_TOKEN` set; otherwise fetch the zip from the
-release page and pass `--zip pzopt-b0bbce05d5-classes.zip`.
+in `pzopt-installed.txt`. The jar is never modified. To use a zip you already have,
+pass `--zip pzopt-b0bbce05d5-classes.zip`.
 
 ```sh
 ./install.sh --status      # installed for which revision, any MISSING/MODIFIED file

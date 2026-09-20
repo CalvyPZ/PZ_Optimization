@@ -20,7 +20,7 @@ Windows cannot mount, so use one of:
 # a) the NTFS partition (sda2, 480 GB, unmounted right now)
 sudo mount -t ntfs3 /dev/sda2 /mnt && cp build/pzopt-b0bbce05d5-classes.zip /mnt/ && sudo umount /mnt
 
-# b) a GitHub release asset on the private repo (download from a browser on Windows)
+# b) a GitHub release asset (download from a browser on Windows)
 gh release create win-test-b0bbce05d5 build/pzopt-b0bbce05d5-classes.zip \
   --title "Windows test build (42.20.4 / b0bbce05d5)" --notes "class overrides for the Windows test, see docs/windows-test.md"
 ```

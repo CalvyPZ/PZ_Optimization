@@ -14,8 +14,8 @@
 # uses, so either tool can uninstall what the other installed. projectzomboid.jar is never
 # modified.
 #
-# Downloading from the private repository needs either the gh CLI logged in, or GITHUB_TOKEN
-# in the environment. Without both, download the zip from the releases page and pass --zip.
+# The zip is fetched from the GitHub releases with curl (GITHUB_TOKEN is used if set, to
+# avoid API rate limits) or with the gh CLI when it is logged in; --zip skips the download.
 set -euo pipefail
 
 REPO_SLUG="DiegoVillalobosFlores/PZ_Optimization"
@@ -134,15 +134,17 @@ if [[ -z "$zip" ]]; then
   tmp=$(mktemp -d)
   if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
     if [[ -z "$tag" ]]; then
-      tag=$(gh release list -R "$REPO_SLUG" --json tagName,publishedAt -q '.[].tagName' | grep -- "-${REV}-\|-${REV}\$" | head -1 || true)
+      tag=$(gh release list -R "$REPO_SLUG" --json tagName -q '.[].tagName' | grep -- "-${REV}-\|-${REV}\$" | head -1 || true)
       [[ -n "$tag" ]] || die "no release for game revision $REV (your game is a build these classes were not built for)"
     fi
     echo "downloading $pattern from release $tag"
     gh release download "$tag" -R "$REPO_SLUG" -p "$pattern" -D "$tmp"
-  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  else
+    command -v curl >/dev/null || die "need curl (or the gh CLI) to download; or pass --zip"
+    auth=(); [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
     api="https://api.github.com/repos/$REPO_SLUG/releases"
-    rels=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$api?per_page=50")
-    url=$(python3 - "$rels" "$pattern" "$tag" <<'EOF'
+    rels=$(curl -fsSL "${auth[@]}" -H "Accept: application/vnd.github+json" "$api?per_page=50") || die "could not list releases of $REPO_SLUG"
+    found=$(python3 - "$rels" "$pattern" "$tag" <<'EOF2'
 import json,sys
 rels,pattern,tag=json.loads(sys.argv[1]),sys.argv[2],sys.argv[3]
 for r in rels:
@@ -150,13 +152,11 @@ for r in rels:
     for a in r["assets"]:
         if a["name"]==pattern: print(r["tag_name"], a["url"]); sys.exit(0)
 sys.exit(1)
-EOF
-) || die "no release asset $pattern found"
-    tag=${url%% *}; url=${url#* }
+EOF2
+) || die "no release has $pattern (your game revision $REV is a build these classes were not built for)"
+    tag=${found%% *}; url=${found#* }
     echo "downloading $pattern from release $tag"
-    curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" -o "$tmp/$pattern" "$url"
-  else
-    die "cannot download: log in with 'gh auth login' or set GITHUB_TOKEN, or download $pattern from https://github.com/$REPO_SLUG/releases and pass --zip"
+    curl -fsSL "${auth[@]}" -H "Accept: application/octet-stream" -o "$tmp/$pattern" "$url"
   fi
   zip="$tmp/$pattern"
 fi

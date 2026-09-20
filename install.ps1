@@ -3,9 +3,9 @@
 Install, remove or inspect the PZ_Optimization class overrides on Windows from a release zip.
 
 .DESCRIPTION
-Standalone: needs Windows PowerShell 5.1 or newer. Nothing is compiled. Downloading from
-the private repository needs the gh CLI logged in, or $env:GITHUB_TOKEN; otherwise download
-the zip from the releases page and pass -Zip.
+Standalone: needs Windows PowerShell 5.1 or newer. Nothing is compiled. The zip is fetched
+from the GitHub releases ($env:GITHUB_TOKEN is used if set; the gh CLI if logged in);
+-Zip skips the download.
 
   .\install.ps1                                  # find the game, download the zip for its revision, install
   .\install.ps1 -Zip "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip"
@@ -154,8 +154,9 @@ if (-not $Zip) {
     Write-Host "downloading $pattern from release $Tag"
     & gh release download $Tag -R $RepoSlug -p $pattern -D $tmp
     if ($LASTEXITCODE -ne 0) { Fail 'gh release download failed' }
-  } elseif ($env:GITHUB_TOKEN) {
-    $h = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json' }
+  } else {
+    $h = @{ Accept = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN) { $h.Authorization = "Bearer $env:GITHUB_TOKEN" }
     $rels = Invoke-RestMethod -Headers $h "https://api.github.com/repos/$RepoSlug/releases?per_page=50"
     $asset = $null
     foreach ($r in $rels) {
@@ -163,11 +164,10 @@ if (-not $Zip) {
       $a = $r.assets | Where-Object { $_.name -eq $pattern } | Select-Object -First 1
       if ($a) { $asset = $a; $Tag = $r.tag_name; break }
     }
-    if (-not $asset) { Fail "no release asset $pattern found" }
+    if (-not $asset) { Fail "no release has $pattern (your game revision $Rev is a build these classes were not built for)" }
     Write-Host "downloading $pattern from release $Tag"
-    Invoke-WebRequest -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/octet-stream' } -Uri $asset.url -OutFile (Join-Path $tmp $pattern)
-  } else {
-    Fail "cannot download: install and log in to the gh CLI, or set `$env:GITHUB_TOKEN, or download $pattern from https://github.com/$RepoSlug/releases and pass -Zip"
+    $h.Accept = 'application/octet-stream'
+    Invoke-WebRequest -Headers $h -Uri $asset.url -OutFile (Join-Path $tmp $pattern)
   }
   $Zip = Join-Path $tmp $pattern
 }

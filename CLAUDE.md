@@ -2,7 +2,7 @@
 
 Class overrides for Project Zomboid Build 42 (Java, LWJGL/OpenGL) that improve chunk
 streaming and driving frame time, plus a hands-off benchmark harness that measures them.
-Private repo (DiegoVillalobosFlores/PZ_Optimization). Owner: Diego (they/them).
+Public repo (DiegoVillalobosFlores/PZ_Optimization). Owner: Diego (they/them).
 
 ## Objective (stated 2026-09-18)
 
