@@ -740,3 +740,35 @@ run but drawn in the control (`bs-off-1`, everything default). All 19 runs, one 
   both keys are ON by default from this commit (the Optimizations tab labels lose "experimental");
   if either 2026-09-19 report comes back, `--shot-at` + `blacktiles.py` on a copy of the real save is
   the way to bisect it.
+
+## 2026-09-20 (14:54–15:25): scene presets — night with/without torch, thunderstorm
+
+New `run.sh --preset night-torch|night-dark|storm` (spinning Rosewood route, `pzopt.Scene` forces the
+hour, weather and torch at world-ready; `harness/CLAUDE.md`). 240 cap, `--no-dashboard`, defaults
+(persistentVbo + translucentTiles on). Runs `preset-*`.
+
+| preset | fps mean | p50 | p99 | p99.9 | max | >33 ms | notes |
+|---|---|---|---|---|---|---|---|
+| night-dark (01:00, no light) | 282 | 3.3 ms | 10.4 | 17.9 | 47 | 1 | `night_strength=1.0` |
+| night-torch (01:00, lit HandTorch) | 283 | 3.3 ms | 10.0 | 18.7 | 46 | 1 | beam visible live; no measurable cost |
+| storm (save's hour, pinned STAGE_STORM values, strike every 6 s) | **83** | 10.1 ms | **43** | 81 | 571 | 40 | game thread 94 %, GPU 76 % |
+
+- Night alone is free on this route (283 vs ~283 in daylight on the same build).
+- **The thunderstorm is a 3.4x frame-time regression and the tail is the worst measured on this
+  route**: 8156 chunk bakes per 1800-frame period vs 1526 in clear weather (`lighting=6535` flags vs
+  1112: the storm's per-frame ambient/daylight changes dirty the chunk lighting continuously, and every
+  lightning strike sets `dirtyRecalcGridStackTime=1` for ~100 frames), plus the rain FX pass. Game
+  thread 94 % of a core, render thread 69 %, GPU 76 % (overlay) / 49 % (nvidia-smi): neither is at
+  the wall, so this is a "fps < 240 and hardware not saturated" finding. Not yet profiled; a JFR run of
+  `--preset storm` is the next step (`harness/gametree.py`).
+- Torch: the beam was visible on screen in every night-torch run (maintainer watching), with the
+  default invisible bench player, and costs nothing measurable (283 vs 282 fps). The `--shot-at`
+  captures never show it: torch and dark shots were pixel-identical after the 2 s stand-still hold, so
+  the hold-and-capture rig is blind to the player light (lights must be judged live or from
+  `--record`); a wrong afternoon was spent concluding the opposite from the shots. Also learned: the
+  bench save's pistol has an always-on weapon light that `Scene` strips before `torch=on|off`, and an
+  invisible player is what `LightingJNI.playerSet` receives as ghost mode (`visible=true` flag exists,
+  off by default: the beam does not need it).
+- First run (`preset-night-torch-1`) hung at the loading screen: `ClimateManager.forceDayInfoUpdate()`
+  before the first climate tick NPEs every frame in `WAIT_WORLD`; removed, and a scene exception now
+  rejects the run instead of looping.

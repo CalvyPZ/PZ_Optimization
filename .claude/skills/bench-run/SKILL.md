@@ -32,7 +32,7 @@ Scene presets (night with / without the torch, thunderstorm; spinning Rosewood r
 ```bash
 harness/run.sh --label <name> --preset night-torch --prop instrument=true --no-dashboard   # or night-dark, storm
 ```
-Presets only add flags (`time_of_day`, `torch`, `weather`, route, turn, zoom); later `--flag`s override.
+Presets only add flags (`time_of_day`, `torch`, `visible`, `weather`, route, turn, zoom); later `--flag`s override.
 Check `weather=`/`torch=`/`night_strength=` in `pzopt-bench.out` and compare preset runs only with
 runs of the same preset.
 Drive, 60 km/h A/B route (the comparable one):

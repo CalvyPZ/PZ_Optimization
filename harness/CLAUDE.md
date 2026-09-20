@@ -33,13 +33,17 @@ Modes:
   test). Check `zoom=2.5` in `pzopt-bench.out` before comparing.
 - Presets (`--preset name`, 2026-09-20): a named bundle of scene flags on top of the spinning
   game-thread route (`route=S:450 turn=90 zoom=max`, 25 s; any later `--flag`/`--mode`/`--route-seconds`
-  wins). `night-torch` = 01:00 with a lit Base.HandTorch in the primary hand (the cone sweeps with
-  the turn), `night-dark` = 01:00 no light item, `storm` = the save's hour with a pinned
-  thunderstorm (rain/cloud 1.0, wind 0.9, dim ambient) and a lightning strike 60 tiles from the
-  player every 6 s (`--flag thunder_secs=N`). Scene flags on their own: `time_of_day=H`,
-  `weather=storm|clear`, `torch=on|off` (`pzopt.Scene`; applied at world-ready, re-pinned every
-  frame, recorded in `pzopt-bench.out` as `time_of_day/game_hour/weather/torch/night_strength/
-  precipitation/lightning_strikes`). Compare a preset only with runs of the same preset.
+  wins). `night-torch` = 01:00 with a lit Base.HandTorch in the primary hand (beam sweeps with the
+  turn; it draws with the invisible bench player), `night-dark` = 01:00 no light item,
+  `storm` = the save's hour with a pinned thunderstorm (rain/cloud 1.0, wind 0.9, dim ambient) and a
+  lightning strike 60 tiles from the player every 6 s (`--flag thunder_secs=N`). Scene flags on their
+  own: `time_of_day=H`, `weather=storm|clear`, `torch=on|off`, `visible=true` (`pzopt.Scene`; applied at
+  world-ready, re-pinned every frame, recorded in `pzopt-bench.out` as `time_of_day/game_hour/weather/
+  torch/visible/night_strength/precipitation/lightning_strikes`; `torch check` console line every 5 s).
+  Compare a preset only with runs of the same preset. 2026-09-20 numbers (`docs/results.md`): night
+  283 fps = daylight, torch on or off (the beam costs nothing measurable); storm 83 fps, p99 43 ms
+  (chunk lighting rebakes ×5). The `--shot-at` captures never show the beam (player held still 2 s
+  before the capture); judge lights live or from `--record`, not from the shots.
 - `drive`: spawns a car and follows the highway. Default route `--flag route=E:1200`,
   `--route-seconds 90`, cruise 60 km/h. `--flag kmh=193` gives the ~122 km/h cap
   (Base.RaceCar12 maxSpeed 120). At 120 km/h the steering oscillates and leaves the road at

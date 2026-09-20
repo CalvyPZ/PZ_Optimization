@@ -11,8 +11,10 @@
 #
 # --preset NAME    scene preset: bench mode on the spinning game-thread route (route=S:450 turn=90 zoom=max,
 #                  --route-seconds 25) plus the scene flags pzopt.Scene reads (time_of_day, torch, weather).
-#                    night-torch  01:00, lit Base.HandTorch in the primary hand (cone sweeps with the turn)
+#                    night-torch  01:00, lit Base.HandTorch in the primary hand (the beam sweeps with the turn)
 #                    night-dark   01:00, no light item
+#                  (--flag visible=true keeps the player visible; the beam draws with the default invisible player too.
+#                  The --shot-at captures do NOT show the beam: the player is held still for 2 s before the capture.)
 #                    storm        the save's hour, pinned thunderstorm + a lightning strike every 6 s (thunder_secs)
 #                  Preset flags go first, so any --flag / --mode / --route-seconds given on the command line wins.
 #
