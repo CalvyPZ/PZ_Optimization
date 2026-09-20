@@ -463,7 +463,10 @@ MangoHud or RivaTuner:
 
 - **Frames**: fps, mean frame time and the active cap; p50 / p99 / p99.9 / max over the
   last 5 s; 1 %-low fps, frame-to-frame jitter and the number of spikes above twice the
-  median. Frame times are taken at the swap, the instant MangoHud logs from.
+  median. Frame times are taken at the swap, the instant MangoHud logs from. The fps
+  number is coloured against the cap: blue at the cap, green within 10 % of it, yellow
+  within 50 %, red further below; uncapped, blue above 300 fps, green 150-300, yellow
+  100-150, red under 100.
 - **Utilization**: GPU busy share (a GL timer query around the frame's draw commands),
   game-thread and render-thread load as a share of one core, the process's share of
   all cores, the machine's, and the heap.
@@ -474,7 +477,11 @@ MangoHud or RivaTuner:
   twice), the cap's budget as a line, the GPU time of each frame in blue.
 
 The "Performance overlay" group in Options > Optimizations shows it from boot, picks
-the corner and the font, and turns on the frame log: `Zomboid/pzopt-overlay.out`,
+the corner and the font, and turns on the frame log; the "fps colour" group below it
+switches the colouring off, chooses whether it follows the cap (off = the fixed fps
+thresholds even when capped), and sets the three thresholds and the four colours
+(named, or an `RRGGBB` hex typed into `Zomboid/pzopt/options.ini`). The frame log is
+`Zomboid/pzopt-overlay.out`,
 one CSV row per presented frame in MangoHud's column names (`fps`, `frametime`,
 `cpu_load`, `gpu_load`) plus `gpu_ms`, `game_load`, `render_load` and `epoch_ms`.
 Every harness run writes that log and `harness/analyze.py` reports it as `overlay:`
