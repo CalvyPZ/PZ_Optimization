@@ -6,6 +6,7 @@ the zip built on Linux carries the finished class files, and the runtime guard
 class it shadows against the Windows jar. If anything differs it logs one line and
 the game runs as stock, so the worst case of a mismatch is "no effect".
 
+2026-09-20 release from `100f441` (flicker of objects inside buildings, doors, windows and corpses fixed; overlay fps colour) is 699 KB, 130 files plus the manifest (131 lines, unchanged); tag `win-b0bbce05d5-100f441`.
 2026-09-20 release from `b0d4fe6` (black chunk squares fixed, persistentVbo and translucentTilesInChunkTexture on by default) is 694 KB, 130 files plus the manifest
 2026-09-20 release from `e398ce5` (master switch) is 607 KB, 114 files plus the manifest
 2026-09-20 release from `aa9482b` is 606 KB, 114 files plus the manifest
