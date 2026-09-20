@@ -94,10 +94,11 @@ seen in the tree.
 
 ## 4. Never profiled
 
-- **The render thread.** `RenderThread` is overridden only for the hand-off. Its own share of
-  a frame (GL state changes, `IndieGL` replay, shader binds, VBO uploads) has no call tree in
-  any run. At 499 fps the game thread is 89 % busy, so ~11 % of it is waiting on the render
-  thread or the GPU. First step: `gametree.py --thread` on the render thread of u400-final-1.
+- **The render thread** was unprofiled until §5 below (`gametree.py --thread main --root
+  zombie.core.opengl.RenderThread.renderLoop`). At 499 fps the game thread is 89 % busy, so
+  ~11 % of it is waiting on the render thread or the GPU.
+- **Native threads** (FMOD, GL driver worker, JIT, GC): ~3.9 cores of the process's 5.9 are
+  outside every Java thread and no harness output attributes them (§5).
 - **The GPU composite** (~0.6 ms of the ~1.9 ms GPU frame): ~290 chunk-level textures drawn
   with per-pixel depth writes, so no early-z, ~72 Mpx of overdraw. The structural item from
   plan 400 (cached colour+depth composite scrolled by the camera delta, only dirty chunk
@@ -105,10 +106,49 @@ seen in the tree.
 - **Other situations.** Every adopted key was measured driving or spinning in Rosewood.
   Base interiors with many lights, combat with a horde, rain, and the map screen have no run.
 
-## 5. Order of work (one bench run after each)
+## 5. The other threads (u400-final-1, `pzopt-threads.out` CPU over the 25 s route, JFR stacks)
+
+| thread | CPU share of one core | what it does | lever |
+|---|---|---|---|
+| MainThread (game) | 89 % | §1 | §2, §3 |
+| main (render thread) | 63 % | replays the draw list: `SpriteRenderer.buildStateDrawBuffer` 95 % of its samples | see below |
+| Lighting Thread | 27 % | 95 % of samples inside `LightingJNI.DoLightingUpdateNew` (native C++), the rest `Display.sync` yields | none from Java; its own rate limiter is `Display.sync` |
+| World Streamer | 4 % | hot-save ancillary writes, worldgen simplex noise, `IsoChunk.Save`, `RecalcProperties`, `PlaceLot`, `Item.InstanceItem`, a `Pattern.compile` per chunk load | small; regex compile is an exact fix once its caller is found (JFR stack is truncated) |
+| pzopt-recalc-3/4/5/7 | 3 % each | our recalc pool | done |
+| Thread-2 | 2 % | no Java samples (native) | unidentified |
+| WorldReuser | 0.7 % | `reuseGridSquares` / `IsoGridSquare.discard` | none |
+| MapCollisionDataJNI, PathfindNativeThread, pool-1/pool-2 workers | < 0.5 % each | | none |
+
+Sum of Java threads: ~2.0 cores. sysmon says the process averages 5.9 cores on the route. The
+missing ~3.9 cores are threads JFR cannot see: the FMOD mixer and stream threads (all sound
+work lives there; `SoundManager.Update` and `FMODParameter.update` on the game thread are only
+parameter pushes, 1.1 %), the NVIDIA GL driver worker thread(s) under GLX, and the JIT compiler
+and GC threads. Per-OS-thread CPU (`/proc/<pid>/task/*/stat` sampled by the harness alongside
+sysmon) is needed before any of that can be attributed; it is the largest unmeasured CPU
+consumer of the process.
+
+Render thread ("main"), inclusive shares of its 3,687 samples on the route:
+
+| area | share | notes |
+|---|---|---|
+| `RingBuffer.add` / `prepareCurrentRun` | 15 % | state-run batching of the draw list before replay |
+| `TextureDraw.run` → `GenericDrawer.render` | 34 % | the per-draw callbacks: `VisibilityPolygon2$Drawer.render` 9.5 % (`IsoDepthHelper.getChunkDepthData` per polygon vertex, on top of the 2.7 % the same polygon already costs on the game thread), `WeatherParticleDrawer.render` 7.1 %, `WorldItemAtlas` depth drawer 6 %, model slots (characters, vehicles) 4.5 %, `FBORenderShadows` 1.2 % |
+| `ShaderHelper.setModelViewProjection` | 4.4 % | `Matrix4f.equals` per draw element (1.6 %) |
+| `ShaderUniformSetter.invokeAll` | 3 % | uniform re-upload per state run |
+| `ChunkRenderShader` / `TileDepthShader.startRenderThread` | 2.3 % | `ShaderProgram.setValue` per chunk draw |
+| `IsoWater.renderSome` → `pzoptMapPersistent` | 2.6 % | the persistent-VBO map of the water geometry (our code) |
+| `Texture.bind` | 1.1 % | |
+
+Render-thread candidates, in order: cache the visibility polygon's depth lookups per chunk
+(shared with the game-thread memo of §2 item 3), skip `Matrix4f.equals` by a dirty flag on the
+MVP, and make the weather particle drawer batch its quads (7 % of the render thread for rain
+that is not falling on this route: check whether it draws when the particle count is zero).
+
+## 6. Order of work (one bench run after each)
 
 1. Small exact fixes batch (§2 item 8). Expected ~2 %; confirms the measurement floor.
-2. Render-thread JFR tree of u400-final-1 (no code change). Decides whether §4 or §2 is next.
+2. Per-OS-thread CPU sampling in the harness (no game change): attribute the ~3.9 cores outside
+   the Java threads (FMOD, GL driver worker, JIT/GC). The render-thread tree is in §5 already.
 3. Character animation and action state machine (§2 item 1): string-free
    `CharacterVariableCondition`, bone re-parent memo when the track set is unchanged,
    `BodyDamage.Update` on a tick cadence. Verify on a horde save, not only on the bench.
