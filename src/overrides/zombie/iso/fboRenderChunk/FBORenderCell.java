@@ -2403,13 +2403,50 @@ public final class FBORenderCell {
          return ObjectRenderLayer.Floor;
       } else if (this.isObjectRenderLayer_Vegetation(object)) {
          return ObjectRenderLayer.Vegetation;
-      } else if (this.isObjectRenderLayer_MinusFloor(object)) {
+      }
+
+      ObjectRenderLayer pzoptCurtainLayer = this.pzoptCurtainLayer(object); // pzopt: issue #4
+      if (pzoptCurtainLayer != null) {
+         return pzoptCurtainLayer;
+      }
+
+      if (this.isObjectRenderLayer_MinusFloor(object)) {
          return ObjectRenderLayer.MinusFloor;
       } else if (this.isObjectRenderLayer_MinusFloorSE(object)) {
          return pzoptPerFrameTranslucentTile(object.getSprite()) ? ObjectRenderLayer.TranslucentSE : ObjectRenderLayer.MinusFloorSE;
       } else {
          return this.isObjectRenderLayer_Translucent(object) ? ObjectRenderLayer.Translucent : ObjectRenderLayer.None;
       }
+   }
+
+   /**
+    * pzopt: a curtain hanging in front of the window (or door) on its own square draws in the same pass as that
+    * window: baked when the window bakes, per frame when the window is per frame (issue #4). The window comes
+    * before the curtain in the square's object list (IsoCurtain.getObjectAttachedTo searches backwards), so its
+    * layer for this pass is already decided, including the fading / obscuring-player cases that send a baked window
+    * per frame for a while. Stock draws both per frame in object order with depth writes off and never compares
+    * their depths; a curtain in one pass and its window in the other depth-tests a per-frame sprite against the
+    * composited chunk texture, where the two sample the 8-bit wall depth texture at slightly different positions
+    * and the glass z-fights through the closed curtain. Returns null when the stock rules apply (both bake keys
+    * off, curtainS / curtainE behind the next square's wall, sheet-door curtains, nothing attached).
+    */
+   private ObjectRenderLayer pzoptCurtainLayer(IsoObject object) {
+      if (!(object instanceof IsoCurtain curtain) || !pzopt.Overrides.enabled()) {
+         return null;
+      }
+      if (!pzopt.Config.WINDOWS_IN_CHUNK_TEXTURE && !pzopt.Config.TRANSLUCENT_TILES_IN_CHUNK_TEXTURE) {
+         return null;
+      }
+      IsoObjectType type = curtain.getType();
+      if (type != IsoObjectType.curtainN && type != IsoObjectType.curtainW || curtain.getSpriteModel() != null) {
+         return null;
+      }
+      IsoObject attached = curtain.getObjectAttachedTo();
+      if (attached == null || attached.square != object.square) {
+         return null;
+      }
+      ObjectRenderLayer layer = attached.getRenderInfo(IsoCamera.frameState.playerIndex).layer;
+      return layer == ObjectRenderLayer.MinusFloor || layer == ObjectRenderLayer.Translucent ? layer : null;
    }
 
    private boolean isObjectRenderLayer_Floor(IsoObject object) {
@@ -3449,7 +3486,59 @@ public final class FBORenderCell {
          }
       }
 
+      if (!this.renderTranslucentOnly && object instanceof IsoCurtain curtain && pzoptCurtainDepthNudge(curtain) > 0.0F) { // pzopt: issue #4
+         pzoptRenderCurtainNudged(curtain, square, lightInfo, pzoptCurtainDepthNudge(curtain));
+         return;
+      }
+
       object.render(square.x, square.y, square.z, lightInfo, true, false, null);
+   }
+
+   /**
+    * pzopt: how far (tiles) a baked curtain draws nearer the camera than its tile geometry says, 0 for none. Stock
+    * never depth-tests a curtain against its window: both are per-frame translucent objects drawn in object order
+    * with depth writes off. Baked (windowsInChunkTexture, pzoptCurtainLayer) the two write depth into the chunk
+    * texture under GL_LEQUAL and the depth textures decide: the north window glass and the north curtain share the
+    * wall depth (or, for the tiles with geometry boxes, the glass leads by 0.017 tile), and the glass came out on
+    * top of the closed curtain (issue #4). Only curtainN / curtainW hang on the camera side of their wall (same
+    * square as the window); curtainS / curtainE are behind the wall of the next square and are meant to be seen
+    * through the glass. Sheet-door curtains draw as 3D models at the door's CurtainOffset and are left alone. The
+    * per-frame pass keeps stock's draw order (pzoptCurtainLayer puts the curtain in the same pass as its window).
+    */
+   private static float pzoptCurtainDepthNudge(IsoCurtain curtain) {
+      if (pzopt.Config.CURTAIN_DEPTH_NUDGE <= 0.0F || !pzopt.Overrides.enabled()) {
+         return 0.0F;
+      }
+      if (!pzopt.Config.WINDOWS_IN_CHUNK_TEXTURE && !pzopt.Config.TRANSLUCENT_TILES_IN_CHUNK_TEXTURE) {
+         return 0.0F;
+      }
+      IsoObjectType type = curtain.getType();
+      if (type != IsoObjectType.curtainN && type != IsoObjectType.curtainW) {
+         return 0.0F;
+      }
+      return curtain.getSpriteModel() != null ? 0.0F : pzopt.Config.CURTAIN_DEPTH_NUDGE;
+   }
+
+   /**
+    * pzopt: draws the curtain with its world position moved {@code nudge} tiles into the room (south for curtainN, east
+    * for curtainW: smaller depth, see IsoDepthHelper.calculateDepth) and its sprite offset moved back by the same
+    * screen distance, so the pixels land where they always did and only the depth the tile-depth shader writes
+    * changes. Bake only: within one chunk texture both sprites sample the same depth texture at the same texels, so
+    * the nudge is an exact margin; against the composited texture a per-frame sprite is not aligned that well.
+    */
+   private static void pzoptRenderCurtainNudged(IsoCurtain curtain, IsoGridSquare square, ColorInfo lightInfo, float nudge) {
+      float dx = curtain.getType() == IsoObjectType.curtainW ? nudge : 0.0F;
+      float dy = curtain.getType() == IsoObjectType.curtainN ? nudge : 0.0F;
+      float offsetX = curtain.offsetX;
+      float offsetY = curtain.offsetY;
+      curtain.offsetX += IsoUtils.XToScreen(dx, dy, 0.0F, 0);
+      curtain.offsetY += IsoUtils.YToScreen(dx, dy, 0.0F, 0);
+      try {
+         curtain.render(square.x + dx, square.y + dy, square.z, lightInfo, true, false, null);
+      } finally {
+         curtain.offsetX = offsetX;
+         curtain.offsetY = offsetY;
+      }
    }
 
    private boolean isRoofTileset(IsoSprite sprite) {

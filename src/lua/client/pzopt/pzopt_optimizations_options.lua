@@ -36,6 +36,9 @@ local SECTIONS = {
               tip = "Windows and glass doors bake like walls instead of being drawn every frame." },
             { key = "translucentTilesInChunkTexture", label = "Bake translucent tiles",
               tip = "Fences, railings, wall decorations and overlays bake into the chunk textures instead of being drawn every frame (about 3,000 draws a frame at max zoom)." },
+            { key = "curtainDepthNudgePct", label = "Curtain depth nudge (hundredths of a tile)",
+              choices = { "0", "3", "5", "10" }, note = { ["0"] = "off" },
+              tip = "Closed curtains draw this much nearer the camera than their tile geometry says, so a baked window never shows through them (north windows sit 0.017 tile in front of their curtain in the game's tile geometry)." },
         },
     },
     {

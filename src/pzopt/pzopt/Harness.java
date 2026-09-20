@@ -39,6 +39,10 @@ import zombie.vehicles.BaseVehicle;
  *   shot_at  seconds   bench/parity: this far into the route hold the camera (no teleport, no turn) for 6 s and,
  *                      2 s into the hold, write Zomboid/Screenshots/pzopt-shot.png (Core.TakeFullScreenshot) and
  *                      touch Zomboid/pzopt-shot.now so run.sh can take a desktop capture too (artifact checks)
+ *   find     curtains  dev: at route start list the curtains within 100 tiles (type, open state, attached window,
+ *                      room) so a screenshot run can be started inside such a room with start=X,Y (issue #4)
+ *   close_curtains true dev: at route start close every open curtain in that range through IsoCurtain.ToggleDoor
+ *                      (map curtains always load open; the bench save is a copy, nothing persists)
  *   route_start_epoch  unix seconds: do not start the route before this instant (puts the route on the
  *                      schedule the external MangoHud log was configured for); absent = the route starts
  *                      settle seconds after the world is up, whenever that is
@@ -329,6 +333,10 @@ public final class Harness {
                    lastTelemetryNs = 0L;
                 }
                 Log.info("harness: route start");
+               boolean closeCurtains = "true".equals(HarnessFlags.get("close_curtains", "false"));
+               if (closeCurtains || "curtains".equals(HarnessFlags.get("find", ""))) {
+                  findCurtains(p, closeCurtains); // dev: curtain screenshot rig (issue #4)
+               }
                Scene.routeStart(nowNs);
                chunksAtStart = Stats.chunkCount();
                runStartNs = nowNs;
@@ -822,6 +830,42 @@ public final class Harness {
       float distance = 0f;
       for (float[] leg : legs) distance += leg[2];
       return distance;
+   }
+
+   /**
+    * Dev flags for the curtain screenshot rig (issue #4, windows through closed curtains). find=curtains lists the
+    * curtains on loaded squares within 100 tiles of the player (type, open state, what they are attached to, the
+    * room), so a screenshot run can be started inside such a room with start=X,Y. close_curtains=true closes every
+    * open curtain in that range through the game's own ToggleDoor (map curtains always load open; the bench save is
+    * a copy, so nothing persists), so the bake shows the reporter's state.
+    */
+   private static void findCurtains(IsoPlayer p, boolean close) {
+      zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance.currentCell;
+      int px = p.getXi(), py = p.getYi();
+      int found = 0, closed = 0, squares = 0, windows = 0;
+      for (int z = 0; z <= 2; z++) {
+         for (int y = py - 100; y <= py + 100; y++) {
+            for (int x = px - 100; x <= px + 100; x++) {
+               zombie.iso.IsoGridSquare sq = cell.getGridSquare(x, y, z);
+               if (sq == null) continue;
+               squares++;
+               for (int i = 0; i < sq.getObjects().size(); i++) {
+                  if (sq.getObjects().get(i) instanceof zombie.iso.objects.IsoWindow) windows++;
+                  if (!(sq.getObjects().get(i) instanceof zombie.iso.objects.IsoCurtain c)) continue;
+                  if (close && c.open) {
+                     c.ToggleDoor(null);
+                     closed++;
+                  }
+                  zombie.iso.IsoObject attached = c.getObjectAttachedTo();
+                  Log.info("harness: curtain " + c.getType() + (c.open ? " open" : " closed") + " at " + x + "," + y + "," + z + " sprite=" + (c.getSprite() == null ? "?" : c.getSprite().getName())
+                        + " attached=" + (attached == null ? "none" : attached.getClass().getSimpleName() + (attached.getSprite() == null ? "" : "/" + attached.getSprite().getName()))
+                        + " room=" + (sq.getRoom() == null ? "outside" : sq.getRoom().getName()) + " dist=" + Math.abs(x - px) + "," + Math.abs(y - py));
+                  found++;
+               }
+            }
+         }
+      }
+      Log.info("harness: " + found + " curtains within 100 tiles of " + px + "," + py + (close ? ", " + closed + " closed now" : "") + " (" + squares + " loaded squares, " + windows + " windows)");
    }
 
    /**

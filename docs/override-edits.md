@@ -1179,3 +1179,48 @@ recordings were mostly black. With the flag every square is lit and drawn on bot
 A/B (more visible tiles and characters than a normal view; compare only same-flag runs). No
 Config key: it is a scene flag, not an optimization. The class also gains the usual
 `pzopt.Overrides.onClassLoaded` static initializer.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-21, curtains in front of baked windows; GitHub issue #4)
+
+Two pieces. (a) In `calculateObjectRenderLayer`, after the Vegetation test and before the
+MinusFloor one, the new private `pzoptCurtainLayer(IsoObject)` decides the layer of a curtain
+that hangs in front of the window or door on its own square: it returns the layer already
+computed for that attached object in this pass (MinusFloor = bakes, Translucent = per frame),
+so the curtain is drawn in the same pass as its window whatever the reason the window landed
+there (the `windowsInChunkTexture` key, or a baked window sent per frame while it fades or
+obscures the player). The attached object comes first in the square's object list
+(`IsoCurtain.getObjectAttachedTo` searches backwards from the curtain's index), and
+`calculateObjectRenderInfo` walks the list in order, so its layer is final. Null (stock rules)
+when both bake keys are off, for `curtainS` / `curtainE` (which hang on the far side of the
+next square's wall and are meant to be seen through the glass), for sheet-door curtains (3D
+models at the door's `CurtainOffset`), and when nothing is attached. (b) At the end of
+`renderMinusFloor_NotDoorOrWall(IsoObject)`, before the final `object.render(...)`, a curtain
+drawn by a bake (`!renderTranslucentOnly`) for which `pzoptCurtainDepthNudge(IsoCurtain)`
+returns a positive distance goes through `pzoptRenderCurtainNudged(...)`: its world position is
+moved that many tiles into the room (south for `curtainN`, east for `curtainW`, i.e. toward the
+camera, a smaller depth in `IsoDepthHelper.calculateDepth`) and `offsetX` / `offsetY` are moved
+back by `IsoUtils.XToScreen` / `YToScreen` of the same delta for the duration of the call, so
+the pixels land where they always did and only the depth the tile depth shader writes changes.
+The nudge is `pzopt.Config.CURTAIN_DEPTH_NUDGE` (`curtainDepthNudgePct`, default 5 = 0.05
+tile; 0 = off) and applies under the same conditions as (a).
+
+Why: a Windows user reported windows drawn over closed curtains with the default settings,
+correct only with both bake keys off. Stock never depth-tests a curtain against its window:
+both are per-frame translucent objects (`IsoWindow`, and the curtain tiles are
+`Translucent = true`), drawn in object order with `glDepthMask(false)`, so the curtain (after
+the window on its square) simply paints over the glass. With both baked the chunk texture's
+depth buffer decides (`DepthTestAll`, `GL_LEQUAL`, depth writes on): the north window glass and
+the north curtain use the same wall depth texture (`setupWallDepth`; the few tiles with
+geometry boxes have the glass 0.017 tile in front), and the glass came out on top. With one
+baked and the other per frame the per-frame sprite is tested against the composited chunk
+texture, and the two sample the 8-bit wall depth texture at slightly different sub-pixel
+positions: the glass z-fights through the curtain as a dither (the reporter's
+"semi-transparent" curtain). Hence (a) removes every cross-pass comparison and (b) settles the
+one that remains, inside a single bake where both sprites map to the same texels and a nudge
+of about 3 depth-texture steps (one step is about 0.016 tile) is an exact margin. Verified on
+the bench save with the `find=curtains` / `close_curtains=true` harness dev flags at
+8147,11507 (Rosewood living room, `fixtures_windows_01_9` + `fixtures_windows_curtains_01_50`):
+runs `i4-repro` (nudge 0, no (a): glass over the curtain), `i4-fix` ((b) alone, defaults:
+curtain covers the glass, same pixels), `i4-wpf` / `i4-tpf` ((b) alone with one key off:
+dithered glass), `i4-fix2` / `i4-wpf2` / `i4-tpf2` ((a) + (b): curtain covers the glass in all
+three settings).
