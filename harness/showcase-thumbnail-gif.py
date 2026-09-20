@@ -7,19 +7,22 @@ zoom-and-pan variant (hold, ease from GIF_START to GIF_END, hold).
 
   harness/showcase-thumbnail-gif.py [out.gif]
   env: THUMB_SRC (video), GIF_T0 (default 25), GIF_LEN seconds (default 4.6), GIF_SIZE (default 448),
-       GIF_FPS (default 6), GIF_START x:y:w (square crop, default 1750:230:1620 = the character centred),
+       GIF_FPS (default 6), GIF_START x:y:w (square crop, default 1750:440:1620 = the character centred between the header and the banner),
        GIF_END x:y:w (zoom target; unset = static), GIF_HOLD1 / GIF_ZOOM seconds for the zoom variant
        (default 1.6 / 1.4, the rest of GIF_LEN is the end hold), GIF_COLORS (default 96),
        GIF_DITHER (default none), GIF_MEDIAN (median filter size, 0 = off, default 3),
-       GIF_LOSSY (gifsicle --lossy level, 0 = off, default 80; binary from GIFSICLE or PATH),
-       GIF_LABEL (default "PZ Optimized"), GIF_LABEL_POS top|bottom (default top)
+       GIF_LOSSY (gifsicle --lossy level, 0 = off, default 90; binary from GIFSICLE or PATH),
+       GIF_LABEL (default "PZ Optimized"), GIF_LABEL_POS top|bottom (default top),
+       GIF_BANNER x:y:w:h (source rectangle of the overlay pasted live along the bottom, default
+       0:0:747:305 = fps / percentiles / loads / verdict / graph; empty = none), GIF_BANNER_SCALE
+       (default 0.6, text ~14 px), GIF_BAND (header band height as a fraction of the side, default 0.15)
 
 The Steam preview limit is 1 MB; the script prints the size and fails above it. The asphalt
 noise is what costs: plain LZW at 512 px is ~145 KB a frame whatever the palette, so a moving
 clip needs the median filter (kills the grain, keeps edges), gifsicle's lossy LZW and a modest
 size / frame count. ImageMagick's fuzz transparency was tried and ghosts badly on a panning
 camera; dither triples the size. Both stay off. The defaults (448 px, 6 fps, 4.6 s = 28 frames,
-96 colours, median 3, lossy 80) land at ~985 KB. The in-game uploader only takes preview.png: a GIF
+96 colours, median 3, lossy 90, the overlay banner) land at ~987 KB. The in-game uploader only takes preview.png: a GIF
 preview goes up with steamcmd (docs/workshop.md).
 """
 import os, subprocess, sys
@@ -34,16 +37,20 @@ total = float(os.environ.get('GIF_LEN', '4.6'))
 S = int(os.environ.get('GIF_SIZE', '448'))
 fps = int(os.environ.get('GIF_FPS', '6'))
 hold1, zoom = float(os.environ.get('GIF_HOLD1', '1.6')), float(os.environ.get('GIF_ZOOM', '1.4'))
-x0, y0, w0 = (int(v) for v in os.environ.get('GIF_START', '1750:230:1620').split(':'))
+x0, y0, w0 = (int(v) for v in os.environ.get('GIF_START', '1750:440:1620').split(':'))
 end = os.environ.get('GIF_END')
 x1, y1, w1 = (int(v) for v in end.split(':')) if end else (x0, y0, w0)
 colors = int(os.environ.get('GIF_COLORS', '96'))
 median = int(os.environ.get('GIF_MEDIAN', '3'))
-lossy = int(os.environ.get('GIF_LOSSY', '80'))
+lossy = int(os.environ.get('GIF_LOSSY', '90'))
 gifsicle = os.environ.get('GIFSICLE', 'gifsicle')
 dither = os.environ.get('GIF_DITHER', 'none')          # none: smallest and no crawling on the game noise
 label = os.environ.get('GIF_LABEL', 'PZ Optimized')
 label_top = os.environ.get('GIF_LABEL_POS', 'top') != 'bottom'
+banner = os.environ.get('GIF_BANNER', '0:0:747:305')
+bx, by, bw, bhh = (int(v) for v in banner.split(':')) if banner else (0, 0, 0, 0)
+bscale = float(os.environ.get('GIF_BANNER_SCALE', '0.6'))
+band_frac = float(os.environ.get('GIF_BAND', '0.15'))
 BLACK = '/usr/share/fonts/noto/NotoSans-Black.ttf'
 
 W, H = 5120, 2160
@@ -57,12 +64,14 @@ proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 def ease(u):                       # smoothstep, so the zoom starts and ends gently
     return u * u * (3 - 2 * u)
 
-bh = int(S * 0.19)
+bh = int(S * band_frac)
 band = Image.new('RGBA', (S, S), (0, 0, 0, 0))
 ImageDraw.Draw(band).rectangle((0, 0, S, bh) if label_top else (0, S - bh, S, S), fill=(0, 0, 0, 170))
 band = band.filter(ImageFilter.GaussianBlur(S // 40))
-font = ImageFont.truetype(BLACK, int(S * 0.115))
-ly = int(S * 0.095) if label_top else S - int(S * 0.095)
+font = ImageFont.truetype(BLACK, int(S * 0.6 * band_frac))
+ly = bh // 2 if label_top else S - bh // 2
+# the overlay banner: its own scale (not the crop's), pasted 1:1 along the bottom, no denoise
+bsz = (S, int(round(bhh * bscale * S / (bw * bscale)))) if banner else None    # full width, height in proportion
 
 frames = []
 for i in range(n):
@@ -73,12 +82,15 @@ for i in range(n):
     u = 0.0 if (not end or t < hold1) else 1.0 if t >= hold1 + zoom else ease((t - hold1) / zoom)
     x, y, w = (round(a + (b - a) * u) for a, b in ((x0, x1), (y0, y1), (w0, w1)))
     x, y = max(0, min(W - w, x)), max(0, min(H - w, y))
-    arr = np.frombuffer(raw, dtype=np.uint8).reshape(H, W, 3)[y:y + w, x:x + w]
-    im = Image.fromarray(np.ascontiguousarray(arr)).resize((S, S), Image.LANCZOS)
+    full = np.frombuffer(raw, dtype=np.uint8).reshape(H, W, 3)
+    im = Image.fromarray(np.ascontiguousarray(full[y:y + w, x:x + w])).resize((S, S), Image.LANCZOS)
     if median:
         im = im.filter(ImageFilter.MedianFilter(median))
     im = im.convert('RGBA')
     im = Image.alpha_composite(im, band)
+    if banner:
+        ov = Image.fromarray(np.ascontiguousarray(full[by:by + bhh, bx:bx + bw])).resize(bsz, Image.LANCZOS)
+        im.paste(ov, (0, S - bsz[1]))
     d = ImageDraw.Draw(im)
     d.text((S // 2 + 3, ly + 3), label, font=font, fill=(0, 0, 0, 220), anchor='mm', stroke_width=S // 120, stroke_fill=(0, 0, 0, 220))
     d.text((S // 2, ly), label, font=font, fill=(245, 245, 245), anchor='mm', stroke_width=S // 120, stroke_fill=(0, 0, 0, 255))
