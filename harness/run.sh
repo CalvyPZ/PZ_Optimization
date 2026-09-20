@@ -2,7 +2,7 @@
 # Launch one hands-off game run and collect its log.
 #
 #   harness/run.sh --label <name> [--quit-after <secs>] [--mode <mode>] [--source-save <Mode/Name>]
-#                  [--flag k=v]... [--prop k=v]... [--mangohud secs]
+#                  [--flag k=v]... [--prop k=v]... [--mangohud secs] [--no-mangohud]
 #                  [--mangohud-config path]
 #                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
 #                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]... [--mod ID]... [--vmarg ARG]...
@@ -72,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --prop) props+=("$2"); shift 2 ;;         # key=value for the game dir's pzopt.properties (see pzopt.Config)
     --mangohud) mangohud_secs="$2"; shift 2 ;; # external frame-time log via MangoHud for N seconds from launch
     --mangohud-config) mangohud_config="$2"; shift 2 ;; # config file used for this MangoHud run
+    --no-mangohud) no_mangohud=1; shift ;;     # no MangoHud preload or CSV; frame times come from pzopt-overlay.out only
     --jfr) jfr=1; shift ;;
     --jfr-period) jfr_period="$2"; shift 2 ;;
     --jfr-setting) jfr_settings+=("$2"); shift 2 ;;
@@ -302,7 +303,8 @@ fi
 # --lead N instead puts everything on a fixed clock from launch (autostart_log,
 # route at launch + N); a world that comes up too late for it is logged as
 # "route start LATE" and the console's "world ready" line prints the margin.
-if [[ -z "$mangohud_secs" && "$mode" != verify ]]; then mangohud_secs=$((route_seconds + 8)); fi
+if (( ${no_mangohud:-0} )); then mangohud_secs=""; fi
+if [[ -z "$mangohud_secs" && "$mode" != verify && ! ${no_mangohud:-0} -eq 1 ]]; then mangohud_secs=$((route_seconds + 8)); fi
 [[ -n "$mangohud_config" ]] || mangohud_config="config/mangohud-benchmark.conf"
 MH_PROFILE="$mangohud_config"
 [[ "$MH_PROFILE" = /* ]] || MH_PROFILE="$REPO/$MH_PROFILE"
@@ -552,7 +554,7 @@ cp "$ZOMBOID/console.txt" "$out/console.txt"
 cp "$ZOMBOID"/pzopt-*.out "$out/" 2>/dev/null || true
 cp "$PZ_DIR/pzopt.properties" "$out/pzopt.properties"
 cp "$LAUNCHER" "$out/ProjectZomboid64.json"
-{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mods=${extra_mods[*]:-}"; echo "vmargs=${vmargs[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
+{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "no_mangohud=${no_mangohud:-0}"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mods=${extra_mods[*]:-}"; echo "vmargs=${vmargs[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
 # gc.log rolls over (filecount=3); keep the segments that were written during this run
 for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
   [[ -f "$g" ]] || continue

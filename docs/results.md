@@ -514,3 +514,76 @@ Small measured negatives, not adopted: `bakeBudget=3` (bursts are re-bakes,
 not first bakes), `uiRenderOffscreen=true` (UI draw 10 → 7 % but frame time
 unchanged at 240), `lightingRebakeMs=1000` (fewer bakes, same frame time).
 
+
+## 2026-09-20 (05:05–05:50): laptop, JVM x GC matrix on the spinning route, in-game overlay only
+
+Machine: the laptop (`diego-flip`, Ryzen AI 9 / Radeon 890M, Mesa 26.2.3, 1920x1080,
+**on battery** throughout, ~25 to 40 W package draw), not the desktop; none of the
+desktop numbers above apply. Every run: max zoom, no dashboard, `--prop uncappedFps=true`,
+frame times from `pzopt-overlay.out` with MangoHud not loaded at all (new
+`harness/run.sh --no-mangohud`; `analyze.py` reads the overlay log the same way).
+One run per cell, so treat differences under ~5 % as noise.
+
+Spinning route (`--flag route=S:450 --flag turn=90 --route-seconds 25`), optimized
+build. "Stock" is our build with every render and game-thread key at its stock value
+(`parallel wake persistentVbo treesInChunkTexture windowsInChunkTexture
+translucentTilesInChunkTexture translucentCache cutawayFast weatherMaskIdleSkip` false,
+`hotsaveIntervalSec bakeBudget lightingBudget lightingRebakeMs rebakeBudget
+lightSwitchCheckFrames cutawayRadius gridStackInterval` 0), the harness plumbing and
+the overlay still installed. GC is the launcher JSON's `-XX:+UseZGC` unless `--gc g1`.
+
+| run | JVM | GC | fps | mean | p50 / p90 | p99 | p99.9 / max | >33 ms | jitter | JIT+GC CPU |
+|---|---|---|---|---|---|---|---|---|---|---|
+| spin-stock-uncap-1 | Zulu 25.0.1 | ZGC | 44.2 | 22.6 | 19.2 / 38.0 | 67.1 | 110 / 127 | 185 | 11.2 | |
+| spin-opt-uncap-1 | Zulu 25.0.1 | ZGC | 66.9 | 14.9 | 13.3 / 24.4 | 41.0 | 98 / 125 | 50 | 5.7 | 87 s |
+| spin-opt-uncap-g1-1 | Zulu 25.0.1 | **G1** | **81.8** | **12.2** | **10.6 / 20.2** | 40.8 | **72 / 110** | 46 | **4.8** | 102 s |
+| spin-opt-uncap-graal-1 | Oracle GraalVM 25.2.4 | ZGC | 56.3 | 17.8 | 15.6 / 29.1 | 52.1 | 104 / 116 | 86 | 6.8 | 143 s |
+| spin-opt-uncap-graal-g1-1 | Oracle GraalVM 25.2.4 | G1 | 65.8 | 15.2 | 13.2 / 25.4 | 46.3 | 111 / 273 | 63 | 6.0 | 159 s |
+| spin-opt-uncap-graal253-1 | Oracle GraalVM 25.3.4.1 | ZGC | 57.1 | 17.5 | 15.5 / 28.9 | 51.0 | 106 / 163 | 88 | 6.8 | 143 s |
+| spin-opt-uncap-graal253-g1-1 | Oracle GraalVM 25.3.4.1 | G1 | 70.0 | 14.3 | 12.6 / 23.4 | 44.0 | 92 / 159 | 54 | 5.5 | 151 s |
+
+Milliseconds except fps and counts. "JIT+GC CPU" is `process_cpu_ms - live_threads_cpu_ms`
+from `pzopt-threads.out` over the 25 s route: CPU the JVM's own (non-Java) threads used.
+The Java threads did the same work in every row (65 to 66 s of CPU; game thread 96 to 98 %
+of a core, Lighting Thread 75 to 79 %).
+
+Findings:
+- The overrides at their defaults are 1.5x stock on this route here (44 → 67 fps, p99
+  67 → 41 ms, >33 ms frames 185 → 50), same shape as the desktop result, at a lower level.
+- **G1 beats ZGC by 22 % on this laptop** (67 → 82 fps) and the gain is in the body of
+  the distribution (mean, p50, p90), not the tail: p99 and the >33 ms count are unchanged.
+  ZGC's concurrent threads and load barriers cost CPU that, on a battery-limited APU, comes
+  out of the clock budget of the single pegged game thread; G1 trades that for stop-the-world
+  pauses (up to 53 ms each in `gc.log`, ~0.8 s total over the run) that show up as the p99.9
+  still being 72 ms. On the desktop uncapped the GPU is the wall (98 % busy), so this is a
+  laptop/APU finding until measured there.
+- **GraalVM (Oracle, Graal JIT on by default) is ~15 % slower than HotSpot C2 on the same
+  collector**, both releases. Its compiler threads used 55 to 60 s more CPU than C2 during
+  the 25 s route (it warms up slower and does far more work per method), and that CPU is
+  taken from the game thread. Not adopted. Both copies stay in the game dir
+  (`jre64_linux` = 25.2.4, `jre64_graal253` = 25.3.4.1); `jre64` is the shipped Zulu.
+  Note `analyze.py`'s "gc (ZGC) N events, M ms wall" counts ZGC's concurrent cycles, not
+  pauses; ZGC pauses are sub-millisecond, so the ZGC tail is not GC pauses.
+
+Does GraalVM catch up once warm? 100 s route (`--flag route=S:1800 --route-seconds 100`),
+G1 on both, same conditions:
+
+| run | JVM | fps | mean | p50 / p90 | p99 | p99.9 / max | >33 ms | under 240 cap | GPU busy | JIT+GC CPU |
+|---|---|---|---|---|---|---|---|---|---|---|
+| long-opt-uncap-g1-1 | Zulu 25.0.1 | **233.5** | **4.3** | 3.0 / 8.1 | **20.1** | 40 / 210 | 55 | 24 % | 65 % | 203 s |
+| long-opt-uncap-graal253-g1-1 | GraalVM 25.3.4.1 | 204.1 | 4.9 | 3.4 / 9.1 | 24.2 | 48 / 140 | 70 | 31 % | 61 % | 283 s |
+
+In 20 s slices (fps, Zulu vs Graal): 0–20 s in town 72.7 vs 56.6 (−22 %), 20–40 s 233.6 vs
+189.2 (−19 %), 40–60 s 343.7 vs 294.3 (−14 %), 60–80 s 300.5 vs 266.4 (−11 %), 80–100 s
+217.1 vs 214.0 (−1 %). The gap closes steadily as the compiler drains its queue but only
+reaches parity about two minutes after launch; nothing in these runs shows Graal ahead of
+C2. Not worth the 680 MB and the slow first minutes.
+
+Side finding: the 100 s route is a different regime from the spinning one on this laptop.
+Out of town the GPU gets busy (65 %, clocks to 2.4 GHz, 40 W battery draw) and a quarter of
+the frames hit the 240 cap; in town on the spinning route the game thread is the wall at
+~⅓ CPU and GPU utilization. Both are "fps < 240 with hardware not saturated"; the first
+20 s of the long route (72 fps, p99 43 ms) is the part that matters for play.
+
+Next, if pursued: repeat the Zulu G1 vs ZGC pair on AC before shipping `-XX:+UseG1GC` in
+the launcher JSON for laptop users (n=1, battery), and the same pair on the desktop.
