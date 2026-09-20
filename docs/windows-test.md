@@ -7,6 +7,7 @@ class it shadows against the Windows jar. If anything differs it logs one line a
 the game runs as stock, so the worst case of a mismatch is "no effect".
 
 2026-09-20 release from `100f441` (flicker of objects inside buildings, doors, windows and corpses fixed; overlay fps colour) is 699 KB, 130 files plus the manifest (131 lines, unchanged); tag `win-b0bbce05d5-100f441`.
+2026-09-20 night release from `cc99c05` (thunderstorm pass: puddle cache, rain tiles, VBORenderer batch, lighting re-bake spread, play mode; includes the 100f441 flicker fix and the overlay colours) is 740 KB, 145 files plus the manifest (146 lines); tag `win-b0bbce05d5-cc99c05`.
 2026-09-20 release from `b0d4fe6` (black chunk squares fixed, persistentVbo and translucentTilesInChunkTexture on by default) is 694 KB, 130 files plus the manifest
 2026-09-20 release from `e398ce5` (master switch) is 607 KB, 114 files plus the manifest
 2026-09-20 release from `aa9482b` is 606 KB, 114 files plus the manifest
@@ -66,7 +67,7 @@ touches `projectzomboid.jar`.
 
 ```powershell
 Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 131 on the b0d4fe6 release (115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
+Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 146 on the cc99c05 release (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
 Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
 ```
 
