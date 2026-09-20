@@ -798,7 +798,7 @@ public final class GameLoadingState extends GameState {
                showedClickToSkip = true;
             }
 
-            if (done && playerCreated && (!newGame || this.time >= 33.0F || Core.isLastStand() || "Tutorial".equals(Core.gameMode))) {
+            if (done && playerCreated && (!newGame || this.time >= 33.0F || Core.isLastStand() || "Tutorial".equals(Core.gameMode) || (pzopt.Config.NO_INTRO_WAIT && pzopt.Overrides.enabled()))) { // pzopt: new game: click-to-start as soon as the world is loaded, not after the 33 s intro
                if (this.clickToSkipFadeIn) {
                   this.clickToSkipAlpha = this.clickToSkipAlpha + GameTime.getInstance().getThirtyFPSMultiplierInMenu() / 30.0F;
                   if (this.clickToSkipAlpha > 1.0F) {

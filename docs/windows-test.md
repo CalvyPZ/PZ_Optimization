@@ -147,6 +147,7 @@ loaderCpuFixes=false
 parallelDepthMaps=false
 shaderCache=false
 noLoadFade=false
+noIntroWait=false
 ```
 
 For per-frame numbers add `instrument=true` to that file (or to an otherwise

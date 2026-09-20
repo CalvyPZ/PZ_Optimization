@@ -502,6 +502,13 @@ the animation sets, and the Lua precompile statistics are logged. Why: F
 dropped from 0.41 to 0.05 s; the other hooks are the load-side ends of the
 boot threads.
 
+`render` (2026-09-20): the click-to-start gate for a new game (`newGame &&
+time < 33`) is also satisfied when `noIntroWait` is on, so the prompt shows,
+and `showedClickToSkip` lets `update` accept the click, as soon as `done &&
+playerCreated`. The three intro lines keep their timers and still fade behind
+the prompt. Why: stock makes a new save wait the full 33 s intro ("This is how
+you died") even when the world finished loading in 4 s.
+
 ## se.krka.kahlua.luaj.compiler.LuaCompiler (added 2026-09-19, evening)
 
 `loadis(Reader, String, KahluaTable)` (the overload `LuaManager.RunLuaInternal`

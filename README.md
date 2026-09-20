@@ -332,6 +332,7 @@ comments: `src/pzopt/pzopt/Config.java`.
 | `mipmapArrays` | `true` | texture mipmaps on byte[] rows instead of per-byte direct-buffer loops (issue #2; the crash itself was the laptop) |
 | `loadWorkers` | `max(workers, cores/2)` | recalc pool width while a world loads |
 | `noLoadFade` | `true` | skip the loading screen's fade to black |
+| `noIntroWait` | `true` | new game: click-to-start as soon as the world is loaded, not after the 33 s intro |
 | `uncappedFps` | `auto` | `true`/`false` force the cap off/on for a run |
 | `instrument` | `false` | write per-chunk and per-frame timings for the harness |
 
@@ -544,6 +545,10 @@ chunk map recalc on half the cores, then the pool shrinks back.
 
 **No fade to black** (`noLoadFade`). The loading screen's 350 ms of sleeps before
 the world's own 2 s fade-in are removed.
+
+**No intro wait** (`noIntroWait`). A new game shows "click to start" as soon as the
+world is loaded; stock holds it back until the three intro lines ("This is how you
+died") have played for 33 s. The lines still fade in and out behind the prompt.
 
 ### 5. Frame cap
 
