@@ -16,6 +16,7 @@ classes are described in words.
 | `plan-wayland.md` | 2026-09-19 native Wayland vs XWayland A/B: a wash at the cap, XWayland stays default |
 | `plan-400fps.md` | 2026-09-20 evening uncapped pass on the spinning route: 273 → ~500 fps, run table, GPU section breakdown, what locking 400 still needs |
 | `plan-500fps.md` | 2026-09-20 night: where the game thread still spends its frame after the 400 pass, untouched hot code, never-profiled areas (render thread, composite), ordered work list |
+| `findings-scene-presets-2026-09-20.md` | the night / torch / thunderstorm presets: night and torch free, storm 83 fps with p99 43 ms and nothing saturated (chunk lighting rebakes ×5); capture rig blind to the player light; next steps |
 | `plan-diagram.md` | plan at a glance |
 | `proton-run-prep-2026-09-19.md` | command sequence for the pending Proton comparison |
 | `windows-test.md` | installing the prebuilt class zip on a Windows depot and testing it; 2026-09-19 results of the first Windows bench (stock vs optimized, utilization) |
