@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build the Windows release zip of the class overrides and (optionally) publish it as a
+# Build the release zip of the class overrides (Windows and Linux) and (optionally) publish it as a
 # GitHub release asset.
 #
 #   scripts/release.sh            # build + test + zip into build/pzopt-<rev>-classes.zip
-#   scripts/release.sh --publish  # ...and gh release create win-<rev>-<commit> with the zip
+#   scripts/release.sh --publish  # ...and gh release create win-<rev>-<commit> with the zip + install.sh/.ps1
 #   scripts/release.sh --publish --notes "extra sentence for the release body"
 #
 # The zip is the flat content of build/classes/ (class files, media/lua, pzopt/build-info)
@@ -75,9 +75,9 @@ if gh release view "$tag" >/dev/null 2>&1; then
   echo "release $tag already exists; delete it or commit first" >&2
   exit 1
 fi
-notes="Prebuilt class overrides for Windows, built $(date -u +%Y-%m-%d) from $short for game revision $rev${version:+ (Build $version)}."
+notes="Prebuilt class overrides for Windows and Linux, built $(date -u +%Y-%m-%d) from $short for game revision $rev${version:+ (Build $version)}."
 [[ -n "$extra_notes" ]] && notes="$notes $extra_notes"
-notes="$notes Install/uninstall procedure: docs/windows-test.md (Expand-Archive into the game folder; $nfiles manifest entries). sha256 $sha"
-gh release create "$tag" "$zipname" --target "$full" \
+notes="$notes Install with install.ps1 (Windows) or install.sh (Linux) from this release, or unpack the zip into the game folder by hand (README; $nfiles manifest entries). sha256 $sha"
+gh release create "$tag" "$zipname" install.sh install.ps1 --target "$full" \
   --title "Windows build${version:+ ($version / $rev)} from $short" --notes "$notes"
 gh release view "$tag" --json url,assets -q '.url, (.assets[] | .name + " " + (.size|tostring))'

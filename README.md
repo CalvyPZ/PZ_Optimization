@@ -149,8 +149,8 @@ being ready for the game thread.
 
 ## Install on Windows
 
-Nothing is compiled on Windows. You download one zip and unpack it into the game
-folder. Total time: about two minutes.
+Nothing is compiled on Windows. One script finds the game, downloads the zip for your
+game revision, checks it and unpacks it. Total time: about two minutes.
 
 **You need:** Project Zomboid on Steam, on the **Build 42.20.4** beta (Steam,
 right-click the game, Properties, Betas). Nothing else.
@@ -159,33 +159,41 @@ right-click the game, Properties, Betas). Nothing else.
 
 The overrides are read when the game starts.
 
-### 2. Download the zip
+### 2. Download the installer and run it
 
-Get `pzopt-b0bbce05d5-classes.zip` (543 KB) from the
+Get `install.ps1` from the
 [release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
-into your Downloads folder. The revision in the file name must match your game
-(Build 42.20.4 is `b0bbce05d5`). A zip for another revision installs fine but
-the classes disable themselves at start-up.
-
-### 3. Unpack it into the game folder
-
-Open PowerShell (Start menu, type `powershell`) and run this block. `$PZ` is
-Steam's default game folder; if your library is elsewhere, use the path Steam
-shows under right-click the game, Manage, Browse local files.
+into your Downloads folder. Open PowerShell (Start menu, type `powershell`) and run:
 
 ```powershell
-$PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
-Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1"
 ```
 
-The last line must print `revision=b0bbce05d5`. `Expand-Archive` only adds
-files and never touches `projectzomboid.jar`; it stops with an error instead of
-overwriting anything that already exists, so do not add `-Force`. If it does
-error, a previous install is still there: run the [uninstall](#uninstall) block
-first.
+The script locates the game through Steam's library list (pass `-Dir <folder>` if it
+cannot), reads the game revision from the jar, downloads `pzopt-<revision>-classes.zip`
+from the matching release, refuses to run if the launcher classpath would not load
+loose classes or if any file it would write already exists, unpacks the zip, and
+records every file in `pzopt-installed.txt` so the uninstall is exact. It never
+touches `projectzomboid.jar`.
 
-### 4. Launch from Steam and check the log
+The repository is private, so the download needs the [gh CLI](https://cli.github.com)
+logged in or a token in `$env:GITHUB_TOKEN`. Without either, download
+`pzopt-b0bbce05d5-classes.zip` (543 KB) from the release page yourself and pass it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1" -Zip "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip"
+```
+
+The revision in the file name must match your game (Build 42.20.4 is `b0bbce05d5`);
+the script refuses a zip for another revision, and if one is unpacked by hand the
+classes disable themselves at start-up.
+
+`install.ps1 -Status` lists what is installed and whether any file changed;
+`install.ps1 -Uninstall` removes exactly those files. Without the script,
+`Expand-Archive` of the zip into the game folder (no `-Force`) is the same install,
+and the [uninstall](#uninstall) block below is the same removal.
+
+### 3. Launch from Steam and check the log
 
 Start the game from Steam as usual. The first boot is slower than later ones:
 the animation-clip cache and texture-pack index under `%USERPROFILE%\Zomboid\pzopt\`
@@ -232,11 +240,57 @@ zip is built on Linux with `scripts/release.sh`.
 
 ## Install on Linux
 
-On Linux you build the class files from this repository against your own jar,
-then a script copies them into the game folder and records what it wrote.
+The release zip is the same on both platforms: the class files are plain JVM bytecode
+and both Steam depots ship the identical jar, so the Linux install is the Windows one
+with `install.sh`. Building from source is the alternative for anyone changing the
+code.
 
-**You need:** Project Zomboid on Steam on the **Build 42.20.4** beta, a JDK 25 or
-newer (`javac`, `javap`), Python 3, `git` and `bash`.
+**You need:** Project Zomboid on Steam on the **Build 42.20.4** beta, `bash`, `curl`
+or the `gh` CLI, and `unzip` (or `python3`). No JDK.
+
+### 1. Close the game
+
+### 2. Run the installer
+
+```sh
+gh release download -R DiegoVillalobosFlores/PZ_Optimization -p install.sh   # or save it from the release page in a browser
+chmod +x install.sh
+./install.sh
+```
+
+It finds the game through Steam's `libraryfolders.vdf` (or `--dir <folder>` /
+`PZ_DIR`), reads the game revision from the jar, downloads
+`pzopt-<revision>-classes.zip` from the matching release, checks the launcher
+classpath and that no file it would write exists, unpacks, and records what it wrote
+in `pzopt-installed.txt`. The jar is never modified. The repository is private, so the
+download needs `gh` logged in or `GITHUB_TOKEN` set; otherwise fetch the zip from the
+release page and pass `--zip pzopt-b0bbce05d5-classes.zip`.
+
+```sh
+./install.sh --status      # installed for which revision, any MISSING/MODIFIED file
+./install.sh --uninstall   # removes exactly the files it wrote and the empty folders
+```
+
+`scripts/pzopt.sh` in the repository reads the same manifest, so either tool can
+remove what the other installed.
+
+### 3. Launch from Steam and check the log
+
+Start the game from Steam as usual (first boot is slower: caches under
+`~/Zomboid/pzopt/` are written). `~/Zomboid/console.txt` shows one
+`[pzopt] loaded override ... active` line per class in its first seconds. If a
+line says the overrides were built for another revision, the game and the files
+do not match and everything runs as stock.
+
+Settings are toggles in Options > Optimizations (saved to `~/Zomboid/pzopt/options.ini`,
+applied on the next launch), or go in `pzopt.properties` next to `projectzomboid.jar`,
+same format as on Windows; that file wins over the tab, and `./install.sh --status`
+prints it when it exists.
+
+### From source
+
+For changing the code, or a game folder the zip does not match: a JDK 25 or newer
+(`javac`, `javap`), Python 3, `git` and `bash`.
 
 ```sh
 # Arch / CachyOS
@@ -247,14 +301,12 @@ sudo apt install openjdk-25-jdk      # or the newest available
 sudo dnf install java-latest-openjdk-devel
 ```
 
-### 1. Close the game
-
-### 2. Clone and build
-
 ```sh
 git clone https://github.com/DiegoVillalobosFlores/PZ_Optimization.git
 cd PZ_Optimization
 scripts/build.sh
+scripts/pzopt.sh install
+scripts/pzopt.sh status
 ```
 
 If the game is not in `/games/steamapps/common/ProjectZomboid`, export the path
@@ -269,35 +321,11 @@ export PZ_ROOT="$HOME/.local/share/Steam/steamapps/common/ProjectZomboid"
 line like `built 101 class files into build/classes for game revision b0bbce05d5`.
 It also runs a structural check against the stock classes and fails loudly if
 your game revision does not match the sources. Optional, the unit tests (no
-game needed, a few seconds): `scripts/test.sh`.
-
-### 3. Install and verify
-
-```sh
-scripts/pzopt.sh install
-scripts/pzopt.sh status
-```
-
-`install` checks that the launcher classpath puts `.` ahead of the jar and that
-your game revision matches the build, copies `build/classes/` into the game
-folder, records every file in `pzopt-installed.txt`, and refuses to overwrite
-any existing file. Its last line confirms the jar checksum did not change.
-`status` must print `installed: yes`, the same revision on the `game revision`
-and `installed for` lines, and a file list with no `MISSING` or `MODIFIED`
-entries.
-
-### 4. Launch from Steam and check the log
-
-Start the game from Steam as usual (first boot is slower: caches under
-`~/Zomboid/pzopt/` are written). `~/Zomboid/console.txt` shows one
-`[pzopt] loaded override ... active` line per class in its first seconds. If a
-line says the overrides were built for another revision, the game and the files
-do not match and everything runs as stock.
-
-Settings are toggles in Options > Optimizations (saved to `~/Zomboid/pzopt/options.ini`,
-applied on the next launch), or go in `pzopt.properties` next to `projectzomboid.jar`,
-same format as on Windows; that file wins over the tab, and `scripts/pzopt.sh status`
-prints it when it exists.
+game needed, a few seconds): `scripts/test.sh`. `pzopt.sh install` checks the
+launcher classpath and the revision, copies `build/classes/` into the game folder,
+records every file in `pzopt-installed.txt`, and refuses to overwrite any existing
+file; `status` must print `installed: yes` with no `MISSING` or `MODIFIED` entries.
+`scripts/release.sh` is what builds the release zip.
 
 ---
 
@@ -377,7 +405,8 @@ is needed afterwards. The caches under `Zomboid/pzopt/` can be deleted by hand;
 the frame-cap setting lives there too (`framecap.ini`), and without the overrides
 the game uses whatever `options.ini` holds.
 
-**Windows:** removes exactly the files the zip added, then the empty folders.
+**Windows:** `install.ps1 -Uninstall`, or by hand, which removes exactly the files
+the zip added, then the empty folders:
 
 ```powershell
 $PZ = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid"
@@ -392,10 +421,11 @@ Test-Path "$PZ\pzopt"   # False
 ```
 
 **Linux:** removes exactly the files it installed and the empty folders it
-created, then deletes the manifest.
+created, then deletes the manifest. Either tool works on either install.
 
 ```sh
-scripts/pzopt.sh uninstall
+./install.sh --uninstall        # release install
+scripts/pzopt.sh uninstall      # from-source install
 ```
 
 ---
@@ -406,11 +436,12 @@ The classes are compiled against one exact jar. After Steam updates the game the
 disable themselves (one log line, stock behaviour). Never leave class files built
 for an older revision on a newer game; they are inert but pointless.
 
-**Windows:** run the uninstall block above and wait for a zip whose name carries
-the new revision.
+**Windows:** `install.ps1 -Uninstall` and wait for a release whose zip carries the
+new revision; `install.ps1` then installs it.
 
-**Linux:** wait for a release of this repo that targets the new build. On an
-unchanged revision (a Steam re-verify, for example) just rebuild and reinstall:
+**Linux:** `./install.sh --uninstall` and wait for a release of this repo that targets
+the new build. From source, on an unchanged revision (a Steam re-verify, for example)
+just rebuild and reinstall:
 
 ```sh
 scripts/pzopt.sh uninstall
@@ -733,7 +764,8 @@ game itself when Steam is not running. Pass `--no-dashboard` on measurement runs
 | `src/overrides/` | The 25 shadowed game classes, edits marked `// pzopt:` |
 | `src/shims/` | From-scratch replacements (`TISLogoState`) |
 | `src/lua/` | The frame-cap and Optimizations-tab options Lua, installed under `media/lua/client/pzopt/` |
-| `scripts/` | `build.sh`, `pzopt.sh`, `release.sh` (Windows zip + GitHub release), `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh`, `pz-env.sh` |
+| `install.sh`, `install.ps1` | Standalone installers (Linux, Windows) for the release zip; also attached to every release |
+| `scripts/` | `build.sh`, `pzopt.sh`, `release.sh` (release zip + GitHub release), `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh`, `pz-env.sh` |
 | `harness/` | `run-win.ps1` (Windows) and `run.sh` (Linux), analysis scripts, `parity-gate.sh`, the `pzopt-harness` Lua mod, bench save template, `baseline/` captures (`baseline/windows/` for the Windows runs) |
 | `config/` | MangoHud profiles |
 | `tools/` | Standalone Java probes (JFR sample dump, GLFW swap probe, static audit) |

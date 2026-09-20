@@ -1,0 +1,197 @@
+<#
+.SYNOPSIS
+Install, remove or inspect the PZ_Optimization class overrides on Windows from a release zip.
+
+.DESCRIPTION
+Standalone: needs Windows PowerShell 5.1 or newer. Nothing is compiled. Downloading from
+the private repository needs the gh CLI logged in, or $env:GITHUB_TOKEN; otherwise download
+the zip from the releases page and pass -Zip.
+
+  .\install.ps1                                  # find the game, download the zip for its revision, install
+  .\install.ps1 -Zip "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip"
+  .\install.ps1 -Dir "D:\SteamLibrary\steamapps\common\ProjectZomboid"
+  .\install.ps1 -Status
+  .\install.ps1 -Uninstall
+
+Files written are recorded in <game dir>\pzopt-installed.txt (same format as the Linux
+tools). projectzomboid.jar is never modified; the runtime guard turns the classes off, with
+one console.txt line, if the game revision differs.
+
+If scripts are blocked: powershell -ExecutionPolicy Bypass -File .\install.ps1
+#>
+[CmdletBinding()]
+param(
+  [string]$Dir,
+  [string]$Zip,
+  [string]$Tag,
+  [switch]$Uninstall,
+  [switch]$Status
+)
+$ErrorActionPreference = 'Stop'
+$RepoSlug = 'DiegoVillalobosFlores/PZ_Optimization'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+function Fail($msg) { Write-Host "error: $msg" -ForegroundColor Red; exit 1 }
+
+# --- locate the game -------------------------------------------------------------------
+
+function Find-GameDir {
+  $libs = @()
+  $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
+  if ($steam) { $libs += $steam }
+  $libs += "${env:ProgramFiles(x86)}\Steam", "$env:ProgramFiles\Steam"
+  foreach ($lib in $libs) {
+    $vdf = Join-Path $lib 'steamapps\libraryfolders.vdf'
+    if (Test-Path $vdf) {
+      foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) {
+        $libs += $m.Groups[1].Value.Replace('\\', '\')
+      }
+    }
+  }
+  foreach ($lib in $libs | Select-Object -Unique) {
+    foreach ($c in @((Join-Path $lib 'steamapps\common\ProjectZomboid'), (Join-Path $lib 'steamapps\common\ProjectZomboid\projectzomboid'))) {
+      if ((Test-Path (Join-Path $c 'projectzomboid.jar')) -and (Test-Path (Join-Path $c 'ProjectZomboid64.json'))) { return $c }
+    }
+  }
+  return $null
+}
+
+if (-not $Dir) { $Dir = Find-GameDir }
+if (-not $Dir) { Fail 'game folder not found; pass -Dir <folder containing projectzomboid.jar>' }
+$Jar = Join-Path $Dir 'projectzomboid.jar'
+if (-not (Test-Path $Jar)) { Fail "no projectzomboid.jar in $Dir" }
+$Json = Join-Path $Dir 'ProjectZomboid64.json'
+$Manifest = Join-Path $Dir 'pzopt-installed.txt'
+
+function Read-ZipEntry($zipPath, $entryName) {
+  $z = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+  try {
+    $e = $z.GetEntry($entryName)
+    if (-not $e) { return $null }
+    $s = $e.Open(); $ms = New-Object System.IO.MemoryStream; $s.CopyTo($ms); $s.Dispose()
+    return $ms.ToArray()
+  } finally { $z.Dispose() }
+}
+function Get-JarRevision {
+  # zombie.GitVersion holds REVISION as a constant-pool string; no JDK needed
+  $bytes = Read-ZipEntry $Jar 'zombie/GitVersion.class'
+  if (-not $bytes) { return $null }
+  $m = [regex]::Match([System.Text.Encoding]::ASCII.GetString($bytes), '\b[0-9a-f]{10}\b')
+  if ($m.Success) { $m.Value } else { $null }
+}
+function Get-Sha256($path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLower() }
+$Rev = Get-JarRevision
+
+# --- status / uninstall ----------------------------------------------------------------
+
+if ($Status) {
+  Write-Host "game dir:      $Dir"
+  Write-Host "game revision: $(if ($Rev) { $Rev } else { 'unknown' })"
+  if (Test-Path $Manifest) {
+    $lines = Get-Content $Manifest | Where-Object { $_ -and -not $_.StartsWith('#') }
+    $for = (Get-Content $Manifest | Select-String '^# revision=(\S+)').Matches[0].Groups[1].Value
+    Write-Host "installed:     yes, for $for ($($lines.Count) files)"
+    $bad = $false
+    foreach ($l in $lines) {
+      $rel, $sha = $l -split ' ', 2
+      $p = Join-Path $Dir $rel
+      if (-not (Test-Path -LiteralPath $p)) { Write-Host "  MISSING  $rel"; $bad = $true }
+      elseif ((Get-Sha256 $p) -ne $sha) { Write-Host "  MODIFIED $rel"; $bad = $true }
+    }
+    if (-not $bad) { Write-Host '  all files present and unchanged' }
+  } else { Write-Host 'installed:     no' }
+  $props = Join-Path $Dir 'pzopt.properties'
+  if (Test-Path $props) { Write-Host 'pzopt.properties:'; Get-Content $props | ForEach-Object { "  $_" } }
+  exit 0
+}
+
+if ($Uninstall) {
+  $filesTxt = Join-Path $Dir 'pzopt-files.txt'
+  if (Test-Path $Manifest) { $list = Get-Content $Manifest | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split ' ')[0] } }
+  elseif (Test-Path $filesTxt) { $list = Get-Content $filesTxt | Where-Object { $_ } }
+  else { Write-Host "not installed (no pzopt-installed.txt or pzopt-files.txt in $Dir)"; exit 0 }
+  $n = 0
+  foreach ($rel in $list) {
+    $p = Join-Path $Dir $rel
+    if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force; $n++ }
+    $d = Split-Path $p -Parent
+    while ($d -and ($d.TrimEnd('\','/') -ne $Dir.TrimEnd('\','/')) -and (Test-Path -LiteralPath $d) -and -not (Get-ChildItem -LiteralPath $d -Force)) {
+      Remove-Item -LiteralPath $d; $d = Split-Path $d -Parent
+    }
+  }
+  Remove-Item -LiteralPath $Manifest, $filesTxt -Force -ErrorAction SilentlyContinue
+  Write-Host "removed $n files; projectzomboid.jar was never modified"
+  Write-Host "caches under $env:USERPROFILE\Zomboid\pzopt\ (anims, packs, framecap.ini, options.ini) can be deleted by hand"
+  exit 0
+}
+
+# --- install ---------------------------------------------------------------------------
+
+$running = Get-Process ProjectZomboid64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -and (Split-Path $_.Path -Parent).TrimEnd('\','/') -eq $Dir.TrimEnd('\','/') }
+if ($running) { Fail "the game is running from $Dir; close it first" }
+if (Test-Path $Manifest) { Fail 'already installed (see -Status); run -Uninstall first' }
+if (-not $Rev) { Fail "could not read the game revision from $Jar" }
+
+# the launcher must search "." before the jar or loose classes never load
+$cp = @((Get-Content $Json -Raw | ConvertFrom-Json).classpath)
+if (($cp.IndexOf('.') -lt 0) -or ($cp.IndexOf('projectzomboid.jar') -lt 0) -or ($cp.IndexOf('.') -gt $cp.IndexOf('projectzomboid.jar'))) {
+  Fail "$Json does not list `".`" before projectzomboid.jar on the classpath; loose classes would never load (found: $($cp -join ', '))"
+}
+
+$tmp = $null
+if (-not $Zip) {
+  $pattern = "pzopt-$Rev-classes.zip"
+  $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("pzopt-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  New-Item -ItemType Directory -Path $tmp | Out-Null
+  $gh = Get-Command gh -ErrorAction SilentlyContinue
+  $ghOk = $false
+  if ($gh) { & gh auth status 2>$null | Out-Null; $ghOk = ($LASTEXITCODE -eq 0) }
+  if ($ghOk) {
+    if (-not $Tag) {
+      $Tag = (& gh release list -R $RepoSlug --json tagName -q '.[].tagName') | Where-Object { $_ -match "-$Rev(-|$)" } | Select-Object -First 1
+      if (-not $Tag) { Fail "no release for game revision $Rev (your game is a build these classes were not built for)" }
+    }
+    Write-Host "downloading $pattern from release $Tag"
+    & gh release download $Tag -R $RepoSlug -p $pattern -D $tmp
+    if ($LASTEXITCODE -ne 0) { Fail 'gh release download failed' }
+  } elseif ($env:GITHUB_TOKEN) {
+    $h = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json' }
+    $rels = Invoke-RestMethod -Headers $h "https://api.github.com/repos/$RepoSlug/releases?per_page=50"
+    $asset = $null
+    foreach ($r in $rels) {
+      if ($Tag -and $r.tag_name -ne $Tag) { continue }
+      $a = $r.assets | Where-Object { $_.name -eq $pattern } | Select-Object -First 1
+      if ($a) { $asset = $a; $Tag = $r.tag_name; break }
+    }
+    if (-not $asset) { Fail "no release asset $pattern found" }
+    Write-Host "downloading $pattern from release $Tag"
+    Invoke-WebRequest -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/octet-stream' } -Uri $asset.url -OutFile (Join-Path $tmp $pattern)
+  } else {
+    Fail "cannot download: install and log in to the gh CLI, or set `$env:GITHUB_TOKEN, or download $pattern from https://github.com/$RepoSlug/releases and pass -Zip"
+  }
+  $Zip = Join-Path $tmp $pattern
+}
+if (-not (Test-Path -LiteralPath $Zip)) { Fail "zip not found: $Zip" }
+
+$z = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+try { $files = @($z.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object { $_.FullName } | Sort-Object) } finally { $z.Dispose() }
+if ($files -notcontains 'pzopt/build-info.properties') { Fail "$Zip is not a PZ_Optimization release zip" }
+$bi = [System.Text.Encoding]::UTF8.GetString((Read-ZipEntry $Zip 'pzopt/build-info.properties'))
+$zipRev = ([regex]::Match($bi, '(?m)^revision=(\S+)')).Groups[1].Value
+if ($zipRev -ne $Rev) { Fail "zip was built for game revision $zipRev but this game is $Rev; the classes would disable themselves. Get the zip for $Rev" }
+foreach ($rel in $files) {
+  $p = Join-Path $Dir ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
+  if (Test-Path -LiteralPath $p) { Fail "refusing to overwrite existing file: $p (a previous install? run -Uninstall)" }
+}
+
+$jarBefore = Get-Sha256 $Jar
+[System.IO.Compression.ZipFile]::ExtractToDirectory($Zip, $Dir)
+$out = @('# files written by install.ps1 - do not edit', "# revision=$zipRev installed=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))")
+foreach ($rel in $files) { $out += "$rel $(Get-Sha256 (Join-Path $Dir ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))" }
+[System.IO.File]::WriteAllLines($Manifest, $out)
+if ((Get-Sha256 $Jar) -ne $jarBefore) { Fail 'projectzomboid.jar changed during install (this should be impossible)' }
+if ($tmp) { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+
+Write-Host "installed $($files.Count) files into $Dir for game revision $zipRev; projectzomboid.jar untouched"
+Write-Host "launch from Steam; $env:USERPROFILE\Zomboid\console.txt shows one '[pzopt] loaded override ... active' line per class"
+Write-Host "settings: Options > Optimizations in the game, or $Dir\pzopt.properties"
