@@ -1,7 +1,7 @@
 # PZ_Optimization
 
 Performance patches for **Project Zomboid Build 42**, on the Java side of the game.
-Not a Lua mod: a set of drop-in `.class` files that shadow 24 game classes and remove
+Not a Lua mod: a set of drop-in `.class` files that shadow 25 game classes and remove
 the worst stalls from the chunk streamer, the renderer and the loading path.
 `projectzomboid.jar` is never modified. Every change has a kill switch, and every
 number in this file comes from the hands-off benchmark harness in this repo.
@@ -161,7 +161,7 @@ The overrides are read when the game starts.
 
 ### 2. Download the zip
 
-Get `pzopt-b0bbce05d5-classes.zip` (518 KB) from the
+Get `pzopt-b0bbce05d5-classes.zip` (543 KB) from the
 [release page](https://github.com/DiegoVillalobosFlores/PZ_Optimization/releases)
 into your Downloads folder. The revision in the file name must match your game
 (Build 42.20.4 is `b0bbce05d5`). A zip for another revision installs fine but
@@ -226,7 +226,7 @@ You do not need it to play. If you want the harness or the sources, clone to a
 short path such as `C:\Users\<you>\PZ_Optimization`; some files sit ten folders
 deep, and from a long path the checkout fails with "Filename too long" unless
 you pass `-c core.longpaths=true`. The build scripts do not run on Windows; the
-zip is built on Linux with `scripts/build.sh`.
+zip is built on Linux with `scripts/release.sh`.
 
 ---
 
@@ -266,7 +266,7 @@ export PZ_ROOT="$HOME/.local/share/Steam/steamapps/common/ProjectZomboid"
 ```
 
 `build.sh` compiles everything under `src/` against your jar and ends with a
-line like `built 95 class files into build/classes for game revision b0bbce05d5`.
+line like `built 101 class files into build/classes for game revision b0bbce05d5`.
 It also runs a structural check against the stock classes and fails loudly if
 your game revision does not match the sources. Optional, the unit tests (no
 game needed, a few seconds): `scripts/test.sh`.
@@ -341,6 +341,9 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `bakeBudget` | `8` | chunk textures baked per frame (`0` = unlimited) |
 | `lightingBudget` | `8` | chunk lighting refreshes per frame (`0` = stock) |
 | `cutawayFast` | `true` | replay the stored occluder mask on clean levels |
+| `treeBakeDirect` | `true` | bake trees through the plain sprite path (the batched path dropped JUMBO trees near buildings) |
+| `textureBufferMb` | `50` | texture upload buffer size |
+| `lightingRebakeMs` / `cutawayRadius` / `gridStackInterval` | `0` | measured and not adopted (see below); `0` = stock |
 | `persistentVbo` | `false` | persistently mapped sprite buffers |
 | `fileThreads` / `fileInflight` | `max(4, cores/2)` / `4x` | async file system width and queue depth |
 | `parallelDepthMaps` | `true` | decode depth-map tilesets concurrently |
@@ -348,7 +351,7 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `scriptParserFast` | `true` | linear script parser |
 | `itemParamSwitch` | `true` | `Item.DoParam` switch dispatch |
 | `fmodAsync` | `true` | FMOD init on a boot thread |
-| `bootPump` / `bootFileThreads` / `earlyModels` | `true` / `cores-6` / `true` | boot-time file pool pump |
+| `bootPump` / `bootFileThreads` / `earlyModels` | `true` / `max(4, cores-6)` / `true` | boot-time file pool pump |
 | `luaPrecompile` | `true` | compile all Lua on a pool at boot |
 | `preloadAnimSets` | `true` | parse animation sets at boot |
 | `animClipCache` | `true` | cache imported animation clips under `Zomboid/pzopt/` |
@@ -601,7 +604,7 @@ class inside the jar. The overrides are copied in as loose files and removed by
 deleting them; the jar's checksum never changes. This is the "manual class
 replacement" method described on the [PZ wiki's Java page](https://pzwiki.net/wiki/Java).
 
-Shadowed classes (24 game classes plus one from-scratch shim):
+Shadowed classes (25 game classes plus one from-scratch shim):
 
 | Area | Classes |
 |---|---|
@@ -727,10 +730,10 @@ game itself when Steam is not running. Pass `--no-dashboard` on measurement runs
 | Path | What |
 |---|---|
 | `src/pzopt/pzopt/` | New classes: `Config`, `Overrides`/`BuildInfo` (build guard), `RecalcPool`, `OrderedPublisher`, `StreamerWake`, `BootPump`, `LuaPrecompiler`, `AnimClipCache`, `ModelShaders`, `FrameCap`, `Stats`, `Harness`/`Parity` |
-| `src/overrides/` | The 24 shadowed game classes, edits marked `// pzopt:` |
+| `src/overrides/` | The 25 shadowed game classes, edits marked `// pzopt:` |
 | `src/shims/` | From-scratch replacements (`TISLogoState`) |
-| `src/lua/` | The frame-cap options Lua, installed under `media/lua/client/pzopt/` |
-| `scripts/` | `build.sh`, `pzopt.sh`, `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh`, `pz-env.sh` |
+| `src/lua/` | The frame-cap and Optimizations-tab options Lua, installed under `media/lua/client/pzopt/` |
+| `scripts/` | `build.sh`, `pzopt.sh`, `release.sh` (Windows zip + GitHub release), `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh`, `pz-env.sh` |
 | `harness/` | `run-win.ps1` (Windows) and `run.sh` (Linux), analysis scripts, `parity-gate.sh`, the `pzopt-harness` Lua mod, bench save template, `baseline/` captures (`baseline/windows/` for the Windows runs) |
 | `config/` | MangoHud profiles |
 | `tools/` | Standalone Java probes (JFR sample dump, GLFW swap probe, static audit) |
