@@ -169,6 +169,29 @@ build is bound by the game thread (93 % of wall) with the GPU at half load. The 
 gap to Linux (18.5 vs 8.3 ms) is the open Windows question; the driver and the cap
 are the candidates.
 
+### Handheld: AYANEO Flip 1S DS, spinning Rosewood route, uncapped
+
+AYANEO Flip 1S DS (Ryzen AI 9 HX 370, Radeon 890M, 1920x1080, Linux, Mesa 26.2), on AC,
+each `powerprofilesctl` profile in turn; direct launch (no Steam), 25 s spinning route at
+max zoom, one run per cell. "Stock" is the stock code path (`enabled=false`).
+Details and thermals in [docs/results.md](docs/results.md) (2026-09-20 15:15 section).
+
+| Profile | Build | fps, mean | Frame time, mean | p99 | p99.9 | Frames over 33 ms | Package power | fps / W |
+|---|---|---|---|---|---|---|---|---|
+| performance | stock | 56 | 17.8 ms | 39.3 ms | 57.5 ms | 24 | 37.7 W | 1.49 |
+| performance | optimized | **126** | 8.0 ms | 22.4 ms | 33.2 ms | 4 | 40.5 W | 3.10 |
+| balanced | stock | 56 | 17.7 ms | 40.3 ms | 68.0 ms | 34 | 38.4 W | 1.47 |
+| balanced | optimized | **125** | 8.0 ms | 22.3 ms | 33.9 ms | 4 | 40.6 W | 3.08 |
+| power-saver | stock | 41 | 24.5 ms | 63.1 ms | 97.8 ms | 176 | 20.3 W | 2.01 |
+| power-saver | optimized | **64** | 15.6 ms | 42.2 ms | 75.5 ms | 47 | 23.2 W | 2.77 |
+
+2.2x on performance and balanced (which are the same run on this device: the game thread is
+pegged at 99 % of one core either way, no thermal throttling, peak 77 °C), 1.6x under
+power-saver, which is a ~21 W package cap. Frames per watt double with the overrides, and the
+optimized build on power-saver still beats stock on any profile at 57 % of the power. The
+hardware is not saturated in any cell (~20 % of 24 threads, GPU under 42 %); the single game
+thread is the wall, as on the desktop.
+
 ### 60 km/h drive, 240 fps cap (the first video)
 
 [![Stock vs optimized, 60 km/h drive](docs/media/drive-60kmh-stock-vs-optimized.jpg)](docs/media/drive-60kmh-stock-vs-optimized.mp4)

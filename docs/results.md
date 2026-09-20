@@ -775,7 +775,7 @@ hour, weather and torch at world-ready; `harness/CLAUDE.md`). 240 cap, `--no-das
 
 ## 2026-09-20 (15:15–15:31): laptop on AC, power profile x stock/optimized on the spinning route
 
-Machine: the laptop again (`diego-flip`, Ryzen AI 9 HX 370 / Radeon 890M, Mesa 26.2.3, 1920x1080),
+Machine: the laptop again (`diego-flip`, an AYANEO Flip 1S DS: Ryzen AI 9 HX 370 / Radeon 890M, Mesa 26.2.3, 1920x1080),
 this time **on AC** with `powerprofilesctl` set to each profile by the maintainer between pairs.
 Every run: spinning Rosewood route (`--flag route=S:450 --flag turn=90 --flag zoom=max
 --route-seconds 25`), `--prop uncappedFps=true`, `--option uiRenderOffscreen=true`, `--launcher
