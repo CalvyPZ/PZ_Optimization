@@ -74,6 +74,47 @@ public final class PerformanceSettings {
       pzopt.FrameCap.setGameFramerate(fps);
    }
 
+   // pzopt: the "Optimizations" options tab (media/lua/client/pzopt/pzopt_optimizations_options.lua)
+   // reads and writes the pzopt.Config keys through these; values are strings as in pzopt.properties.
+   // Choices go to Zomboid/pzopt/options.ini (pzopt.UserOptions) and apply on the next launch.
+   public boolean hasPzoptOptions() {
+      return pzopt.Overrides.enabled();
+   }
+
+   public boolean isPzoptOptionKnown(String key) {
+      return pzopt.Config.knows(key);
+   }
+
+   /** The value in force since boot ("" for an unknown key). */
+   public String getPzoptOption(String key) {
+      String v = pzopt.Config.value(key);
+      return v == null ? "" : v;
+   }
+
+   public String getPzoptOptionDefault(String key) {
+      String v = pzopt.Config.defaultValue(key);
+      return v == null ? "" : v;
+   }
+
+   /** The value saved from the tab ("" when the default is in force). */
+   public String getPzoptOptionSaved(String key) {
+      String v = pzopt.UserOptions.get(key);
+      return v == null ? "" : v;
+   }
+
+   /** "" or what overrides the tab for this key: "pzopt.properties" or "-Dpzopt.<key>". */
+   public String getPzoptOptionPinnedBy(String key) {
+      String v = pzopt.Config.pinnedBy(key);
+      return v == null ? "" : v;
+   }
+
+   /** "" removes the key (default on the next launch). */
+   public void setPzoptOption(String key, String value) {
+      if (pzopt.Config.knows(key)) {
+         pzopt.UserOptions.set(key, value);
+      }
+   }
+
    public void setLightingQuality(int lighting) {
    }
 

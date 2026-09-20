@@ -630,6 +630,33 @@ runs no longer change the player's frame-rate choice. Verified with two short
 boots: forced run logs "game uncapped", next auto boot logs "game 300 fps". Menu means every state that is not
 in-game or loading: logo, main menu, options, character creation.
 
+Optimizations tab (added 2026-09-20): six more public instance methods, again
+one-line forwards and nothing else touched: `hasPzoptOptions` (true when the
+build guard is on), `isPzoptOptionKnown(key)`, `getPzoptOption(key)` (the value
+in force since boot, from `pzopt.Config.value`), `getPzoptOptionDefault(key)`,
+`getPzoptOptionSaved(key)` (the player's saved value or ""),
+`getPzoptOptionPinnedBy(key)` ("" or `pzopt.properties` / `-Dpzopt.<key>`) and
+`setPzoptOption(key, value)` ("" removes the key). They serve
+`src/lua/client/pzopt/pzopt_optimizations_options.lua`, which wraps
+`MainOptions:addDisplayPanel` and adds an "Optimizations" page right after
+Display: every `Config` key that is an optimization (not `instrument`, `dev`,
+`devRedrawFrame`, `dumpItems`, `translucentCache`, `uncappedFps`, the last is
+the Display combo) as a tick box (booleans) or a combo whose first entry is
+"Default (value on this machine)" (integers), grouped as rendering, chunk
+streaming, boot and load, with a tooltip per control. The choices go to
+`Zomboid/pzopt/options.ini` through `pzopt.UserOptions` the moment Apply is
+pressed, and `Config` reads that file at class init below `-Dpzopt.<key>` and the
+install dir's `pzopt.properties` (harness runs write that file per run, so a run
+never depends on a menu choice; a key set there shows disabled in the tab with
+the pinning source in its tooltip). Choosing "Default" removes the key instead of
+writing the default's value, because defaults differ per machine (worker
+counts). Everything applies on the next launch: the GameOption's `apply`
+compares the boot value with the new one through the stock
+`GameOption:restartRequired`, so the stock "restart required" dialog appears
+exactly when a change matters. Verified by a verify run (`opttab-smoke`,
+`--prop bakeBudget=8`): the console logs "options tab: 35 controls, 1 pinned",
+no Lua errors; the click path was not exercised hands-off.
+
 ## zombie.core.skinnedmodel.model.Model (added 2026-09-19, night, game load; GitHub issue #1)
 
 `CreateShader(name)`: the stock method always posts a lambda to the render

@@ -20,7 +20,7 @@ a machine you play on.
 1. [Results at a glance](#results-at-a-glance)
 2. [Install on Windows](#install-on-windows)
 3. [Install on Linux](#install-on-linux)
-4. [Settings](#settings)
+4. [Settings](#settings) ([in the game menu](#in-the-game-menu), [in a file](#in-a-file))
 5. [Uninstall](#uninstall)
 6. [After a game update](#after-a-game-update)
 7. [How the optimizations work](#how-the-optimizations-work)
@@ -203,14 +203,16 @@ Select-String -Path "$env:USERPROFILE\Zomboid\console.txt" -Pattern "\[pzopt\] l
 | `0` | the class files did not load. Check that `$PZ\pzopt\Overrides.class` exists and that `$PZ\ProjectZomboid64.json` lists `"."` before `"projectzomboid.jar"` under `classpath` (it does on the stock depot). |
 | a line in `console.txt` saying the overrides were built for another revision | your game is not 42.20.4 / `b0bbce05d5`. The game runs as stock. Switch Steam to that beta or wait for a matching zip. |
 
-Options, Display now has an **Uncapped** framerate entry, 300 to 500 fps entries,
-and a separate **Menu framerate** combo. That is the only visible change; everything
-else is frame time.
+Options gains an **Optimizations** tab with every optimization as a toggle, and
+Display & Performance gains the **Uncapped** entry, 300 to 500 fps caps and a
+separate **Menu framerate** combo; see [Settings](#settings) for screenshots.
+Everything else is frame time.
 
 ### Optional: change a setting
 
-Create `$PZ\pzopt.properties` with only the keys you want to change; everything
-else keeps its default. See [Settings](#settings) for the list.
+Use the Optimizations tab, or create `$PZ\pzopt.properties` with only the keys you
+want to change; everything else keeps its default. A key in that file wins over the
+tab and shows there as pinned. See [Settings](#settings) for the list.
 
 ```properties
 workers=2
@@ -292,17 +294,40 @@ Start the game from Steam as usual (first boot is slower: caches under
 line says the overrides were built for another revision, the game and the files
 do not match and everything runs as stock.
 
-Settings go in `pzopt.properties` next to `projectzomboid.jar`, same format as on
-Windows; `scripts/pzopt.sh status` prints the file when it exists.
+Settings are toggles in Options > Optimizations (saved to `~/Zomboid/pzopt/options.ini`,
+applied on the next launch), or go in `pzopt.properties` next to `projectzomboid.jar`,
+same format as on Windows; that file wins over the tab, and `scripts/pzopt.sh status`
+prints it when it exists.
 
 ---
 
 ## Settings
 
-Keys go in `pzopt.properties` in the game directory (next to `projectzomboid.jar`),
+### In the game menu
+
+Every optimization is a toggle in **Options > Optimizations**, a tab of its own right
+after Display & Performance. Tick boxes are the on/off switches; combos hold the
+numeric budgets and thread counts, with the build's default on your machine as the
+first entry. Hover a control for what it does and its key name. Changes apply on the
+next launch: the game shows its usual "restart required" dialog when a change
+matters, and the choices are kept in `Zomboid/pzopt/options.ini` (Linux
+`~/Zomboid`, Windows `%USERPROFILE%\Zomboid`). Choosing "Default" removes the key
+again.
+
+![Options > Optimizations: every optimization as a tick box or combo, grouped as rendering, chunk streaming, boot and load](docs/media/options-optimizations-tab.jpg)
+
+Display & Performance keeps the stock layout and gains the **Uncapped** entry, the
+300 to 500 fps caps and the separate **Menu framerate** combo:
+
+![Options > Display & Performance with the extended Lock Framerate combo and the Menu framerate combo](docs/media/options-display-tab.jpg)
+
+### In a file
+
+Keys also go in `pzopt.properties` in the game directory (next to `projectzomboid.jar`),
 or as `-Dpzopt.<key>=` JVM properties. Only list the keys you change. A key set to
-`false` or `0` restores stock behaviour for that item alone. Full list with
-comments: `src/pzopt/pzopt/Config.java`.
+`false` or `0` restores stock behaviour for that item alone. A key set this way wins
+over the menu and shows there as a disabled control whose tooltip names the file.
+Full list with comments: `src/pzopt/pzopt/Config.java`.
 
 | Key | Default | What it controls |
 |---|---|---|

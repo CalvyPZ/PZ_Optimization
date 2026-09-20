@@ -107,6 +107,11 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   offer 500/430/400/330/300 fps; the in-game choice is snapshotted before `Core.loadOptions`
   rewrites options.ini and a cap above 244 lives in framecap.ini (`gameFps=`); forced
   `uncappedFps=` runs restore the player's choice on the next boot (`restore=`).
+- Options > Optimizations tab (2026-09-20): every Config key as a tick box / combo
+  (`src/lua/client/pzopt/pzopt_optimizations_options.lua`, Java side `pzopt.UserOptions` +
+  `PerformanceSettings` forwards), saved to `~/Zomboid/pzopt/options.ini`, applied on the next
+  launch; `-Dpzopt.*` and the game dir's `pzopt.properties` (harness `--prop`) still win, so runs
+  never depend on menu choices.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under

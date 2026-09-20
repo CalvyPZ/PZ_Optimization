@@ -18,7 +18,10 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   edits can be re-applied on top.
 - `src/lua/`: loose game-dir Lua (`client/pzopt/*.lua`); build.sh copies it under
   `build/classes/media/lua/` so `pzopt.sh` installs it into the game dir's `media/lua/` with the
-  classes. No mod to enable. Currently the "Menu framerate" Display-options combo.
+  classes. No mod to enable. Currently the "Menu framerate" Display-options combo
+  (`pzopt_framecap_options.lua`) and the "Optimizations" options tab
+  (`pzopt_optimizations_options.lua`: every Config key as a tick box or combo, saved to
+  `~/Zomboid/pzopt/options.ini`, applied on the next launch).
 - `src/shims/`: small replacement classes (e.g. the TISLogoState shim that skips the boot
   splash screens).
 - `src/pzopt/pzopt/`: our own package, committed.
@@ -28,7 +31,8 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
 | Class | Role |
 |---|---|
 | `FrameCap` | frame limiter: enables the stock "Uncapped" combo entry, snapshots the saved frameRate/uncappedFPS before `Core.loadOptions` clamps and re-saves them, persists caps above 244 and the forced-run restore marker, and holds the separate menu cap (`~/Zomboid/pzopt/framecap.ini`) the main loop reads via `uncappedNow()`/`lockNow()`; the "Menu framerate" combo is `src/lua/client/pzopt/pzopt_framecap_options.lua`, shipped loose into the game dir |
-| `Config` | runtime keys read from `pzopt.properties` in the game dir; DEFAULTS are the adopted optimizations (parallel, workers, wake, persistentVbo, trees/windows/translucentTiles InChunkTexture, bakeBudget 8, lightingBudget 8, hotsaveIntervalSec 30, cutawayFast, fileThreads, parallelDepthMaps, loaderCpuFixes, loadWorkers). `instrument=false` by default: harness runs pass `--prop instrument=true`. `uncappedFps=auto` honours the in-game frame-rate option; `true`/`false` force it per run. |
+| `Config` | runtime keys read from `pzopt.properties` in the game dir; DEFAULTS are the adopted optimizations (parallel, workers, wake, persistentVbo, trees/windows/translucentTiles InChunkTexture, bakeBudget 8, lightingBudget 8, hotsaveIntervalSec 30, cutawayFast, fileThreads, parallelDepthMaps, loaderCpuFixes, loadWorkers). `instrument=false` by default: harness runs pass `--prop instrument=true`. `uncappedFps=auto` honours the in-game frame-rate option; `true`/`false` force it per run. Lookup order: `-Dpzopt.<key>` > `pzopt.properties` > `~/Zomboid/pzopt/options.ini` (the Optimizations tab, `UserOptions`) > default; `value/defaultValue/pinnedBy(key)` serve the tab. |
+| `UserOptions` | the Optimizations tab's file (`~/Zomboid/pzopt/options.ini`): read once for Config, rewritten on every Apply; "Default" removes the key |
 | `RecalcPool` / `OrderedPublisher` / `StreamerWake` | parallel chunk recalc workers, ordered publication, waking the streamer |
 | `Harness` / `HarnessFlags` / `AutoStart` | in-game harness: reads the flag file, auto-continues into the bench save, presses click-to-start (bench/parity/drive only, never verify), forces zoom, drives the route (`roadFollow`), writes `pzopt-schedule.out`, `pzopt-bench.out` |
 | `Stats` | `pzopt-frames.out` / `pzopt-chunks.out` samplers |

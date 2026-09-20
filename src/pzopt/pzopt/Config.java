@@ -8,7 +8,10 @@ import java.util.Properties;
 /**
  * Runtime settings for the overrides, read once from pzopt.properties in the
  * game install directory (next to projectzomboid.jar, so scripts/pzopt.sh
- * status can show it) with -Dpzopt.<key> system properties overriding.
+ * status can show it) with -Dpzopt.<key> system properties overriding. Below both sits the
+ * player's Zomboid/pzopt/options.ini, written by the Options > Optimizations tab
+ * (pzopt.UserOptions); every key is exposed there (booleans as tick boxes, ints as combos) and
+ * takes effect on the next launch. A key set in pzopt.properties or -D is shown pinned in the tab.
  *
  * Keys:
  *   parallel    true/false   kill switch: false forces the stock single-threaded pass (default true)
@@ -93,7 +96,11 @@ import java.util.Properties;
  *                            spill reload), so this is a simplification, not the fix (default true)
  */
 public final class Config {
+   /** Every key read at init: key -> {effective value, default}, in declaration order (for the options tab). */
+   private static final java.util.LinkedHashMap<String, String[]> REGISTRY = new java.util.LinkedHashMap<>();
    private static final Properties props = load();
+   /** The player's Options > Optimizations choices (Zomboid/pzopt/options.ini), below props and -D. */
+   private static final Properties userProps = UserOptions.load();
    public static final boolean PARALLEL = bool("parallel", true);
    public static final int WORKERS = clampWorkers(integer("workers", Math.min(4, Runtime.getRuntime().availableProcessors() - 1)));
    public static final boolean INSTRUMENT = bool("instrument", false);
@@ -154,32 +161,74 @@ public final class Config {
       return p;
    }
 
+   /** -Dpzopt.<key>, then the install dir's pzopt.properties, then the player's options.ini. */
    private static String raw(String key) {
       String v = System.getProperty("pzopt." + key);
-      return v != null ? v : props.getProperty(key);
+      if (v == null) {
+         v = props.getProperty(key);
+      }
+      return v != null ? v : userProps.getProperty(key);
+   }
+
+   private static <T> T register(String key, T effective, T def) {
+      REGISTRY.put(key, new String[] {String.valueOf(effective), String.valueOf(def)});
+      return effective;
    }
 
    private static boolean bool(String key, boolean def) {
       String v = raw(key);
-      return v == null ? def : Boolean.parseBoolean(v.trim());
+      return register(key, v == null ? def : Boolean.parseBoolean(v.trim()), def);
    }
 
    private static String string(String key, String def) {
       String v = raw(key);
-      return v == null ? def : v.trim();
+      return register(key, v == null ? def : v.trim(), def);
    }
 
    private static int integer(String key, int def) {
       String v = raw(key);
       if (v == null) {
-         return def;
+         return register(key, def, def);
       }
       try {
-         return Integer.parseInt(v.trim());
+         return register(key, Integer.parseInt(v.trim()), def);
       } catch (NumberFormatException e) {
          Log.warn("bad integer for " + key + ": " + v + "; using " + def);
-         return def;
+         return register(key, def, def);
       }
+   }
+
+   // --- options tab (Options > Optimizations; see UserOptions) --------------------------------
+
+   /** Is this one of the keys read at init? */
+   public static boolean knows(String key) {
+      return key != null && REGISTRY.containsKey(key);
+   }
+
+   /** The value in force since boot (before the clamps some keys apply), or null for an unknown key. */
+   public static String value(String key) {
+      String[] r = key == null ? null : REGISTRY.get(key);
+      return r == null ? null : r[0];
+   }
+
+   /** The build's default on this machine, or null for an unknown key. */
+   public static String defaultValue(String key) {
+      String[] r = key == null ? null : REGISTRY.get(key);
+      return r == null ? null : r[1];
+   }
+
+   /**
+    * What pins the key above the player's options.ini: "-Dpzopt.<key>" or "pzopt.properties",
+    * or null when the menu choice is what counts.
+    */
+   public static String pinnedBy(String key) {
+      if (key == null) {
+         return null;
+      }
+      if (System.getProperty("pzopt." + key) != null) {
+         return "-Dpzopt." + key;
+      }
+      return props.getProperty(key) != null ? "pzopt.properties" : null;
    }
 
    /** At least 1, and never the full processor count: the render thread keeps one core. */
