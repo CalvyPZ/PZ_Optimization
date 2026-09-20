@@ -13,19 +13,21 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   (frame limiter, 2026-09-19), and skinnedmodel.model.Model (shader cache, issue #1, 2026-09-19
   night), and core.textures.ImageData (byte[] mipmap loops, issue #2, 2026-09-20), and the game-thread
   trims of 2026-09-20: iso.weather.fx.WeatherFxMask (mask scan gate), iso.objects.IsoLightSwitch
-  (electricity check cache), se.krka KahluaTableImpl (single-lookup rawget). Inner classes
+  (electricity check cache), se.krka KahluaTableImpl (single-lookup rawget), and
+  core.opengl.RenderThread (performance-overlay hooks, 2026-09-20). Inner classes
   are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md` and marked `// pzopt:` in the
   source.** After a game update, `scripts/regen-overrides.sh` decompiles the new jar so the
   edits can be re-applied on top.
-- `src/lua/`: loose game-dir Lua (`client/pzopt/*.lua`); build.sh copies it under
+- `src/lua/`: loose game-dir Lua (`client/pzopt/*.lua`, `shared/pzopt/*.lua`); build.sh copies it under
   `build/classes/media/lua/` so `pzopt.sh` installs it into the game dir's `media/lua/` with the
   classes. No mod to enable. Currently the "Menu framerate" Display-options combo
   (`pzopt_framecap_options.lua`) and the "Optimizations" options tab
   (`pzopt_optimizations_options.lua`: every Config key as a tick box or combo in nine titled
   categories (chunk textures ×2, cutaways/lighting/weather, sprite buffers, chunk streaming, boot ×2,
   world load ×2; 2026-09-20), saved to
-  `~/Zomboid/pzopt/options.ini`, applied on the next launch).
+  `~/Zomboid/pzopt/options.ini`, applied on the next launch), and the "Toggle performance
+  overlay" key binding (`shared/pzopt/pzopt_keybinding.lua`, default F9, listed after "Display FPS").
 - `src/shims/`: small replacement classes (e.g. the TISLogoState shim that skips the boot
   splash screens).
 - `src/pzopt/pzopt/`: our own package, committed.
@@ -40,6 +42,7 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
 | `RecalcPool` / `OrderedPublisher` / `StreamerWake` | parallel chunk recalc workers, ordered publication, waking the streamer |
 | `Harness` / `HarnessFlags` / `AutoStart` | in-game harness: reads the flag file, auto-continues into the bench save, presses click-to-start (bench/parity/drive only, never verify), forces zoom, drives the route (`roadFollow`), writes `pzopt-schedule.out`, `pzopt-bench.out` |
 | `Stats` | `pzopt-frames.out` / `pzopt-chunks.out` samplers |
+| `Overlay` | in-game performance overlay and frame log, the platform-independent replacement for MangoHud/RivaTuner (2026-09-20): presented-frame times from `RenderThread` after the swap, GPU busy from a `GL_TIME_ELAPSED` query around `SpriteRenderer.postRender`, game/render thread and process CPU from JMX, a 5 s window of fps / p99 / p99.9 / max / 1%-low / jitter / spikes, a verdict line (at cap, X bound, or nothing saturated), a frame graph; drawn from `Display.imguiEndFrame` (the last game-thread draw before `Core.EndFrameUI` hands the frame over). Keys `overlay` (show from boot), `overlayLog` (`Zomboid/pzopt-overlay.out`, MangoHud column names + `epoch_ms`; always on in harness runs), `overlayKey`, `overlayFont`, `overlayCorner`. Toggle with the "Toggle performance overlay" binding (F9). `analyze.py` reports it as `overlay:` next to `mangohud:` |
 | `Parity` | per-square recalc capture for the parity gate |
 | `LoadTrace` | stamps console lines with epoch ms into `pzopt-loadtrace.out` |
 | `BootAsync` / `BootPump` / `LuaPrecompiler` / `AnimClipCache` + `CachedAnimationTask` / `PackIndex` / `ScriptText` / `LotHeaders` / `FileTaskStats` / `ScriptDump` | boot and load work (2026-09-19 evening): FMOD init and animation-set parse on boot threads, file-pool pump during init, parallel Lua precompile cache, animation clip and texture-pack index caches under `~/Zomboid/pzopt/`, linear script text passes, per-cell lot-header memo, file-task timing, item field dump for equivalence checks |

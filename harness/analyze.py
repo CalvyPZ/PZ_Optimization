@@ -116,6 +116,13 @@ def summarize(run, skip_seconds=20):
         m = mangohud_summary(mh, run / "mangohud.name", bench)
         if m:
             out["mangohud"] = m
+    # the in-game overlay's log (pzopt.Overlay): same columns plus epoch_ms per row, so it
+    # windows itself; the platform-independent replacement for the MangoHud log
+    ov = run / "pzopt-overlay.out"
+    if ov.exists():
+        m = mangohud_summary(ov, run / "mangohud.name", bench)
+        if m:
+            out["overlay"] = m
     sysmon = run / "sysmon.csv"
     if sysmon.exists() and bench.exists():
         sm = sysmon_summary(sysmon, bench)
@@ -164,13 +171,17 @@ def mangohud_summary(mh, name_file, bench):
                 rows.append((float(parts[el_i]) / 1e9, float(parts[ft_i]), parts))
             except ValueError:
                 pass
-    # file name carries the log start time to the second: ProjectZomboid64_YYYY-MM-DD_HH-MM-SS.csv
-    import datetime, re
-    name = name_file.read_text().strip() if name_file.exists() else mh.name
-    m = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})", name)
     t_start = None
-    if m:
-        t_start = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}", "%Y-%m-%d %H:%M:%S").timestamp()
+    if "epoch_ms" in cols and rows:
+        # the overlay log stamps every row: the log start is the first row's epoch minus its elapsed
+        t_start = float(rows[0][2][cols["epoch_ms"]]) / 1000 - rows[0][0]
+    else:
+        # file name carries the log start time to the second: ProjectZomboid64_YYYY-MM-DD_HH-MM-SS.csv
+        import datetime, re
+        name = name_file.read_text().strip() if name_file.exists() else mh.name
+        m = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})", name)
+        if m:
+            t_start = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}", "%Y-%m-%d %H:%M:%S").timestamp()
     sel = rows
     if t_start is not None and bench.exists():
         kv = dict(l.split("=", 1) for l in bench.read_text().splitlines() if "=" in l)
@@ -197,7 +208,7 @@ def mangohud_summary(mh, name_file, bench):
     }
     # utilization columns, when the profile logged them
     util = {}
-    for k in ("cpu_load", "gpu_load", "gpu_core_clock", "gpu_mem_clock", "cpu_mhz", "gpu_power", "cpu_power", "gpu_temp", "cpu_temp", "gpu_vram_used", "ram_used", "process_rss"):
+    for k in ("cpu_load", "gpu_load", "game_load", "render_load", "gpu_ms", "gpu_core_clock", "gpu_mem_clock", "cpu_mhz", "gpu_power", "cpu_power", "gpu_temp", "cpu_temp", "gpu_vram_used", "ram_used", "process_rss"):
         if k not in cols:
             continue
         vals = []
@@ -305,7 +316,7 @@ def gc_summary(run):
     a, b = int(kv["route_start_epoch_ms"]) / 1000, int(kv["route_end_epoch_ms"]) / 1000
     collector = None
     events, pauses = [], []
-    pat = re.compile(r"^\[(\S+?)\]\[[\d.]+s\] GC\((\d+)\) (.*?) ([\d.]+)(ms|s)$")
+    pat = re.compile(r"^\[(\S+?)\]\[[\d.,]+s\] GC\((\d+)\) (.*?) ([\d.,]+)(ms|s)$")  # older runs logged comma decimals (LC_NUMERIC)
     for line in log.read_text().splitlines():
         if "Using" in line and "Garbage Collector" in line:
             collector = "G1" if "G1" in line else "ZGC" if "Z Garbage" in line else line.split("Using ")[1]
@@ -314,7 +325,7 @@ def gc_summary(run):
         if not m:
             continue
         t_end = datetime.datetime.fromisoformat(m.group(1)).timestamp()
-        ms = float(m.group(4)) * (1000 if m.group(5) == "s" else 1)
+        ms = float(m.group(4).replace(",", ".")) * (1000 if m.group(5) == "s" else 1)
         desc = m.group(3)
         if not (a <= t_end <= b):
             continue
@@ -365,10 +376,12 @@ def print_summary(s):
         print(f"frames: {f['count']} over {f['seconds']:.0f}s, {f['fps_mean']:.1f} fps mean")
         print(f"  frame  mean {fmt_us(u['mean'])}  p50 {fmt_us(u['p50'])}  p90 {fmt_us(u['p90'])}  p99 {fmt_us(u['p99'])}  p99.9 {fmt_us(u['p99_9'])}  max {fmt_us(u['max'])}")
         print(f"  frames >33ms: {f['over_33ms']}  >50ms: {f['over_50ms']}  >100ms: {f['over_100ms']}")
-    m = s.get("mangohud")
-    if m:
+    for src in ("mangohud", "overlay"):
+        m = s.get(src)
+        if not m:
+            continue
         u = m["us"]
-        print(f"mangohud: {m['count']} frames over {m['seconds']:.0f}s{' (route window)' if m['windowed'] else ''}, {m['count'] / m['seconds']:.1f} fps mean")
+        print(f"{src}: {m['count']} frames over {m['seconds']:.0f}s{' (route window)' if m['windowed'] else ''}, {m['count'] / m['seconds']:.1f} fps mean")
         print(f"  frame  mean {fmt_us(u['mean'])}  p50 {fmt_us(u['p50'])}  p90 {fmt_us(u['p90'])}  p99 {fmt_us(u['p99'])}  p99.9 {fmt_us(u['p99_9'])}  max {fmt_us(u['max'])}  >33ms: {m['over_33ms']}")
         print(f"  consistency: stdev {fmt_us(m['stdev_us'])}  frame-to-frame jitter {fmt_us(m['jitter_us'])}  1%-low {m['fps_1pct_low']:.0f} fps  frames below the {FPS_TARGET:.0f} fps cap: {m['under_cap_share'] * 100:.1f}%")
         ut = m.get("util")
@@ -376,7 +389,7 @@ def print_summary(s):
             def f(k, unit="", scale=1):
                 d = ut.get(k)
                 return f"{k} {d['mean'] * scale:.0f}{unit} (p10 {d['p10'] * scale:.0f}, p90 {d['p90'] * scale:.0f})" if d else None
-            parts = [x for x in (f("cpu_load", "%"), f("gpu_load", "%"), f("gpu_core_clock", "MHz"), f("cpu_mhz", "MHz"), f("gpu_power", "W"), f("cpu_power", "W")) if x]
+            parts = [x for x in (f("cpu_load", "%"), f("gpu_load", "%"), f("game_load", "% of a core"), f("render_load", "% of a core"), f("gpu_core_clock", "MHz"), f("cpu_mhz", "MHz"), f("gpu_power", "W"), f("cpu_power", "W")) if x]
             print("  utilization: " + "; ".join(parts))
     sm = s.get("sysmon")
     if sm:

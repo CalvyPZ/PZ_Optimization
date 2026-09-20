@@ -73,6 +73,21 @@ local SECTIONS = {
         },
     },
     {
+        title = "Performance overlay (F9, or the \"Toggle performance overlay\" key binding)",
+        entries = {
+            { key = "overlay", label = "Show the overlay from boot",
+              tip = "Frame rate, frame-time tail (p99, p99.9, max, 1%-low, jitter, spikes), GPU busy share, game and render thread load, and a frame-time graph. The key toggles it any time." },
+            { key = "overlayLog", label = "Log every presented frame",
+              tip = "Writes Zomboid/pzopt-overlay.out, one CSV row per frame in MangoHud's column names, for harness/analyze.py. Harness runs log regardless." },
+            { key = "overlayCorner", label = "Overlay corner",
+              choices = { "tl", "tr", "bl", "br" },
+              tip = "Where the overlay sits: top-left, top-right, bottom-left, bottom-right." },
+            { key = "overlayFont", label = "Overlay font",
+              choices = { "CodeMedium", "CodeSmall", "CodeLarge", "Small", "Medium", "Large" },
+              tip = "The UI font the overlay text uses." },
+        },
+    },
+    {
         title = "Chunk streaming",
         entries = {
             { key = "parallel", label = "Parallel chunk loading",

@@ -120,6 +120,11 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   there, 230 → 238.5 on the 100 s route. No gain from bakeBudget=3, uiRenderOffscreen or
   lightingRebakeMs=1000. Game thread now 97 % busy with broad work (bakes 20 %, world update 23 %,
   Lua UI 10 %): 240 locked on that route needs a structural change, not more trims.
+- In-game performance overlay (2026-09-20, `pzopt.Overlay`, F9 or `--prop overlay=true`): presented
+  frame time, p99/p99.9/max/1%-low/jitter/spikes over 5 s, GPU busy (GL timer query), game/render
+  thread load, verdict line, frame graph; every harness run also writes `pzopt-overlay.out`
+  (MangoHud columns + epoch_ms) and `analyze.py` prints it as `overlay:`. Same numbers on
+  Windows/Linux without MangoHud or RivaTuner. The stock "Display FPS" graph (K) is debug-only bars.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under

@@ -85,7 +85,7 @@ real above twice that.
 
 | Script | Reads | Gives |
 |---|---|---|
-| `analyze.py <run>` | pzopt-frames/chunks.out, mangohud CSV, sysmon | route-window frame stats, chunk latency, per-thread CPU. First check a run is valid (mangohud + sysmon + threads lines present) |
+| `analyze.py <run>` | pzopt-frames/chunks.out, mangohud CSV, pzopt-overlay.out (in-game overlay log, same shape), sysmon | route-window frame stats, chunk latency, per-thread CPU. First check a run is valid (mangohud + sysmon + threads lines present) |
 | `compare.py --baseline <dir> <runs>` | analyze output | deltas vs stock with noise verdict |
 | `dashboard.py` | all runs | `docs/benchmark-progress.html`; regenerate after every run |
 | `waits.py <run>` | JFR wait events (`--jfr --jfr-setting jdk.JavaMonitorWait#threshold=0ms` etc.) | per-thread blocking sites in the route window |

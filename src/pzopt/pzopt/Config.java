@@ -152,6 +152,11 @@ public final class Config {
    public static final int LOAD_WORKERS = clampWorkers(integer("loadWorkers", Math.max(WORKERS, Runtime.getRuntime().availableProcessors() / 2)));
    public static final boolean SHADER_CACHE = bool("shaderCache", true);
    public static final boolean MIPMAP_ARRAYS = bool("mipmapArrays", true);
+   public static final boolean OVERLAY = bool("overlay", false);
+   public static final boolean OVERLAY_LOG = bool("overlayLog", false);
+   public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent
+   public static final String OVERLAY_FONT = string("overlayFont", "CodeMedium");
+   public static final String OVERLAY_CORNER = string("overlayCorner", "tl");
 
    private Config() {
    }

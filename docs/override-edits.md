@@ -802,3 +802,26 @@ rasterize lambdas; renamed, marked `// pzopt: decompiler fix`).
    The metatable fallback is unchanged. The reload-replace and data-breakpoint
    code before it is untouched.
 
+## zombie.core.opengl.RenderThread (added 2026-09-20, performance overlay)
+
+Three one-line hooks in `lockStepRenderStep`, all into `pzopt.Overlay`, plus the load
+marker `static {}` block. Inside the `spriteRendererPostRender` probe,
+`pzopt.Overlay.gpuBegin()` precedes `SpriteRenderer.instance.postRender()` and
+`pzopt.Overlay.gpuEnd()` follows it: a `GL_TIME_ELAPSED` query around the frame's
+draw-command replay, which is the frame's GPU work (the swap is outside it). After the
+`displayUpdate` probe closes, before the stock `FPSGraph.addRender` call,
+`pzopt.Overlay.onSwap()` records the presented-frame time, the same instant MangoHud
+logs from. With the build guard off every hook is a static boolean test.
+
+## org.lwjglx.opengl.Display (second edit, 2026-09-20, performance overlay)
+
+First statement of `imguiEndFrame()`: `pzopt.Overlay.draw();`. `Core.EndFrameUI` calls
+this method on the game thread after the UI FBO has been composited onto the screen and
+immediately before `IndieGL.glDoEndFrame()` / `RenderThread.Ready()` hand the frame to the
+render thread, so sprites queued here are the last thing on top of every state (menus,
+loading screen, world). A draw at the end of `GameWindow.renderInternal` was tried first
+and never showed: the hand-off has already happened by then. The overlay draws through
+`TextManager` and `SpriteRenderer`, so it needs no Lua and no external HUD. See
+`pzopt.Overlay` for what it shows and the `overlay*` Config keys. The other two callers of
+`imguiEndFrame` (exception paths in `GameWindow.logic`, ImGui only) just draw one more
+overlay frame.

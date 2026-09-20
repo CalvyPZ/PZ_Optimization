@@ -659,6 +659,7 @@ public class Display {
    }
 
    public static ImDrawData imguiEndFrame() {
+      pzopt.Overlay.draw(); // pzopt: performance overlay; Core.EndFrameUI calls this after the UI composite and right before it hands the frame to the render thread
       if (!Core.isImGui()) {
          return null;
       }

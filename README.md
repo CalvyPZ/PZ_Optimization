@@ -22,8 +22,8 @@ a machine you play on.
 > GPU-bound at max zoom either way, so the monitor only hides the difference; it
 > does not change the stock numbers. Every result below and every harness run was
 > taken with it off (A/B/A on the 120 km/h route: 164 fps with it on, 237 fps off;
-> see `docs/results.md`, 2026-09-19). Use MangoHud, RivaTuner or the in-game FPS
-> counter instead.
+> see `docs/results.md`, 2026-09-19). Use the build's own performance overlay
+> (F9, see [Performance overlay](#performance-overlay)), MangoHud or RivaTuner instead.
 
 ---
 
@@ -32,7 +32,7 @@ a machine you play on.
 1. [Results at a glance](#results-at-a-glance)
 2. [Install on Windows](#install-on-windows)
 3. [Install on Linux](#install-on-linux)
-4. [Settings](#settings) ([in the game menu](#in-the-game-menu), [in a file](#in-a-file))
+4. [Settings](#settings) ([in the game menu](#in-the-game-menu), [performance overlay](#performance-overlay), [in a file](#in-a-file))
 5. [Uninstall](#uninstall)
 6. [After a game update](#after-a-game-update)
 7. [How the optimizations work](#how-the-optimizations-work)
@@ -389,6 +389,36 @@ Display & Performance keeps the stock layout and gains the **Uncapped** entry, t
 300 to 500 fps caps and the separate **Menu framerate** combo:
 
 ![Options > Display & Performance with the extended Lock Framerate combo and the Menu framerate combo](docs/media/options-display-tab.jpg)
+
+### Performance overlay
+
+Press **F9** (the "Toggle performance overlay" key binding, listed after "Display FPS")
+for the build's own profiler. It is drawn by the game itself, so it reads the same on
+Windows and Linux, in the menus, on the loading screen and in the world, with no
+MangoHud or RivaTuner:
+
+![The performance overlay in the world: fps, frame-time tail, utilization, verdict and frame graph](docs/media/performance-overlay.png)
+
+- **Frames**: fps, mean frame time and the active cap; p50 / p99 / p99.9 / max over the
+  last 5 s; 1 %-low fps, frame-to-frame jitter and the number of spikes above twice the
+  median. Frame times are taken at the swap, the instant MangoHud logs from.
+- **Utilization**: GPU busy share (a GL timer query around the frame's draw commands),
+  game-thread and render-thread load as a share of one core, the process's share of
+  all cores, the machine's, and the heap.
+- **Verdict**: "at the cap", "below cap: game thread / render thread / GPU bound", or
+  "below cap, nothing saturated: waits or sync". The last one is the case worth
+  reporting: the frame rate is under the cap and no resource is full.
+- **Graph**: the last 240 frames as bars (green at budget, amber above it, red past
+  twice), the cap's budget as a line, the GPU time of each frame in blue.
+
+The "Performance overlay" group in Options > Optimizations shows it from boot, picks
+the corner and the font, and turns on the frame log: `Zomboid/pzopt-overlay.out`,
+one CSV row per presented frame in MangoHud's column names (`fps`, `frametime`,
+`cpu_load`, `gpu_load`) plus `gpu_ms`, `game_load`, `render_load` and `epoch_ms`.
+Every harness run writes that log and `harness/analyze.py` reports it as `overlay:`
+next to the MangoHud line, so a Windows run has the same frame-tail and utilization
+numbers as a Linux one. The stock "Display FPS" key (K) still shows the game's own
+debug graph, which is frames per second only.
 
 ### In a file
 
@@ -893,7 +923,9 @@ PZDashboard mod off so its 2 s collectors stay out of the tail.
 
 **Windows:** `harness/run-win.ps1` runs the bench through Steam, samples CPU and
 GPU load with `Get-Counter` and `nvidia-smi`, and the analysis scripts run on any
-Python 3 (the embeddable build is enough). No MangoHud, JFR or recording. The game
+Python 3 (the embeddable build is enough). No MangoHud, JFR or recording; the
+frame-time tail and utilization come from the in-game overlay's log
+(`pzopt-overlay.out`, see [Performance overlay](#performance-overlay)). The game
 pauses on focus loss, so keep the window focused during a run.
 
 ```powershell

@@ -141,6 +141,7 @@ public final class Harness {
    private static void requestQuit() {
       quitRequestedEpochMs = System.currentTimeMillis();
       Log.info("harness: quit requested");
+      Overlay.flushLog();
       Core.getInstance().quit();
       // frames stop once the world is gone, so the escalation cannot rely on onFrame:
       // a timer thread closes the window after 15 s and ends the process after 30 s
