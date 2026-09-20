@@ -615,3 +615,37 @@ hand-off and bakes, the same bursts the 03:10 game-thread pass attributed on the
 JVM flags are exhausted as a lever here. Kept anyway: no 50 ms stop-the-world hits, no
 heap growth, no hsperfdata writes, for ~1 GB more RSS and a slightly longer boot
 (`AlwaysPreTouch`).
+
+## 2026-09-20 (12:10–13:10): uncapped 400 fps pass on the spinning Rosewood route
+
+Route as the game-thread pass (`--flag route=S:450 --flag turn=90 --route-seconds 25`, max zoom,
+5120x2160, NVIDIA GL, Steam launcher, no dashboard) but uncapped (`--prop uncappedFps=true`), frame
+source the in-game overlay log (`--no-mangohud`), JFR at 1 ms. Every run used the maintainer's
+Optimizations-tab file (persistentVbo, translucentTilesInChunkTexture on). Full table, GPU
+breakdown and the structural remainder in `docs/plan-400fps.md`.
+
+| run | change | fps mean | p50 | p90 | p99 | p99.9 | game thread | GPU |
+|---|---|---|---|---|---|---|---|---|
+| u400-base-1 | previous build, UI drawn every frame | 272.8 | 2.8 | 6.3 | 13.2 | 27.8 | 98 % | 80 % |
+| u400-uifbo-2 | stock option `uiRenderOffscreen=true` | 374.3 | 1.9 | 4.8 | 12.3 | 23.4 | 93 % | 89 % |
+| u400-it1-1 | + cutawayInvalidateChanged, soundZoneCache, lightInfoOncePerFrame | 442.2 | 1.7 | 3.8 | 9.5 | 18.3 | 91 % | 92 % |
+| u400-it4-1 | + chunkHandoffDivisor=8, occlusionSkipLightingOnly | 454.2 | 1.7 | 3.7 | 9.0 | 18.4 | 89 % | 92 % |
+| u400-it8-1 | + cutawayVisitPrefilter | 466.1 | 1.7 | 3.4 | 8.6 | 18.6 | 90 % | 93 % |
+| u400-it9-1 | + lightInfoChunkGate | 500.8 | 1.6 | 3.1 | 7.7 | 16.8 | 89 % | 93 % |
+| u400-final-1 | final build, confirmation | 499.1 | 1.6 | 3.2 | 7.6 | 15.1 | 89 % | 94 % |
+
+Caveat found while recording the video: the game's Steam launch options are
+`harness/steam-launch.sh mangohud %command%`, so the MangoHud HUD was drawn (the maintainer's
+full config) on every run above even with `--no-mangohud`; it depresses the absolute numbers
+(same build: 273 fps with the HUD in u400-base-1 vs 391 fps with `MANGOHUD_CONFIG=no_display`
+in u400show-prev-1, UI drawn every frame in both) but was identical across the runs, so the
+deltas hold. The recordings for `docs/media/rosewood-spin-uncapped-stock-vs-optimized-vs-all-hdr.mp4`
+(u400show-stock-2 / -prev-1 / -all-1) hide it: stock settings 114 fps mean, p99 31.4 ms;
+optimized before the pass 391 fps, p99 10.2 ms; all optimizations 492 fps, p99 7.7 ms.
+
+No gain: weatherFxScalePct=50, lightingRebakeMs=1000, bakeBudget=4; uiRenderFPS=60 +2 % (noise).
+The whole weather FX pass off is +11 % (measurement only). Verdict against the objective: the
+mean is past 400 but the frame is not locked; ~13 % of frames exceed 2.5 ms, all of them chunk
+streaming on the game thread (loot roll, new-row bakes, cutaway data) or the UI FBO refresh,
+and from ~450 fps the GPU (chunk composite + bakes) is saturated, so the machine is now used to
+the max on both sides at this resolution.

@@ -383,6 +383,7 @@ public final class FBORenderCell {
    }
 
    private void renderTilesInternal(int maxHeight) {
+      pzopt.GpuSections.frame(IsoWorld.instance.getFrameNo()); // pzopt: GPU sections per-frame tick
       FBORenderChunkManager.instance.recycle();
       if (DebugOptions.instance.terrain.renderTiles.enable.getValue()) {
          if (IsoCell.floorRenderShader == null) {
@@ -552,7 +553,7 @@ public final class FBORenderCell {
          }
 
          perPlayerData1.occlusionChanged = false;
-         if (FBORenderOcclusion.getInstance().enabled && this.hasAnyDirtyChunkTextures(playerIndex)) {
+         if (FBORenderOcclusion.getInstance().enabled && this.pzoptHasDirtyChunkTexturesForOcclusion(playerIndex)) {
             perPlayerData1.occlusionChanged = true;
             int sizex = (perPlayerData1.occludedGridX2 - perPlayerData1.occludedGridX1 + 1)
                * (perPlayerData1.occludedGridY2 - perPlayerData1.occludedGridY1 + 1);
@@ -1368,7 +1369,7 @@ public final class FBORenderCell {
          AbstractPerformanceProfileProbe var10 = renderOneChunk.profile();
 
          try {
-            this.renderOneChunk(c, perPlayerRender, playerIndex, currentTimeMillis, floorRenderShader, wallRenderShader);
+            this.renderOneChunk(c, perPlayerRender, playerIndex, currentTimeMillis, floorRenderShader, wallRenderShader); // pzopt: (a per-chunk GPU section here cost 600 queries a frame; bake + composite cover it)
          } catch (Throwable var28) {
             if (var10 != null) {
                try {
@@ -1389,7 +1390,9 @@ public final class FBORenderCell {
       SpriteRenderer.instance.endProfile(tilesProbe);
       FBORenderCorpses.getInstance().update();
       FBORenderItems.getInstance().update();
+      pzopt.GpuSections.begin("composite"); /* pzopt: GPU section: chunk textures into the combined FBO and onto the screen */
       FBORenderChunkManager.instance.endFrame();
+      pzopt.GpuSections.end("composite");
       FBORenderShadows.getInstance().clear();
       this.renderPlayers(playerIndex);
       this.renderCorpseShadows(playerIndex);
@@ -1400,7 +1403,7 @@ public final class FBORenderCell {
 
       if (!DebugOptions.instance.fboRenderChunk.itemsInChunkTexture.getValue()) {
          SpriteRenderer.instance.beginProfile(itemsProbe);
-         this.renderItemsInWorld(playerIndex);
+         pzopt.GpuSections.begin("items"); /* pzopt: GPU section */ this.renderItemsInWorld(playerIndex); pzopt.GpuSections.end("items");
          SpriteRenderer.instance.endProfile(itemsProbe);
       }
 
@@ -1428,12 +1431,12 @@ public final class FBORenderCell {
 
       this.renderOpaqueObjectsEvent(playerIndex);
       SpriteRenderer.instance.beginProfile(movingObjectsProbe);
-      this.renderMovingObjects();
+      pzopt.GpuSections.begin("moving"); /* pzopt: GPU section */ this.renderMovingObjects(); pzopt.GpuSections.end("moving");
       SpriteRenderer.instance.endProfile(movingObjectsProbe);
       AbstractPerformanceProfileProbe var30 = water.profile();
 
       try {
-         this.renderWater(playerIndex);
+         pzopt.GpuSections.begin("water"); /* pzopt: GPU section */ this.renderWater(playerIndex); pzopt.GpuSections.end("water");
       } catch (Throwable var26) {
          if (var30 != null) {
             try {
@@ -1460,7 +1463,7 @@ public final class FBORenderCell {
          AbstractPerformanceProfileProbe var34 = translucentFloor.profile();
 
          try {
-            this.renderTranslucentFloorObjects(playerIndex, z, floorRenderShader, wallRenderShader, currentTimeMillis);
+            pzopt.GpuSections.begin("translucentFloor"); /* pzopt: GPU section */ this.renderTranslucentFloorObjects(playerIndex, z, floorRenderShader, wallRenderShader, currentTimeMillis); pzopt.GpuSections.end("translucentFloor");
          } catch (Throwable var25) {
             if (var34 != null) {
                try {
@@ -1539,7 +1542,7 @@ public final class FBORenderCell {
          var34 = translucentNonFloor.profile();
 
          try {
-            this.renderTranslucentObjects(playerIndex, z, floorRenderShader, wallRenderShader, currentTimeMillis);
+            pzopt.GpuSections.begin("translucent"); /* pzopt: GPU section */ this.renderTranslucentObjects(playerIndex, z, floorRenderShader, wallRenderShader, currentTimeMillis); pzopt.GpuSections.end("translucent");
          } catch (Throwable var22) {
             if (var34 != null) {
                try {
@@ -1746,6 +1749,7 @@ public final class FBORenderCell {
          int frameNo = IsoWorld.instance.getFrameNo();
          boolean canRender = true;
          boolean isDirty = FBORenderChunkManager.instance.beginRenderChunkLevel(c, level, zoom, canRender, true);
+         if (isDirty && canRender) pzopt.GpuSections.begin("bake"); // pzopt: GPU section
          if (DebugOptions.instance.delayObjectRender.getValue()) {
             canRender = frameNo == c.loadedFrame || frameNo >= c.renderFrame;
          }
@@ -2277,6 +2281,7 @@ public final class FBORenderCell {
                }
 
                FBORenderChunkManager.instance.endRenderChunkLevel(c, level, zoom, true);
+               pzopt.GpuSections.end("bake"); // pzopt: GPU section
                return;
             }
 
@@ -3748,6 +3753,14 @@ public final class FBORenderCell {
          pzoptBakeFlags[b] = 0;
       }
       pzoptBakesTotal = 0;
+      sb.append(" | cutaway visits=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptCutawayVisits) // pzopt: 400 fps pass counters
+         .append(" chunks invalidated=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptCutawayChunksInvalidated)
+         .append(" squares changed=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptCutawayChangedSquares)
+         .append(" walls visited=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptWallsVisited)
+         .append(" skipped=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptWallsSkipped)
+         .append(" | occlusion rebuilds skipped=").append(pzoptOcclusionRebuildsSkipped)
+         .append(" light info skipped=").append(pzoptLightInfoSkipped).append(" levels gated=").append(pzoptLightInfoLevelsGated);
+      sb.append(pzopt.GpuSections.summary()); // pzopt: GPU sections (Config.GPU_SECTIONS)
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));
@@ -4029,6 +4042,39 @@ public final class FBORenderCell {
       return renderLevels.isOnScreen(level) && LightingJNI.getChunkDirty(playerIndex, chunk.wx, chunk.wy, level + 32);
    }
 
+   /**
+    * pzopt: cacheLightInfo is a JNI call per square, and the same square is asked twice in one frame when its chunk
+    * level is both texture-dirty (prepareChunkForUpdating) and lighting-dirty (updateChunkLighting). The lighting
+    * results only change in LightingThread.update, which runs before the render, so the second call within a
+    * frame is skipped (Config.LIGHT_INFO_ONCE_PER_FRAME). Stamps live on the chunk per player and level.
+    */
+   private static void pzoptCacheLightInfo(int playerIndex, IsoChunk chunk, int level, int index, IsoGridSquare square) {
+      if (pzopt.Config.LIGHT_INFO_ONCE_PER_FRAME && pzopt.Overrides.enabled() && level >= -32 && level < 32) {
+         int[][] stamps = chunk.pzoptLightInfoFrame;
+         if (stamps == null) {
+            stamps = new int[256][];
+            chunk.pzoptLightInfoFrame = stamps;
+         }
+         int row = playerIndex * 64 + level + 32;
+         int[] r = stamps[row];
+         if (r == null) {
+            r = new int[64];
+            Arrays.fill(r, Integer.MIN_VALUE);
+            stamps[row] = r;
+         }
+         int frame = IsoWorld.instance.getFrameNo();
+         if (r[index] == frame) {
+            pzoptLightInfoSkipped++;
+            return;
+         }
+         r[index] = frame;
+      }
+      square.cacheLightInfo();
+   }
+
+   public static long pzoptLightInfoSkipped; // pzopt: counter for the log
+   public static long pzoptLightInfoLevelsGated;
+
    private boolean pzoptCacheChunkLevelLightInfo(int playerIndex, IsoChunk chunk, int level) {
       if (level < chunk.minLevel || level > chunk.maxLevel) {
          return false;
@@ -4039,7 +4085,7 @@ public final class FBORenderCell {
       for (int i = 0; i < squares.length; i++) {
          IsoGridSquare square = squares[i];
          if (square != null && levelData.shouldRenderSquare(playerIndex, square)) {
-            square.cacheLightInfo();
+            pzoptCacheLightInfo(playerIndex, chunk, level, i, square); // pzopt: once per frame
          }
       }
 
@@ -4063,7 +4109,7 @@ public final class FBORenderCell {
          for (int i = 0; i < squares.length; i++) {
             IsoGridSquare square = squares[i];
             if (square != null && levelData.shouldRenderSquare(playerIndex, square)) {
-               square.cacheLightInfo();
+               pzoptCacheLightInfo(playerIndex, chunk, level, i, square); // pzopt: once per frame
             }
          }
 
@@ -4244,6 +4290,40 @@ public final class FBORenderCell {
       }
    }
 
+   /**
+    * pzopt: the occluded-squares grid (and, through occlusionChanged, every on-screen level's rendered-squares count)
+    * is rebuilt whenever any on-screen chunk level is dirty. A level dirty for lighting only (flag 32: daylight or a
+    * light source drifted) has the same squares, vision matrix and cutaway flags, so its occluders are unchanged;
+    * with Config.OCCLUSION_SKIP_LIGHTING_ONLY such frames keep the previous grid, exactly like a frame with no dirty
+    * level does in stock. Any other dirty reason still rebuilds.
+    */
+   private boolean pzoptHasDirtyChunkTexturesForOcclusion(int playerIndex) {
+      if (!pzopt.Config.OCCLUSION_SKIP_LIGHTING_ONLY || !pzopt.Overrides.enabled()) {
+         return this.hasAnyDirtyChunkTextures(playerIndex);
+      }
+      float zoom = Core.getInstance().getZoom(playerIndex);
+      FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
+      boolean lightingOnly = false;
+      for (int i = 0; i < perPlayerData1.onScreenChunks.size(); i++) {
+         IsoChunk c = perPlayerData1.onScreenChunks.get(i);
+         FBORenderLevels renderLevels = c.getRenderLevels(playerIndex);
+         for (int z = c.minLevel; z <= c.maxLevel; z++) {
+            if (renderLevels.isOnScreen(z) && renderLevels.isDirty(z, zoom)) {
+               if (renderLevels.isDirty(z, ~32L, zoom)) {
+                  return true;
+               }
+               lightingOnly = true;
+            }
+         }
+      }
+      if (lightingOnly) {
+         pzoptOcclusionRebuildsSkipped++;
+      }
+      return false;
+   }
+
+   public static long pzoptOcclusionRebuildsSkipped; // pzopt: counter for the log
+
    private boolean hasAnyDirtyChunkTextures(int playerIndex) {
       float zoom = Core.getInstance().getZoom(playerIndex);
       FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
@@ -4403,13 +4483,21 @@ public final class FBORenderCell {
 
             for (int z2 = minLevel; z2 <= maxLevel; z2++) {
                ChunkLevelData levelData = chunk.getCutawayDataForLevel(z2);
+               // pzopt: Config.LIGHT_INFO_CHUNK_GATE. cacheLightInfo per square asks the lighting engine (JNI) whether the
+               // square is dirty; the engine also answers per chunk level, which stock's own lighting refresh uses as its
+               // gate. One chunk-level question replaces 64 square questions when nothing in the level changed.
+               boolean pzoptRefresh = !(pzopt.Config.LIGHT_INFO_CHUNK_GATE && pzopt.Overrides.enabled())
+                  || LightingJNI.getChunkDirty(playerIndex, chunk.wx, chunk.wy, z2 + 32);
+               if (!pzoptRefresh) {
+                  pzoptLightInfoLevelsGated++;
+               }
 
                for (int y = 0; y < 8; y++) {
                   for (int x = 0; x < 8; x++) {
                      IsoGridSquare sq = chunk.getGridSquare(x, y, z2);
                      levelData.squareFlags[playerIndex][x + y * 8] = 0;
                      if (sq != null) {
-                        sq.cacheLightInfo();
+                        if (pzoptRefresh) pzoptCacheLightInfo(playerIndex, chunk, z2, x + y * 8, sq); // pzopt: once per frame, dirty levels only
                         if (sq.getLightInfo(playerIndex) != null && this.shouldRenderSquare(sq)) {
                            levelData.squareFlags[playerIndex][x + y * 8] = (byte)(levelData.squareFlags[playerIndex][x + y * 8] | 1);
                         }

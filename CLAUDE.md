@@ -128,7 +128,17 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   thread load, verdict line, frame graph; every harness run also writes `pzopt-overlay.out`
   (MangoHud columns + epoch_ms) and `analyze.py` prints it as `overlay:`. Same numbers on
   Windows/Linux without MangoHud or RivaTuner. The stock "Display FPS" graph (K) is debug-only bars.
-- Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
+- Uncapped 400 fps pass (2026-09-20 evening, `docs/plan-400fps.md`, runs `u400-*`, in-game overlay log
+  only, `--no-mangohud`): spinning route 273 → ~500 fps mean, p99 13.2 → 7.7 ms. Stock option
+  `uiRenderOffscreen=true` is +40 % uncapped (runs pass `--option uiRenderOffscreen=true`). Adopted
+  keys: cutawayInvalidateChanged, cutawayVisitPrefilter, lightInfoOncePerFrame, lightInfoChunkGate,
+  occlusionSkipLightingOnly, soundZoneCache, chunkHandoffDivisor=8. Dead ends: weatherFxScalePct,
+  lightingRebakeMs=1000, bakeBudget=4, hotsaveStaged (off: cross-file consistency). GPU is the wall
+  from ~450 fps (`pzopt.GpuSections`, `--prop gpuSections=true`: chunk composite ~0.6 ms, bakes
+  ~0.3-0.5 ms a frame). `harness/gametree.py` prints the game-thread call tree from a JFR run.
+  Never build or decompile while a run is going; check `pzopt.sh status` says installed before a launch.
+- Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
+  `docs/plan-400fps.md` (the locked-400 structural items).
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under
   GLX). `docs/plan-wayland.md`.

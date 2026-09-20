@@ -180,8 +180,8 @@ public class WeatherFxMask {
          return false;
       }
 
-      int width = Core.getInstance().getScreenWidth();
-      int height = Core.getInstance().getScreenHeight();
+      int width = pzoptFxSize(Core.getInstance().getScreenWidth()); // pzopt: weather FX buffers at WEATHER_FX_SCALE_PCT
+      int height = pzoptFxSize(Core.getInstance().getScreenHeight());
       if (fboMask != null && fboParticles != null && fboMask.getTexture().getWidth() == width && fboMask.getTexture().getHeight() == height) {
          return fboMask != null && fboParticles != null;
       }
@@ -656,6 +656,34 @@ public class WeatherFxMask {
     * the player stands in, so with neither there is nothing to find. Stock rasterizes the whole view every frame
     * regardless (isInteriorLocation per exterior tile), which at max zoom is tens of thousands of squares.
     */
+   /**
+    * pzopt: the weather mask and particle buffers (clouds, fog, rain and the interior mask they are cut by) are
+    * screen-sized and cleared, drawn and composited every frame; on a 5120x2160 screen that pass is ~11 % of the
+    * uncapped frame (u400-it2-nofx-1, 2026-09-20). Their content is soft, so they are rendered at
+    * Config.WEATHER_FX_SCALE_PCT of the screen size: smaller textures, a matching viewport for the FX frames (the
+    * projection stays in world units), and the two composites sample the scaled texels. 100 = stock. Split screen
+    * keeps stock (the FX viewport offsets per player are not scaled here).
+    */
+   private static float pzoptFxScale() {
+      if (!pzopt.Overrides.enabled() || IsoPlayer.numPlayers > 1) {
+         return 1.0F;
+      }
+      int pct = pzopt.Config.WEATHER_FX_SCALE_PCT;
+      return pct >= 100 || pct < 10 ? 1.0F : pct / 100.0F;
+   }
+
+   private static int pzoptFxSize(int screenPixels) {
+      float s = pzoptFxScale();
+      return s == 1.0F ? screenPixels : Math.max(1, Math.round(screenPixels * s));
+   }
+
+   private static void pzoptFxViewport() {
+      if (pzoptFxScale() == 1.0F || fboMask == null) {
+         return;
+      }
+      SpriteRenderer.instance.glViewport(0, 0, fboMask.getTexture().getWidth(), fboMask.getTexture().getHeight());
+   }
+
    private static boolean pzoptScanIsNoop(WeatherFxMask.PlayerFxMask playerFxMask) {
       if (!pzopt.Config.WEATHER_MASK_IDLE_SKIP || !pzopt.Overrides.enabled()) {
          return false;
@@ -718,6 +746,18 @@ public class WeatherFxMask {
    }
 
    public static void renderFxMask(int nPlayer) {
+      if (pzopt.Config.DEV_WEATHER_FX_OFF && pzopt.Overrides.enabled()) { // pzopt: measurement switch, whole pass off
+         return;
+      }
+      pzopt.GpuSections.begin("fx"); // pzopt: GPU section (whole weather pass)
+      try {
+         pzoptRenderFxMask(nPlayer);
+      } finally {
+         pzopt.GpuSections.end("fx");
+      }
+   }
+
+   private static void pzoptRenderFxMask(int nPlayer) { // pzopt: the stock body of renderFxMask
       if (!(IsoCamera.frameState.camCharacterZ < 0.0F)) {
          if (DebugOptions.instance.weather.fx.getValue()) {
             if (!GameServer.server) {
@@ -848,6 +888,7 @@ public class WeatherFxMask {
       renderingMask = true;
       SpriteRenderer.instance.glBuffer(4, nPlayer);
       SpriteRenderer.instance.glDoStartFrameFx(ow, oh, nPlayer);
+      pzoptFxViewport(); // pzopt: draw into the reduced-size FX buffer
       IsoWorld.instance.getCell().drawStencilMask();
       IndieGL.glDepthMask(true);
       IndieGL.enableDepthTest();
@@ -935,6 +976,7 @@ public class WeatherFxMask {
       IndieGL.disableDepthTest();
       SpriteRenderer.instance.glBuffer(6, nPlayer);
       SpriteRenderer.instance.glDoStartFrameFx(ow, oh, nPlayer);
+      pzoptFxViewport(); // pzopt: draw into the reduced-size FX buffer
       if (!doClouds && !doFog && !doPrecip) {
          Color c = RenderSettings.getInstance().getMaskClearColorForPlayer(nPlayer);
          SpriteRenderer.glBlendfuncEnabled = true;
@@ -953,7 +995,7 @@ public class WeatherFxMask {
       if (maskingEnabled) {
          IndieGL.glBlendFunc(scrMerge, dstMerge);
          SpriteRenderer.instance.glBlendEquation(32779);
-         ((Texture)fboMask.getTexture()).rendershader2(0.0F, 0.0F, ow, oh, sx, sy, sw, sh, 1.0F, 1.0F, 1.0F, 1.0F);
+         ((Texture)fboMask.getTexture()).rendershader2(0.0F, 0.0F, ow, oh, pzoptFxSize(sx), pzoptFxSize(sy), pzoptFxSize(sw), pzoptFxSize(sh), 1.0F, 1.0F, 1.0F, 1.0F); // pzopt: mask texels at the FX scale
          SpriteRenderer.instance.glBlendEquation(32774);
       }
 
@@ -973,10 +1015,11 @@ public class WeatherFxMask {
       float g = 1.0F;
       float b = 1.0F;
       float a = 1.0F;
-      float sx1 = (float)sx / tex.getWidthHW();
-      float ey1 = (float)sy / tex.getHeightHW();
-      float ex1 = (float)(sx + sw) / tex.getWidthHW();
-      float sy1 = (float)(sy + sh) / tex.getHeightHW();
+      float pzoptS = pzoptFxScale(); // pzopt: the FX texture holds the screen at this scale
+      float sx1 = (float)sx * pzoptS / tex.getWidthHW();
+      float ey1 = (float)sy * pzoptS / tex.getHeightHW();
+      float ex1 = (float)(sx + sw) * pzoptS / tex.getWidthHW();
+      float sy1 = (float)(sy + sh) * pzoptS / tex.getHeightHW();
       SpriteRenderer.instance.render(tex, 0.0F, 0.0F, ow, oh, 1.0F, 1.0F, 1.0F, 1.0F, sx1, sy1, ex1, sy1, ex1, ey1, sx1, ey1);
       IndieGL.glDefaultBlendFunc();
    }

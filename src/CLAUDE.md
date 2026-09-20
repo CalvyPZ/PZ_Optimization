@@ -48,6 +48,7 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
 | `BootAsync` / `BootPump` / `LuaPrecompiler` / `AnimClipCache` + `CachedAnimationTask` / `PackIndex` / `ScriptText` / `LotHeaders` / `FileTaskStats` / `ScriptDump` | boot and load work (2026-09-19 evening): FMOD init and animation-set parse on boot threads, file-pool pump during init, parallel Lua precompile cache, animation clip and texture-pack index caches under `~/Zomboid/pzopt/`, linear script text passes, per-cell lot-header memo, file-task timing, item field dump for equivalence checks |
 | `ModelShaders` | shaders already created by a `Model`, so `Model.CreateShader` skips the blocking render-thread round trip for repeat shader names (`shaderCache`; issue #1: 73 animal models were 16.5 s of a laptop load); summary logged at load start and world ready |
 | `MipMaps` | row-based texture mipmap generation and alpha premultiply on `byte[]` copies (`mipmapArrays`; issue #2: the stock per-byte direct-buffer loop was C2-miscompiled into a SIGSEGV on a file-pool thread); byte-identical to stock, `tests/pzopt/MipMapsTest` |
+| `GpuSections` | GPU time per named frame section from `GL_TIMESTAMP` queries riding the sprite stream (`gpuSections=true`, measurement only; printed in the periodic FBORenderCell log line) |
 | `Overrides` / `Guard` / `BuildInfo` / `Log` | install checks, build stamp, logging |
 
 Design notes carried from memory:

@@ -24,6 +24,7 @@ import zombie.savefile.PlayerDB;
 import zombie.util.ByteBufferPooledObject;
 import zombie.vehicles.VehiclesDB2;
 import zombie.worldMap.WorldMapVisited;
+import zombie.ZomboidFileSystem;
 
 public class ChunkSaveWorker {
    public static final ChunkSaveWorker instance = new ChunkSaveWorker();
@@ -43,6 +44,9 @@ public class ChunkSaveWorker {
 
    public void Update(IsoChunk aboutToLoad) {
       if (!GameServer.server) {
+         if (this.pzoptHotsaveStage > 0) { // pzopt: continue a staged hot save, one part per call
+            this.pzoptHotsaveStep();
+         }
          ChunkSaveWorker.QueuedSave qs = null;
          this.saving = !this.toSaveQueue.isEmpty();
          if (this.saving) {
@@ -84,7 +88,63 @@ public class ChunkSaveWorker {
       }
    }
 
+   // pzopt: staged hot save (Config.HOTSAVE_STAGED). Stock serialises every ancillary system on the game thread in one
+   // go (the meta grid alone is ~40 ms: map_meta, zones, animal zones, meta cells), one 55 ms frame per hot save.
+   // Staged, each Update call from the streamer runs one part on the game thread, so the same work lands as several
+   // short hitches a few frames apart; the buffers accumulate and are written to disk after the last stage.
+   private int pzoptHotsaveStage = -1;
+   private static final int PZOPT_HOTSAVE_STAGES = 9;
+
+   private boolean pzoptHotsaveStaged() {
+      return pzopt.Overrides.enabled() && pzopt.Config.HOTSAVE_STAGED;
+   }
+
+   /** pzopt: runs the next stage of a staged hot save if one is in progress. */
+   private void pzoptHotsaveStep() {
+      if (this.pzoptHotsaveStage < 0) {
+         return;
+      }
+      int stage = this.pzoptHotsaveStage++;
+      MainThread.invokeOnMainThread(() -> {
+         IsoMetaGrid mg = IsoWorld.instance.metaGrid;
+         switch (stage) {
+            case 0 -> mg.saveToSaveBufferMap(saveBufferMap, ZomboidFileSystem.instance.getFileNameInCurrentSave("map_meta.bin"), mg::save);
+            case 1 -> mg.saveToSaveBufferMap(saveBufferMap, ZomboidFileSystem.instance.getFileNameInCurrentSave("map_zone.bin"), mg::saveZone);
+            case 2 -> mg.saveToSaveBufferMap(saveBufferMap, ZomboidFileSystem.instance.getFileNameInCurrentSave("map_animals.bin"), mg::saveAnimalZones);
+            case 3 -> mg.saveCellsToSaveBufferMap(saveBufferMap, "metagrid", "metacell_%d_%d.bin", IsoMetaCell::save);
+            case 4 -> AnimalPopulationManager.getInstance().saveToBufferMap(saveBufferMap);
+            case 5 -> GameTime.instance.saveToBufferMap(saveBufferMap);
+            case 6 -> MapItem.SaveWorldMapToBufferMap(saveBufferMap);
+            case 7 -> WorldMapVisited.getInstance().saveToBufferMap(saveBufferMap);
+            default -> GameEntityManager.saveToBufferMap(saveBufferMap);
+         }
+      });
+      if (this.pzoptHotsaveStage >= PZOPT_HOTSAVE_STAGES) {
+         this.pzoptHotsaveStage = -1;
+         if (PlayerDB.isAllow()) {
+            PlayerDB.getInstance().savePlayers();
+         }
+
+         try {
+            saveBufferMap.save(ChunkSaveWorker::writeBufferToDisk);
+         } catch (Exception e) {
+            ExceptionLogger.logException(e);
+         }
+
+         saveBufferMap.clear();
+      }
+   }
+
    private void HotsaveAncilliarySystems() {
+      if (this.pzoptHotsaveStaged()) { // pzopt: start a staged hot save; stages run on the following Update calls
+         if (this.pzoptHotsaveStage < 0) {
+            saveBufferMap.clear();
+            this.pzoptHotsaveStage = 0;
+            pzopt.Log.info("hot save: staged over " + PZOPT_HOTSAVE_STAGES + " streamer updates");
+            this.pzoptHotsaveStep();
+         }
+         return;
+      }
       saveBufferMap.clear();
       MainThread.invokeOnMainThread(() -> {
          IsoWorld.instance.metaGrid.saveToBufferMap(saveBufferMap);

@@ -844,3 +844,129 @@ and never showed: the hand-off has already happened by then. The overlay draws t
 `pzopt.Overlay` for what it shows and the `overlay*` Config keys. The other two callers of
 `imguiEndFrame` (exception paths in `GameWindow.logic`, ImGui only) just draw one more
 overlay frame.
+
+## zombie.iso.fboRenderChunk.FBORenderCutaways (added 2026-09-20, game thread, 400 fps pass)
+
+Loose copy with the load marker `static {}` block and one edit in
+`doCutawayVisitSquares`, behind `pzopt.Config.CUTAWAY_INVALIDATE_CHANGED` (and only when
+`PerformanceSettings.fboRenderChunk` is on). Stock clears the cutaway flag of every square in
+last visit's result sets, re-adds the flags from this visit's sets, and invalidates (flag
+2048, "cutaway changed") the chunk level of every square touched in either step, so every chunk
+holding a cut-away wall re-bakes its texture on every visit; while moving through a town the
+visit runs almost every frame. With `fboRenderChunk` the texture only reads the square's
+*target* cutaway flag (`getPlayerCutawayFlag` returns it directly, there is no fade), so the
+texture is unchanged when the flags end the visit as they began. The edit remembers each
+touched square's target flag before the clear (an identity map, reused), lets the stock flag
+updates run unchanged, then invalidates only the chunks where a square's flag differs (with the
+stock off-screen seen-rooms mask reset for those). The edge-wall neighbour invalidation loop
+after it iterates the same reduced set, which is exact: it only reads flags of that chunk.
+Counters `pzoptCutawayVisits`, `pzoptCutawayChunksInvalidated`, `pzoptCutawayChangedSquares`.
+
+## zombie.audio.parameters.ParameterZone (added 2026-09-20, game thread, 400 fps pass)
+
+Loose copy with the load marker and a memo in `calculateCurrentValue`, behind
+`pzopt.Config.SOUND_ZONE_CACHE`. Seven of these parameters (forest, deep forest, farm, nav,
+town, trailer park, vegetation) each scan the meta grid's zones in an 80x80 window around the
+listener every frame (`IsoMetaChunk.getZonesIntersecting`, with an `ArrayList.contains` per
+zone) and take distances from `fastfloor(x)`, `fastfloor(y)`. The value is therefore a function
+of the listener's integer square; it is reused while that square is unchanged, for at most 30
+frames. The stock body is unchanged, moved into `pzoptCalculate`.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, light info once per frame)
+
+`cacheLightInfo` (one JNI call per square) is now routed through `pzoptCacheLightInfo` at the
+three per-frame sites: `prepareChunkForUpdating` (texture-dirty chunk levels),
+`pzoptCacheChunkLevelLightInfo` and `updateChunkLevelLighting` (lighting-dirty levels). A chunk
+level that is both texture-dirty and lighting-dirty in one frame asked twice per square. The
+helper keeps a frame-number stamp per player, level and square on the `IsoChunk`
+(`pzoptLightInfoFrame`, lazily allocated) and skips a square already refreshed this frame,
+behind `pzopt.Config.LIGHT_INFO_ONCE_PER_FRAME`. Lighting results only change in
+`LightingThread.update`, which runs before the render. Counter `pzoptLightInfoSkipped`.
+
+## zombie.iso.IsoChunk (edit of 2026-09-20 evening)
+
+One field: `pzoptLightInfoFrame`, the stamp rows used by the FBORenderCell edit above.
+
+## zombie.iso.ChunkSaveWorker (second edit, 2026-09-20 evening, staged hot save)
+
+(A ten-stage variant splitting `map_meta.bin` in two was tried and dropped the same evening.)
+
+`HotsaveAncilliarySystems` behind `pzopt.Config.HOTSAVE_STAGED`: instead of serialising the
+meta grid (map_meta, zones, animal zones, meta cells), the animal population, game time, the
+world map, visited map and the entity manager in one `invokeOnMainThread` block (one 55 ms
+frame per hot save on the bench route), the first call starts a staged save and every following
+`Update` call from the streamer runs one part on the game thread (nine stages), accumulating
+into the same `SaveBufferMap`; after the last stage the players are saved and the buffers are
+written to disk exactly as stock does. The stock path is kept for the flag off.
+
+## zombie.iso.weather.fx.WeatherFxMask (second edit, 2026-09-20 evening, FX buffer scale)
+
+Behind `pzopt.Config.WEATHER_FX_SCALE_PCT` (100 = stock and the default: 50 % measured as a wash, u400-it3-fx50-2; single player only):
+`checkFbos` creates the mask and particle FBO textures at that fraction of the screen size;
+`drawFxMask` and `drawFxLayered` queue a `glViewport` to the texture size right after their
+`glDoStartFrameFx` (the projection stays in world units, `glDoEndFrameFx` pops the viewport
+attribute); the mask composite (`rendershader2` texel rectangle) and the final particle composite
+(texture coordinates) sample the scaled texels. Clouds, fog, rain and the interior mask are soft
+content; at 5120x2160 the full-size pass was ~11 % of the uncapped frame (CPU and GPU). Also a
+measurement-only `Config.DEV_WEATHER_FX_OFF` that returns from `renderFxMask` at once.
+
+## zombie.iso.IsoChunkMap (added 2026-09-20 evening, chunk hand-off budget)
+
+Loose copy with the load marker and one edit in `updateInternal`, behind
+`pzopt.Config.CHUNK_HANDOFF_DIVISOR` (8; 0 = stock): the number of freshly loaded chunks handed
+to the game thread this frame (`doLoadGridsquare`: loot roll, erosion, recalc, pathfind, 1 to
+5 ms each) is capped at 1 + queue / divisor on top of the stock 1 + 3 * queue / gridWidth, so a
+chunk row arriving at once is spread over a few frames instead of one 10 to 25 ms frame.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, occlusion grid on lighting-only frames)
+
+`renderTilesInternal` decides whether to rebuild the occluded-squares grid through
+`pzoptHasDirtyChunkTexturesForOcclusion` instead of `hasAnyDirtyChunkTextures`: behind
+`pzopt.Config.OCCLUSION_SKIP_LIGHTING_ONLY`, a frame whose only dirty on-screen chunk levels are
+dirty for lighting (flag 32) keeps the previous grid and does not set `occlusionChanged` (so
+the per-level rendered-squares counts are not recomputed either), exactly as a frame with no
+dirty level behaves in stock. Lighting drift changes no square, vision matrix or cutaway flag,
+which are the only inputs of the occluder test. Counter `pzoptOcclusionRebuildsSkipped`.
+
+## GPU section timing (2026-09-20 evening, `pzopt.GpuSections`, measurement only)
+
+Behind `pzopt.Config.GPU_SECTIONS` (off by default): `begin`/`end` calls on the game thread
+queue a generic draw command whose render step writes a `GL_TIMESTAMP` query, so the GPU time of
+a named span of the sprite stream is known a few frames later; the periodic FBORenderCell log
+line prints the average GPU microseconds per frame per section. Sites: `FBORenderCell`
+(`chunks` = the per-chunk draw/bake loop, `bake` = one chunk-level texture bake,
+`translucentFloor`, `translucent`, `items`, `moving`, `water`) and `WeatherFxMask.renderFxMask`
+(`fx`, the whole weather pass; the stock body moved to `pzoptRenderFxMask`). With the flag off
+every site is a static boolean test.
+
+## zombie.iso.fboRenderChunk.FBORenderCutaways (second edit, 2026-09-20 evening, visit prefilter)
+
+Behind `pzopt.Config.CUTAWAY_VISIT_PREFILTER`. `cutawayVisit` walks every cutaway wall of the
+on-screen chunks at the player's level and, per wall square, does a grid-square lookup, two hash
+set operations, a level-data lookup and `IsCutawaySquare`; on the spinning route that is ~10 %
+of the frames above 3 ms. `IsCutawaySquare` can only be true when the wall occludes one of the
+player's cutaway rooms, or (with no cutaway rooms) is part of a building in
+`buildingsToCollapse`, or the player is peeking through a window (a per-square garage-door
+test, kept as is). Those are wall-level facts, so `pzoptWallCanCut` tests them once per wall and
+walls that fail are skipped before their squares are touched. The visited sets are then no
+longer complete; their only reader is the point-of-interest loop in `doCutawayVisitSquares`,
+where stock's first visit marks every wall square visited so later points of interest never
+add a square: with the prefilter the loop simply stops after the first visit, which is the same
+result. The wall's own `ChunkLevelData` is used when the square lies in the wall's chunk instead
+of a hash lookup per square. Counters `pzoptWallsVisited`, `pzoptWallsSkipped`.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, light info chunk gate)
+
+`prepareChunkForUpdating` refreshes the light info of every square of every level of a chunk
+about to be re-baked; each refresh is a JNI "is this square dirty" question (and the lighting
+data fetch when it is). Behind `pzopt.Config.LIGHT_INFO_CHUNK_GATE` the level first asks
+`LightingJNI.getChunkDirty` (the same chunk-level question stock's own lighting refresh,
+`updateChunkLevelLighting`, uses as its gate) and skips the 64 square refreshes when the level
+has no dirty square; the `squareFlags` bookkeeping of the loop is unchanged. Counter
+`pzoptLightInfoLevelsGated`.
+
+**Staged hot save off by default (2026-09-20 night):** `hotsaveStaged` defaults to false. The
+parts are serialised a few frames apart while chunks keep loading, so `map_meta.bin` and the
+`metacell_*.bin` files could disagree on room metaIDs; the "invalid room metaID" load errors seen
+that night turned out to be pre-existing in the bench save (present in every run), but the
+consistency risk stands and the gain was one 55 ms frame per 30 s, so it stays opt-in.

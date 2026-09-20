@@ -146,6 +146,9 @@ public final class IsoChunk {
    // per-frame map lookup FBORenderCell.calculateOccludingSquares used for clean levels (cutawayFast)
    public final long[] pzoptOccluderMask = new long[64];
    public long pzoptOccluderMaskSet;
+   // pzopt: frame number of the last cacheLightInfo per square, rows indexed playerIndex * 64 + level + 32
+   // (Config.LIGHT_INFO_ONCE_PER_FRAME, used by FBORenderCell)
+   public int[][] pzoptLightInfoFrame;
    // pzopt: marker so the game log shows the loose class was loaded, not the jar's copy
    static {
       pzopt.Overrides.onClassLoaded("zombie.iso.IsoChunk");

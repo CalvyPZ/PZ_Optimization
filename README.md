@@ -51,6 +51,40 @@ zoom, 5120x2160. Machine: Ryzen 7 9800X3D, RTX 4090, Crucial T705 NVMe, 32 GB DD
 "Stock" is this build with every optimization switched off, which reproduces the
 shipped game exactly.
 
+### Rosewood uncapped: stock vs optimized vs all optimizations (2026-09-20 evening)
+
+The same spinning Rosewood route with the frame cap off, recorded with the build's own
+performance overlay on screen (no MangoHud). Three recordings: stock settings, the
+optimized build as it was before the evening pass, and the build with everything
+including the pass (`harness/stitch-triple-hdr.sh`, runs `u400show-stock-2`,
+`u400show-prev-1`, `u400show-all-1`; AV1 10-bit HDR, the click-through copy is a
+1920x960 encode of the same file).
+
+[![Stock vs optimized vs all optimizations, uncapped, on the Rosewood route](docs/media/rosewood-spin-uncapped-stock-vs-optimized-vs-all-hdr.jpg)](docs/media/rosewood-spin-uncapped-stock-vs-optimized-vs-all-hdr-1080.mp4)
+
+| Metric | Stock settings | Optimized (before the pass) | All optimizations |
+|---|---|---|---|
+| fps, mean | 114 | 391 | 492 |
+| Frame time, mean | 8.8 ms | 2.6 ms | 2.0 ms |
+| Frame time, p50 | 6.2 ms | 1.9 ms | 1.6 ms |
+| Frame time, p90 | 17.8 ms | 4.4 ms | 3.3 ms |
+| Frame time, p99 | 31.4 ms | 10.2 ms | 7.7 ms |
+| Frame time, p99.9 | 53.1 ms | 20.0 ms | 15.8 ms |
+| Frames below 240 fps | 71 % | 9 % | 4 % |
+
+The pass (`docs/plan-400fps.md`, run table in `docs/results.md`) went for "400 fps locked"
+on this route. The mean is past it; the frame is not locked: about 13 % of frames still take
+more than 2.5 ms, all of them chunk streaming on the game thread (the loot roll of freshly
+loaded chunks, the bakes of a new chunk row, cutaway data for new chunks) or the offscreen
+UI's refresh frame, and from about 450 fps the GPU is saturated (the chunk-texture composite
+and the bakes), so both sides of the machine are now used to the full at 5120x2160. What
+the pass changed is in [Renderer](#2-renderer); what locking 400 still needs is in the
+[Roadmap](#roadmap). Two things learned on the way: the stock Display option
+**UI rendering: offscreen** is worth about 40 % uncapped on this machine (it was a wash at
+the 240 cap, which is why it was never adopted), and a `mangohud %command%` in the game's
+Steam launch options draws the MangoHud HUD on every launch at a cost of about 30 % uncapped;
+the runs above hide it, the earlier measurement runs of the pass carried it as a constant.
+
 ### Rosewood at max zoom: stock vs optimized vs the game-thread pass (2026-09-20)
 
 The newest comparison, and a different route from the ones below: a 25 s teleport
@@ -452,6 +486,15 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `lightingRebakeMs` | `250` | a texture dirtied only by lighting drift is not re-baked more often than this (`0` = stock) |
 | `cutawayRadius` / `gridStackInterval` | `6` / `8` | cutaway wall visits only within 6 chunks of the camera; buildings-in-front scan at most every 8 frames while square and facing are unchanged (`0` = stock) |
 | `weatherMaskIdleSkip` | `true` | skip the per-frame weather-mask view scan when it cannot add a mask; scan only the player's building when it can |
+| `cutawayInvalidateChanged` | `true` | re-bake a chunk after a cutaway visit only if one of its squares' cutaway flags changed |
+| `cutawayVisitPrefilter` | `true` | a cutaway visit skips walls that cannot cut anything before touching their squares |
+| `lightInfoOncePerFrame` / `lightInfoChunkGate` | `true` / `true` | the per-square light-info JNI call once per frame, and skipped for a whole chunk level the lighting engine reports clean |
+| `occlusionSkipLightingOnly` | `true` | keep the occluded-squares grid when only lighting drift dirtied visible chunk levels |
+| `soundZoneCache` | `true` | ambient zone parameters reuse their zone scan while the listener's square is unchanged |
+| `chunkHandoffDivisor` | `8` | freshly loaded chunks handed to the game thread per frame: at most 1 + queue/8 (`0` = stock, up to 4) |
+| `weatherFxScalePct` | `100` | weather mask and particle buffers at this share of the screen size (measured as a wash at 50) |
+| `hotsaveStaged` | `false` | hot save serialised one part per streamer update (off: the meta-grid files could disagree) |
+| `gpuSections` | `false` | GPU microseconds per frame section in the log (timestamp queries; measurement only) |
 | `lightSwitchCheckFrames` | `15` | a light switch reuses its has-electricity answer for this many frames (`0` = stock) |
 | `persistentVbo` | `false` | persistently mapped sprite buffers |
 | `fileThreads` / `fileInflight` | `max(4, cores/2)` / `4x` | async file system width and queue depth |
@@ -624,6 +667,28 @@ p99 10.5 → 7.3 ms, frames under the 240 cap 24 → 21 %. Recordings with the k
 the same frames. What is left on the game thread is broad: chunk texture bakes (20 %), the
 world update (23 %: player, zombies, vehicles, chunk hand-off) and the Lua UI (10 %).
 
+**Uncapped 400 fps pass** (2026-09-20 evening, `docs/plan-400fps.md`). The same route with
+the cap off, measured with the build's own overlay log and a 1 ms JFR of the game thread
+(`harness/gametree.py` prints its inclusive call tree from a run). Seven exact trims, all
+keys in the Optimizations tab: a cutaway visit re-flags every cut-away wall square and stock
+re-bakes every chunk holding one on every visit, so while moving through a town those
+textures re-baked every frame; now only chunks where a square's cutaway flag actually
+changed re-bake (`cutawayInvalidateChanged`). The visit itself only walks the squares of
+walls that can cut, the ones occluding a cutaway room, part of a collapsing building or
+near a peeked window (`cutawayVisitPrefilter`, 140k of 154k wall walks skipped on the route).
+The per-square light-info JNI call is made once per square per frame
+(`lightInfoOncePerFrame`) and a chunk level about to be re-baked asks the lighting engine
+one chunk-level question before its 64 square questions (`lightInfoChunkGate`, the single
+largest step: 466 to 501 fps). The occluded-squares grid and the per-level rendered-square
+counts are kept when the only dirty chunk levels are dirty for lighting drift
+(`occlusionSkipLightingOnly`). The seven ambient sound zone parameters reuse their 80x80 zone
+scan while the listener's square is unchanged (`soundZoneCache`). Freshly loaded chunks are
+handed to the game thread at most 1 + queue/8 per frame instead of up to four
+(`chunkHandoffDivisor`). Together with the offscreen UI option: 273 to 501 fps mean on the
+route, p90 6.3 to 3.1 ms, p99 13.2 to 7.7 ms. GPU time per frame section is available with
+`gpuSections=true` (timestamp queries in the sprite stream, printed in the log): the chunk
+composite is about 0.6 ms a frame, bakes 0.3 to 0.5 ms, the weather pass 0.1 to 0.17 ms.
+
 ### 3. Boot: launch to main menu
 
 **FMOD on a boot thread** (`fmodAsync`). Sound system and 12 bank files (1.6 s)
@@ -718,14 +783,21 @@ in-game choice survives the game's own rewrite of `options.ini`.
 G1 instead of ZGC (p99 -13 % but 3x the frames over 33 ms); Mesa Zink
 instead of NVIDIA GL (blocks 1.8 ms per frame in swap); a 256 MB texture upload
 buffer (a 5 s frame a few seconds into the world); native Wayland (a wash at the
-240 cap).
+240 cap). On the uncapped route (2026-09-20 evening): weather FX buffers at half
+size (`weatherFxScalePct`, a wash: the pass costs draw calls, not pixels),
+`lightingRebakeMs=1000` and `bakeBudget=4` (no change), a hot save split over nine
+streamer updates (`hotsaveStaged`, off: the meta-grid files could disagree on room
+ids), `uiRenderFPS=60` (+2 %, within noise).
 
 ---
 
 ## Roadmap
 
-Where the frame goes today, after everything above: on NVIDIA GL at max zoom the
-machine is GPU-bound (fill for the 12800x5400 zoom-out buffer, 69 Mpixel per frame);
+Where the frame goes today, after everything above: on NVIDIA GL at max zoom and
+uncapped the machine is GPU-bound from about 450 fps (the zoom is a projection onto a
+screen-sized viewport, not a 12800x5400 fill as earlier notes said; the GPU time is the
+composite of ~290 visible chunk-level textures with per-pixel depth, about 0.6 ms a
+frame, and the chunk-texture bakes, 0.3 to 0.5 ms), with the game thread at 89 %;
 everywhere else, lower zoom, a smaller screen, a slower card, or Windows, the
 **game thread** is the limit (93 % of wall on the Windows bench with the GPU at half
 load). Items 1 and 2 attack that in order of value, each with a plan document
@@ -745,9 +817,11 @@ spinning Rosewood route with the GPU at 60 to 68 %, and the remaining cost is br
 chunk texture bakes 20 % (first bakes and object changes while streaming), the world
 update 23 % (player 4 %, zombies 3 %, animation post-update 6 %, vehicles 2 %,
 chunk hand-off 4 %), the Lua UI draw 10 % plus its update 3 %, JNI light-info
-caching 3 %, `LightingJNI.update` 3 %. No single hot spot is left worth a class
-override; measured non-gains: `bakeBudget=3`, `uiRenderOffscreen=true`,
-`lightingRebakeMs=1000`.
+caching 3 %, `LightingJNI.update` 3 %. The evening pass then took the uncapped route
+from 273 to 501 fps (see Renderer) and left the game thread at 89 % with the tail made of
+chunk streaming: `doLoadGridsquare` (the loot roll's `ScriptManager.FindItem` and
+`getLootType` per candidate item, erosion, recalc), the bakes of a new chunk row, the
+cutaway data of new chunks. No single hot spot is left worth a class override.
 
 What would move the needle now is structural, each with its own plan and gate:
 
@@ -760,6 +834,14 @@ What would move the needle now is structural, each with its own plan and gate:
   frame apart is the largest gain and the largest race risk (`docs/plan-resource-use.md`).
 - **View-cone polygon off the game thread** (`calculateVisibilityPolygon`, about 2 %):
   small, low risk, a good first exercise of the fork-join hand-off.
+- **Chunk hand-off off the game thread or time-sliced.** The remaining frames above
+  2.5 ms on the uncapped route are `doLoadGridsquare`; the loot roll and erosion of a
+  chunk could run before the chunk is handed over, or be sliced per square with a
+  time budget.
+- **Cached world composite on the GPU.** The ~290 visible chunk-level textures are
+  redrawn onto the offscreen buffer every frame with a depth-writing shader (about
+  0.6 ms). A colour + depth cache scrolled by the camera delta, with only dirty levels
+  redrawn, removes most of it; needs integer camera steps at every zoom.
 - **`Translucent`-flagged tiles bake** once the tile set that bakes opaque black
   is filtered (the flag exists, off by default).
 
@@ -941,7 +1023,13 @@ python harness\analyze.py harness\runs\bench-opt-*
 ```
 
 **Linux:** `harness/run.sh` adds an optional MangoHud CSV, JFR and a screen
-recording. Restore the bench save once with:
+recording. `--no-mangohud` keeps MangoHud out of the run and uses the overlay log as the
+frame source (a `mangohud %command%` in the game's Steam launch options still injects
+its HUD; hide it with `--env MANGOHUD_CONFIG=no_display` or use `--launcher direct`).
+`--jfr --jfr-period 1` plus `harness/gametree.py <run>` gives the game thread's
+inclusive call tree over the route; `--prop gpuSections=true` logs GPU time per frame
+section; `harness/stitch-triple-hdr.sh` stitches three recordings into the AV1 HDR
+comparison video above. Restore the bench save once with:
 
 ```sh
 zstd -dc harness/bench-save/pzopt-bench-template.tar.zst | tar -C ~/Zomboid/Saves/Sandbox -xf -
