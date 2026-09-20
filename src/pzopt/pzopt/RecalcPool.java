@@ -143,8 +143,10 @@ public final class RecalcPool {
             task.timing.thread = Thread.currentThread().getName() + "(retry)";
             task.chunk.loadInWorldStreamerThread();
             task.timing.recalcEndNs = System.nanoTime();
-         } catch (Exception ex) {
-            // same as stock: log and publish what we have rather than losing the chunk
+         } catch (Throwable ex) {
+            // Throwable, not Exception: a StackOverflowError here (stock isWallTo recursing on a mis-mapped
+            // square) once escaped past publish()/resolve() and left the publisher blocked on this entry,
+            // so no later chunk was ever handed to the main thread. Log and publish what we have, as stock would.
             zombie.core.logger.ExceptionLogger.logException(ex);
             Log.error("retry of chunk " + task.chunk.wx + "," + task.chunk.wy + " failed too; publishing as stock would");
          }
