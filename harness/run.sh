@@ -7,7 +7,7 @@
 #                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
 #                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]... [--mod ID]... [--vmarg ARG]...
 #                  [--lead secs] [--route-seconds secs] [--launcher auto|steam|direct] [--option key=value]...
-#                  [--preset night-torch|night-dark|storm]
+#                  [--preset night-torch|night-dark|storm|fog|storm-fog]
 #
 # --preset NAME    scene preset: bench mode on the spinning game-thread route (route=S:450 turn=90 zoom=max,
 #                  --route-seconds 25) plus the scene flags pzopt.Scene reads (time_of_day, torch, weather).
@@ -16,7 +16,11 @@
 #                  (--flag visible=true keeps the player visible; the beam draws with the default invisible player too.
 #                  The --shot-at captures do NOT show the beam: the player is held still for 2 s before the capture.)
 #                    storm        the save's hour, pinned thunderstorm + a lightning strike every 6 s (thunder_secs)
-#                  Preset flags go first, so any --flag / --mode / --route-seconds given on the command line wins.
+#                    fog          the save's hour and weather period stopped, fog pinned at 1.0 (fog=heavy; rendered by
+#                                 ImprovedFog with options.ini fogQuality 0/1, the legacy fog circle with 2)
+#                    storm-fog    storm + fog=heavy with the stock storm fog tint: the heaviest STAGE_STORM the game rolls
+#                  Preset flags go first, so any --flag / --mode / --route-seconds given on the command line wins
+#                  (e.g. --preset storm --flag fog=0.5 is a storm with half fog).
 #
 # --launcher direct starts the native game itself (projectzomboid.sh, -Dzomboid.steam=0) instead of
 # asking the running Steam client; auto (default) does that whenever Steam is not running or not
@@ -113,7 +117,9 @@ if [[ -n "$preset" ]]; then
     night-torch) preset_flags=(time_of_day=1 torch=on) ;;
     night-dark)  preset_flags=(time_of_day=1 torch=off) ;;
     storm)       preset_flags=(weather=storm) ;;
-    *) echo "unknown preset: $preset (night-torch|night-dark|storm)" >&2; exit 2 ;;
+    fog)         preset_flags=(fog=heavy) ;;
+    storm-fog)   preset_flags=(weather=storm fog=heavy) ;;
+    *) echo "unknown preset: $preset (night-torch|night-dark|storm|fog|storm-fog)" >&2; exit 2 ;;
   esac
   extra_flags=(route=S:450 turn=90 zoom=max "${preset_flags[@]}" "${extra_flags[@]}")   # later duplicates win (Properties.load)
   [[ $mode_set -eq 1 ]] || mode=bench

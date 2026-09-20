@@ -43,10 +43,15 @@ Modes:
   wins). `night-torch` = 01:00 with a lit Base.HandTorch in the primary hand (beam sweeps with the
   turn; it draws with the invisible bench player), `night-dark` = 01:00 no light item,
   `storm` = the save's hour with a pinned thunderstorm (rain/cloud 1.0, wind 0.9, dim ambient) and a
-  lightning strike 60 tiles from the player every 6 s (`--flag thunder_secs=N`). Scene flags on their
-  own: `time_of_day=H`, `weather=storm|clear`, `torch=on|off`, `visible=true` (`pzopt.Scene`; applied at
-  world-ready, re-pinned every frame, recorded in `pzopt-bench.out` as `time_of_day/game_hour/weather/
-  torch/visible/night_strength/precipitation/lightning_strikes`; `torch check` console line every 5 s).
+  lightning strike 60 tiles from the player every 6 s (`--flag thunder_secs=N`), `fog` = the save's hour
+  with the weather period stopped and fog pinned at 1.0 (`fog=heavy`; `ImprovedFog` with `fogQuality`
+  0/1 in options.ini, legacy fog circle with 2), `storm-fog` = storm + `fog=heavy` with the stock storm
+  fog tint (the heaviest STAGE_STORM the game can roll; `--preset storm --flag fog=0.5` for a lighter one).
+  Scene flags on their own: `time_of_day=H`, `weather=storm|clear`, `fog=heavy|off|0..1`, `torch=on|off`,
+  `visible=true` (`pzopt.Scene`; applied at world-ready, re-pinned every frame, recorded in `pzopt-bench.out`
+  as `time_of_day/game_hour/weather/fog/torch/visible/night_strength/precipitation/fog_intensity/fog_fx/
+  fog_quality/lightning_strikes`; `torch check` console line every 5 s; the sandbox `MaxFogIntensity` cap
+  and `FogCycle` are logged at apply time, a cap other than 1 is a warning).
   Compare a preset only with runs of the same preset. 2026-09-20 numbers (`docs/results.md`): night
   283 fps = daylight, torch on or off (the beam costs nothing measurable); storm 83 fps, p99 43 ms
   (chunk lighting rebakes ×5). The `--shot-at` captures never show the beam (player held still 2 s

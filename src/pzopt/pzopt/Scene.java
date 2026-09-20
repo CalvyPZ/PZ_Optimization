@@ -16,6 +16,13 @@ import zombie.iso.weather.ClimateManager;
  *       full cloud, wind, dark ambient) every frame, plus a lightning strike next to the player every
  *       {@code thunder_secs} seconds (default 6) so the flash + forced grid-stack recalc is part of
  *       every run at the same instants; {@code clear} stops weather and pins the fair-weather values;</li>
+ *   <li>{@code fog=heavy|off|0..1} — pins the fog intensity ({@code heavy} = 1.0, the value a stock
+ *       BLIZZARD stage without its own roll uses; a storm stage rolls at most 0.5) every frame. On its own it
+ *       stops the save's weather period too (every WeatherPeriod stage re-pins fog to 0) but leaves the other
+ *       climate values to the save; combined with {@code weather=storm} the stock storm fog tint is pinned as
+ *       well, so {@code storm} + {@code fog=heavy} is the heaviest STAGE_STORM the game can roll. Rendered by
+ *       {@code ImprovedFog} (options {@code fogQuality} 0/1) or the legacy fog circle + particles (2); the
+ *       sandbox {@code MaxFogIntensity} cap is logged, not overridden;</li>
  *   <li>{@code torch=on|off} — {@code on} puts a lit Base.HandTorch in the player's primary hand
  *       (a cone light that follows the facing, so with {@code turn} it sweeps the lighting grid);
  *       {@code off} makes sure no light item is equipped;</li>
@@ -30,6 +37,7 @@ import zombie.iso.weather.ClimateManager;
 final class Scene {
    private static float timeOfDay = -1f;
    private static String weather = "";
+   private static float fog = -1f;
    private static String torch = "";
    private static boolean visible;
    private static float thunderSecs = 6f;
@@ -46,6 +54,7 @@ final class Scene {
    static void apply(IsoPlayer p) {
       timeOfDay = Float.parseFloat(HarnessFlags.get("time_of_day", "-1"));
       weather = HarnessFlags.get("weather", "").trim().toLowerCase(java.util.Locale.ROOT);
+      fog = parseFog(HarnessFlags.get("fog", ""));
       torch = HarnessFlags.get("torch", "").trim().toLowerCase(java.util.Locale.ROOT);
       thunderSecs = Float.parseFloat(HarnessFlags.get("thunder_secs", "6"));
       visible = Boolean.parseBoolean(HarnessFlags.get("visible", "false"));
@@ -76,6 +85,27 @@ final class Scene {
          } else {
             Log.warn("harness: unknown weather '" + weather + "' (storm|clear); leaving the save's weather");
             weather = "";
+         }
+      }
+      if (fog >= 0f) {
+         ClimateManager cm = ClimateManager.getInstance();
+         if (weather.isEmpty()) {
+            // a running weather period re-pins FOG_INTENSITY to 0 on every stage but STORM/BLIZZARD, so the
+            // fog flag alone still has to stop it; the other climate values stay the save's own
+            cm.stopWeatherAndThunder();
+            cm.setEnabledWeatherGeneration(false);
+         }
+         assertFog(cm);
+         int maxFog = zombie.SandboxOptions.instance.maxFogIntensity.getValue();
+         int fogCycle = zombie.SandboxOptions.instance.fogCycle.getValue();
+         Log.info("harness: fog forced to " + fog + (fog > 0f && "storm".equals(weather) ? " with the storm tint" : "")
+               + "; fogQuality=" + zombie.core.PerformanceSettings.fogQuality + " (0/1 ImprovedFog, 2 legacy circle)"
+               + ", sandbox MaxFogIntensity=" + maxFog + " FogCycle=" + fogCycle);
+         if (maxFog != 1) {
+            Log.warn("harness: sandbox MaxFogIntensity=" + maxFog + " caps the rendered fog (1 = uncapped, 2 = 0.75, 3 = 0.5, 4 = none)");
+         }
+         if (fogCycle > 1) {
+            Log.warn("harness: sandbox FogCycle=" + fogCycle + " drives its own fog override; the pinned value may not hold");
          }
       }
       if ("on".equals(torch) || "off".equals(torch)) {
@@ -128,11 +158,16 @@ final class Scene {
                + " jniTorches=" + jniTorchCount() + " invisible=" + p.isInvisible() + " night=" + GameTime.getInstance().getNight()
                + " | square lighting (player, +3, +6 tiles ahead): " + squareLight(p, 0) + " " + squareLight(p, 3) + " " + squareLight(p, 6));
       }
-      if (weather.isEmpty()) {
+      if (weather.isEmpty() && fog < 0f) {
          return;
       }
       ClimateManager cm = ClimateManager.getInstance();
-      assertWeather(cm);
+      if (!weather.isEmpty()) {
+         assertWeather(cm);
+      }
+      if (fog >= 0f) {
+         assertFog(cm);
+      }
       if ("storm".equals(weather) && thunderSecs > 0f) {
          if (lastThunderNs == 0L) {
             lastThunderNs = nowNs; // first strike one interval after the route starts, not on frame one
@@ -188,7 +223,9 @@ final class Scene {
       set(cm, ClimateManager.FLOAT_CLOUD_INTENSITY, storm ? 1.0f : 0.0f);
       set(cm, ClimateManager.FLOAT_WIND_INTENSITY, storm ? 0.9f : 0.1f);
       set(cm, ClimateManager.FLOAT_WIND_ANGLE_INTENSITY, storm ? 0.7f : 0.0f);
-      set(cm, ClimateManager.FLOAT_FOG_INTENSITY, 0.0f);
+      if (fog < 0f) {
+         set(cm, ClimateManager.FLOAT_FOG_INTENSITY, 0.0f); // no fog flag: a storm/clear run has no fog (the 2026-09-20 baselines)
+      }
       set(cm, ClimateManager.FLOAT_DESATURATION, storm ? 0.3f : 0.0f);
       set(cm, ClimateManager.FLOAT_GLOBAL_LIGHT_INTENSITY, storm ? 0.4f : 1.0f);
       set(cm, ClimateManager.FLOAT_AMBIENT, storm ? 0.45f : 1.0f);
@@ -196,28 +233,57 @@ final class Scene {
       cm.getClimateBool(ClimateManager.BOOL_IS_SNOW).setOverride(false);
    }
 
+   private static void assertFog(ClimateManager cm) {
+      set(cm, ClimateManager.FLOAT_FOG_INTENSITY, fog);
+      if (fog > 0f && "storm".equals(weather)) {
+         // what WeatherPeriod.update pins for a STAGE_STORM whose stage rolled fog (case 3, fogStrength > 0)
+         cm.getClimateColor(ClimateManager.COLOR_NEW_FOG).setOverride(cm.getFogTintStorm(), 1.0f);
+      }
+   }
+
+   /** {@code heavy} = 1, {@code off} = 0, a number = that intensity (clamped to 0..1); unset or unknown = -1. */
+   private static float parseFog(String raw) {
+      String v = raw.trim().toLowerCase(java.util.Locale.ROOT);
+      if (v.isEmpty()) return -1f;
+      if ("heavy".equals(v) || "on".equals(v)) return 1f;
+      if ("off".equals(v) || "none".equals(v)) return 0f;
+      try {
+         return Math.max(0f, Math.min(1f, Float.parseFloat(v)));
+      } catch (NumberFormatException e) {
+         Log.warn("harness: unknown fog '" + raw + "' (heavy|off|0..1); leaving the save's fog");
+         return -1f;
+      }
+   }
+
    private static void set(ClimateManager cm, int id, float value) {
       cm.getClimateFloat(id).setOverride(value, 1.0f);
    }
 
    static boolean requested() {
-      return timeOfDay >= 0f || !weather.isEmpty() || !torch.isEmpty() || visible;
+      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible;
    }
 
    /** Lines for pzopt-bench.out. */
    static String summary() {
       float night = -1f;
       float precip = -1f;
+      float fogNow = -1f;
+      float fogFx = -1f;
       try {
          ClimateManager cm = ClimateManager.getInstance();
          night = cm.getNightStrength();
          precip = cm.getPrecipitationIntensity();
+         fogNow = cm.getFogIntensity();
+         zombie.iso.weather.fx.IsoWeatherFX fx = zombie.iso.IsoWorld.instance.getCell().getWeatherFX();
+         if (fx != null) fogFx = fx.getFogIntensity(); // the stepped value the renderer reached (ramps 0.005/tick)
       } catch (Exception ignored) {
       }
       return "time_of_day=" + (timeOfDay >= 0f ? Float.toString(timeOfDay) : "save")
             + "\ngame_hour=" + GameTime.getInstance().getTimeOfDay()
             + "\nweather=" + (weather.isEmpty() ? "save" : weather)
+            + "\nfog=" + (fog >= 0f ? Float.toString(fog) : "save")
             + "\ntorch=" + (torch.isEmpty() ? "save" : torch) + "\nvisible=" + visible
-            + "\nnight_strength=" + night + "\nprecipitation=" + precip + "\nlightning_strikes=" + thunderCount;
+            + "\nnight_strength=" + night + "\nprecipitation=" + precip + "\nfog_intensity=" + fogNow + "\nfog_fx=" + fogFx
+            + "\nfog_quality=" + zombie.core.PerformanceSettings.fogQuality + "\nlightning_strikes=" + thunderCount;
    }
 }

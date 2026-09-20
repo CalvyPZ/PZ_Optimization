@@ -219,3 +219,26 @@ and gradient of the 480x203 grayscale recording; frozen runs = consecutive zero-
 4. Watch for the flicker of interior objects / doors / windows / corpses reported by the
    maintainer on the 15:49 build (VBORenderer is on that build's suspect list; the
    `storm-rec-cur` / `storm-rec-vbostock` recordings are the A/B).
+
+## 7. Heavy fog presets (17:29–17:32): fog is the slowest scene so far
+
+New `run.sh --preset fog` (`fog=heavy`: weather period stopped, `FLOAT_FOG_INTENSITY` pinned at 1.0
+every frame, the other climate values left to the save) and `--preset storm-fog` (storm + `fog=heavy`
+with the stock storm fog tint, i.e. the heaviest `STAGE_STORM` the game can roll; `pzopt.Scene`,
+`fog=heavy|off|0..1` as a bare flag). Both use `ImprovedFog` (options.ini `fogQuality=0`); the
+sandbox caps were `MaxFogIntensity=1 FogCycle=1` (uncapped). `pzopt-bench.out` records
+`fog/fog_intensity/fog_fx/fog_quality`; `fog_fx=1.0` in both runs, so the renderer's stepped ramp
+had reached full fog before the route.
+
+| run | preset | fps | mean | p99 | p99.9 | max | game thread | GPU |
+|---|---|---|---|---|---|---|---|---|
+| preset-fog-1-20260920-173048 | fog | 55.5 | 18.0 ms | 38.7 | 72.2 | 144.5 | 98 % | 42 % |
+| preset-storm-fog-1-20260920-172918 | storm-fog (4 strikes) | 30.5 | 32.8 ms | 64.0 | 99.5 | 101.7 | 97 % | 34 % |
+
+Against 283 fps clear and 188 fps storm on the same route, heavy fog alone is a 5× frame-time
+cost with the GPU under half busy: game-thread bound ("fps < 240 and hardware not saturated").
+Caveat: a peer session was NVENC-encoding the docs/media videos during both runs (encoder block
++ some CPU), so treat these as smoke numbers and re-run clean before profiling. Next: GameProfiler
+(`--game-profiler`, `sections.py --thread game`) on `preset-fog`; the suspect is
+`FBORenderCell.renderFog` → `ImprovedFog.renderRowsBehind(square)` per visible square per level
+on the game thread.
