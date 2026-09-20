@@ -390,7 +390,7 @@ public final class FBORenderCell {
             RenderThread.invokeOnRenderContext(this.cell::initTileShaders);
          }
 
-         FBORenderLevels.clearCachedSquares = true;
+         FBORenderLevels.clearCachedSquares = !pzoptKeepPerFrameLists(); // pzopt: see pzoptKeepPerFrameLists
          int playerIndex = IsoCamera.frameState.playerIndex;
          IsoPlayer player = IsoPlayer.players[playerIndex];
          FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
@@ -613,7 +613,7 @@ public final class FBORenderCell {
             var44.close();
          }
 
-         FBORenderLevels.clearCachedSquares = true;
+         FBORenderLevels.clearCachedSquares = !pzoptKeepPerFrameLists(); // pzopt: see pzoptKeepPerFrameLists
          this.cell.playerCutawaysDirty[playerIndex] = false;
          IsoCell.ShadowSquares.clear();
          IsoCell.MinusFloorCharacters.clear();
@@ -1685,13 +1685,15 @@ public final class FBORenderCell {
                if (pzoptLightingOnly) {
                   pzoptLightingRebakesHeld++;
                }
-               // pzopt: re-bake budget. A texture already on screen whose only dirty reasons are lighting drift (32),
-               // a redraw (1024: neighbour loaded, came on screen, light switch) or a cutaway change (2048) keeps its
-               // previous image for up to REBAKE_MAX_FRAMES frames once REBAKE_BUDGET such re-bakes have started this
-               // frame. Object, tree and obscuring changes are never held (their per-frame lists must match the texture).
+               // pzopt: re-bake budget. A texture already on screen whose only dirty reasons are lighting drift (32)
+               // or a redraw (1024: neighbour loaded, came on screen, light switch) keeps its previous image for up to
+               // REBAKE_MAX_FRAMES frames once REBAKE_BUDGET such re-bakes have started this frame. Object, tree,
+               // obscuring and (since 2026-09-20 evening) cutaway changes are never held: their per-frame draws re-test
+               // the live state (isTableTopObjectSquareCutaway, the window-frame flags), so a stale texture would show
+               // the object neither baked nor per frame.
                int pzoptRebakeBudget = pzopt.Overrides.enabled() ? pzopt.Config.REBAKE_BUDGET : 0;
                if (!pzoptDefer && pzoptRebakeBudget > 0 && pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom)
-                     && !renderLevels.isDirty(level, ~(32L | 1024L | 2048L), zoom)) {
+                     && !renderLevels.isDirty(level, ~(32L | 1024L), zoom)) {
                   int pzoptNow = IsoWorld.instance.getFrameNo();
                   if (this.pzoptRebakesThisFrame >= pzoptRebakeBudget) {
                      Integer since = this.pzoptRebakeHeldSince.get(pzoptRc);
@@ -3689,6 +3691,20 @@ public final class FBORenderCell {
             this.renderTranslucent(object);
          }
       }
+   }
+
+   /**
+    * pzopt: stock FBORenderLevels.NLevels.invalidate() also empties the level's per-frame square lists (items on
+    * tables, obscuring furniture, cutaway window frames, corpses, animated attachments, flies, puddles, translucent
+    * floor) whenever a level is invalidated outside performRenderTiles, because the bake that follows in the same
+    * frame rebuilds them. With a held re-bake (Config.LIGHTING_REBAKE_MS, REBAKE_BUDGET) the previous texture stays
+    * on screen but those lists were already cleared, so for the held frames nothing per-frame was drawn: objects on
+    * tables, doors, windows and corpses blinked out for 1-3 frames (2026-09-20, runs flick-*). The lists only ever
+    * change at a bake (clearCachedSquares(level) at its start), so keeping them across invalidations keeps them
+    * matched to whatever texture is on screen. Stock's own flow is unchanged: every bake rebuilds them anyway.
+    */
+   private static boolean pzoptKeepPerFrameLists() {
+      return pzopt.Overrides.enabled() && (pzopt.Config.LIGHTING_REBAKE_MS > 0 || pzopt.Config.REBAKE_BUDGET > 0 || pzopt.Config.BAKE_BUDGET > 0);
    }
 
    // pzopt: bake budget — chunk-level textures (re)baked per frame; the rest keep their previous texture for a frame

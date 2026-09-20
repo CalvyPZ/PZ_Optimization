@@ -145,6 +145,12 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   (`config/launcher/ProjectZomboid64.g1.json`, now installed) has the tightest tail (508 fps, p99 7.3 ms,
   game thread 81 %). The ~500 fps numbers need `persistentVbo=true translucentTilesInChunkTexture=true`
   (tab file or `--prop`); with both off the same route is 184 fps, so check the console `settings:` line.
+- Flicker fix (2026-09-20 evening, `docs/results.md`): objects inside buildings, doors, windows and
+  corpses blinked out for 1-3 frames because stock `FBORenderLevels.invalidate()` empties the per-frame
+  square lists and every pzopt held re-bake (`lightingRebakeMs`, `rebakeBudget`) drew the previous
+  texture with them empty. FBORenderCell now keeps the lists across invalidations (IsoChunk clears them
+  on pool reuse) and never holds cutaway re-bakes. Repro/metric: `run.sh --flag hold=10` + `harness/flicker.py`
+  (runs `flick-*`); stock 3.8 vs broken 26 transient px/frame at `--scale 2560`.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
   still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).

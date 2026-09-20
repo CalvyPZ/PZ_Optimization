@@ -999,3 +999,42 @@ parts are serialised a few frames apart while chunks keep loading, so `map_meta.
 `metacell_*.bin` files could disagree on room metaIDs; the "invalid room metaID" load errors seen
 that night turned out to be pre-existing in the bench save (present in every run), but the
 consistency risk stands and the gain was one 55 ms frame per 30 s, so it stays opt-in.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, per-frame lists survive a held re-bake)
+
+The maintainer reported objects inside buildings, doors, windows and corpses flickering
+(appear / disappear) in normal play. Reproduced on the end square of the `S:450` route with the
+player spinning (`run.sh ... --flag hold=10 --flag turn=90 --flag zoom=1 --record`, runs
+`flick-*`; metric `harness/flicker.py`): items on the desks, the table beside the player, the
+doors and the wall objects blink out for 1-3 frames; stock shows nothing but the spinning player.
+
+Cause: stock `FBORenderLevels.NLevels.invalidate()` does not only set the dirty bits. Outside
+`performRenderTiles` (`FBORenderLevels.clearCachedSquares == true`, set at the top of
+`renderInternal` and after the tile pass) it also empties the level's per-frame square lists
+(items on tables, obscuring furniture, cutaway window frames, corpses, flies, animated
+attachments, puddles, translucent floor), because in stock the bake that follows in the same
+frame rebuilds them. Every pzopt hold that draws the previous texture instead of re-baking
+(`lightingRebakeMs`, `rebakeBudget`) therefore drew a texture whose per-frame objects were
+neither in the texture nor in the lists. `lightingRebakeMs=0` alone took the metric from 26 to
+7.8 transient px/frame (stock 3.8); `rebakeBudget=0`, `bakeBudget=0`, `lightingBudget=0`, the
+cutaway keys and the texture-content keys changed nothing on their own.
+
+Edit: the two `FBORenderLevels.clearCachedSquares = true` assignments in `renderInternal`
+become `= !pzoptKeepPerFrameLists()`, a private static helper that is true when the overrides
+are enabled and any of `LIGHTING_REBAKE_MS`, `REBAKE_BUDGET`, `BAKE_BUDGET` is set. The lists
+then only change at a bake (`clearCachedSquares(level)` at its start rebuilds them), so they
+always describe the texture that is on screen, held or fresh. Stock's own flow is unchanged
+(every bake rebuilds them anyway). The re-bake budget no longer holds cutaway (2048) re-bakes:
+their per-frame draws re-test the live cutaway flags (`isTableTopObjectSquareCutaway`, the
+window-frame flags), so a stale texture could show an object neither baked nor per frame; the
+held set is now `32 | 1024` only. Result: 0.1 transient px/frame at object scale (`--scale
+1280`; broken build 3.4, stock 0.0); uncapped spinning route 488.7 fps mean, p99 7.2 ms
+(`flickfix-u-1`, reference `jvm-zulu-g1-1` 508.7 / 7.3) with ~15 % more bakes per period.
+
+## zombie.iso.IsoChunk (fourth edit, 2026-09-20 evening, per-frame lists cleared on reuse)
+
+`resetForStore` calls a new private `pzoptClearPerFrameLists()`: `clearCachedSquares(z)` for every
+level of every player's `FBORenderLevels`. Stock relied on the load-time invalidation to empty
+those lists; with the FBORenderCell edit above that invalidation keeps them, so a chunk object
+going back to the pool drops them here instead (the corpse and flies lists are iterated for every
+on-screen level, baked or not).

@@ -5378,9 +5378,28 @@ public final class IsoChunk {
       }
    }
 
+   /**
+    * pzopt: the per-frame square lists of every chunk level (items, obscuring objects, cutaway window frames,
+    * corpses, flies, puddles, water). Stock empties them in FBORenderLevels.invalidate(); with
+    * FBORenderCell.pzoptKeepPerFrameLists they survive invalidations so a held re-bake keeps drawing them, and a
+    * chunk object going back to the pool must drop them here instead.
+    */
+   private void pzoptClearPerFrameLists() {
+      for (int playerIndex = 0; playerIndex < 4; playerIndex++) {
+         FBORenderLevels renderLevels = this.renderLevels[playerIndex];
+         if (renderLevels == null) {
+            continue;
+         }
+         for (int z = this.minLevel; z <= this.maxLevel; z++) {
+            renderLevels.clearCachedSquares(z);
+         }
+      }
+   }
+
    public void resetForStore() {
       loadGridSquare.remove(this);
       this.pzoptOccluderMaskSet = 0L; // pzopt: a reused chunk object starts without stored occluder masks
+      this.pzoptClearPerFrameLists(); // pzopt: FBORenderCell keeps them across invalidations; a reused chunk starts empty
       this.randomId = 0;
       this.revision = 0L;
       this.nextSplatIndex = 0;

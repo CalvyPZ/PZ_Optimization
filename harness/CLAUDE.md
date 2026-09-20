@@ -62,6 +62,15 @@ are entirely black; the control is a same-route run with the suspect key off (20
 the black chunk squares, runs `bs-*`). Two captures 2 s apart tell a baked artifact (identical)
 from a per-frame one.
 
+`--flag hold=N` (bench): after the last route leg the player stays on the end square N s before
+the run ends; `turn` keeps spinning the facing, so the camera is still while cutaways, fades and
+the obscuring set keep changing. The flicker rig (2026-09-20 evening, runs `flick-*`):
+`--flag route=S:450 --flag speed=90 --flag turn=90 --flag hold=10 --flag zoom=1 --route-seconds 16
+--record`, then `flicker.py <run>/recording.mp4 START END` over the hold (quit instant minus 12 to
+minus 4 s) counts pixels that change and revert within 3 frames (a per-frame appear / disappear);
+`--heat out.png` paints where. Stock reads 3.8 px/frame at `--scale 2560` (the spinning player
+only) and 0.0 at `--scale 1280`; the broken build read 26 / 3.4. Compare only same-scale numbers.
+
 Flags that must be on every measured run: `--prop instrument=true` (else no
 `pzopt-chunks.out` / `pzopt-frames.out` and compare.py crashes), `--flag zoom=max` on bench,
 `--no-dashboard` when measuring (the PZDashboard mod fires four collectors every 2.000 s, one
@@ -118,6 +127,8 @@ real above twice that.
 | `loadsheet.sh <run>` | recording.mp4 + loadtrace | contact sheet around the load |
 | `parity.py a b` | pzopt-parity.out | square-by-square recalc diff |
 | `blacktiles.py ctrl.png run.png...` | `--shot-at` captures | newly-black pixels and fully black 32 px tiles of a run against a control capture |
+| `flicker.py <run>/recording.mp4 START END [--scale W] [--heat png]` | `--record` of a `--flag hold=N` run | per-frame appear / disappear metric (pixels that change and revert within 3 frames), busiest screen cells, heat map |
+| `flicker-triple.py <run>/recording.mp4 FRAME` | same | crops of one frame triple with the A-B-A pixels marked (frame-numbered; use `-ss` times for anything compared with flicker.py) |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe) |
 | `stitch-triple.sh` | three bench recordings (stock settings, optimized 2026-09-19, optimized + game-thread pass) | 2:1 quad video with a results panel; clip starts derived from run.opts launch_epoch and pzopt-schedule.out (recorder starts ~1 s after launch_epoch) |

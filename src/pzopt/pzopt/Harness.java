@@ -34,6 +34,8 @@ import zombie.vehicles.BaseVehicle;
  *                      load burst and the forced-zoom bake are over ~2 s after the world is up)
  *   zoom     max|level  force the camera zoom before the route (auto-zoom off); drive mode defaults to max, other modes keep the save's zoom
  *   max_seconds        drive mode: give up (route_status=timeout) after this long on the route (default 90)
+ *   hold     seconds   bench/parity: after the last leg stay on the end square this long before quitting; the turn
+ *                      keeps spinning the facing (a still camera with changing cutaways, for flicker recordings)
  *   shot_at  seconds   bench/parity: this far into the route hold the camera (no teleport, no turn) for 6 s and,
  *                      2 s into the hold, write Zomboid/Screenshots/pzopt-shot.png (Core.TakeFullScreenshot) and
  *                      touch Zomboid/pzopt-shot.now so run.sh can take a desktop capture too (artifact checks)
@@ -82,6 +84,9 @@ public final class Harness {
    private static float turnAngle = 0f;
    /** bench: seconds into the route at which the camera is held for a screenshot (flag shot_at, 0 = off). */
    private static float shotAt = 0f;
+   /** bench: seconds to stay on the route's end square, still spinning, before the run ends (flag hold, 0 = off). */
+   private static float holdSecs = 0f;
+   private static long holdStartNs = 0L;
    private static int shotPhase; // 0 = pending, 1 = holding, 2 = done
    private static long shotHoldNs;
    private static boolean shotRequested, shot2Requested;
@@ -198,6 +203,7 @@ public final class Harness {
          speed = Float.parseFloat(HarnessFlags.get("speed", "18"));
          turnDegPerSec = Float.parseFloat(HarnessFlags.get("turn", "0"));
          shotAt = Float.parseFloat(HarnessFlags.get("shot_at", "0"));
+         holdSecs = Float.parseFloat(HarnessFlags.get("hold", "0"));
          settle = Float.parseFloat(HarnessFlags.get("settle", "15"));
          maxSeconds = Float.parseFloat(HarnessFlags.get("max_seconds", "90"));
          cruiseKmh = Float.parseFloat(HarnessFlags.get("kmh", "60"));
@@ -398,6 +404,16 @@ public final class Harness {
                // spin the facing so the vision cone, lighting cone and buildings-in-front scans keep changing
                turnAngle = (turnAngle + turnDegPerSec * Math.min(dt, 0.1f)) % 360f;
                p.setDirectionAngle(turnAngle);
+            }
+            if (leg >= legs.size() && holdSecs > 0f) {
+               // end-of-route hold: no more teleports, the facing keeps turning (flag hold)
+               if (holdStartNs == 0L) {
+                  holdStartNs = nowNs;
+                  Log.info("harness: route legs done at " + p.getXi() + "," + p.getYi() + "; holding " + holdSecs + " s" + (turnDegPerSec != 0f ? " with turn=" + turnDegPerSec : ""));
+               }
+               if ((nowNs - holdStartNs) / 1e9f < holdSecs) {
+                  return;
+               }
             }
             if (leg >= legs.size()) {
                float secs = (nowNs - runStartNs) / 1e9f;

@@ -831,3 +831,42 @@ Thermals over the same route windows (`sysmon.csv`; on this APU `gpu_c` is the e
   power.
 - 25 s is not steady state on a thin laptop; whether sustained play throttles needs the 100 s
   route on `performance` (the sysmon CSV already logs everything needed).
+
+## 2026-09-20 (16:05–16:45): flicker of objects inside buildings, doors, windows, corpses — held re-bakes drew empty per-frame lists
+
+Report (maintainer, normal play, clear weather): objects inside buildings, doors, windows and
+corpses appear / disappear. Repro recipe from the maintainer: spawn where the south route ends
+and spin. New harness flag `hold=N` (stay on the end square, `turn` keeps spinning) and a
+metric, `harness/flicker.py` (pixels that change and revert within 3 frames of a `--record`),
+runs `flick-*`, all `--flag route=S:450 --flag speed=90 --flag turn=90 --flag hold=10 --flag
+zoom=1`, hold window analysed at `--scale 2560`, the game classes of the 16:01 install.
+
+| run | keys | transient px/frame | what the heat map shows |
+|---|---|---|---|
+| flick-opt-1 | defaults | 26.2 | papers on the desks, the table beside the player, doors, wall objects |
+| flick-stock-1 | `enabled=false` | 3.8 | the spinning player only |
+| flick-norebake-1 | `rebakeBudget=0` | 28.1 | same as defaults |
+| flick-g1cut-1 | cutawayInvalidateChanged/VisitPrefilter/Fast off, cutawayRadius=0, gridStackInterval=0 | 34.3 | same as defaults |
+| flick-g2bake-1 | lightingRebakeMs=0 lightInfoChunkGate/OncePerFrame off, occlusionSkipLightingOnly=false, bakeBudget=0 lightingBudget=0 | 11.5 | edge shimmer only |
+| flick-g3tex-1 | windows/translucentTiles/treesInChunkTexture off, persistentVbo=false | 670.7 | everything per-frame flickers (more objects per frame = more flicker) |
+| flick-lb0-1 | `lightingBudget=0` | 25.4 | same as defaults |
+| flick-lrb0-1 | `lightingRebakeMs=0` | 7.8 | edge shimmer only |
+| flick-bb0-1 | `bakeBudget=0` | 22.4 | same as defaults |
+| flick-fix-1 | fix, defaults | 11.5 (0.1 at `--scale 1280`; stock 0.0, broken 3.4) | edge shimmer only |
+
+Frames of the table region (flick-opt-1, 29.43 s): fading table + lamp per frame -> opaque table
+with the papers (fresh bake) -> table, lamp and papers gone for three frames -> back.
+
+Cause (`docs/override-edits.md`, FBORenderCell entry of this evening): stock
+`FBORenderLevels.NLevels.invalidate()` also empties the level's per-frame square lists (items,
+obscuring objects, cutaway window frames, corpses, flies, attachments, puddles) outside
+`performRenderTiles`, because stock always re-bakes in the same frame. A held re-bake
+(`lightingRebakeMs=250`, `rebakeBudget=4`) drew the previous texture with those lists already
+empty, so for the held frames the per-frame objects were nowhere. Group 3 was worse because with
+windows, translucent tiles and trees per frame there is more per-frame content to lose.
+
+Fix: keep the lists across invalidations when a hold is configured (they only change at a bake,
+so they always match the texture on screen), clear them when a chunk object returns to the pool,
+and never hold cutaway (2048) re-bakes (their per-frame draws re-test live flags). Cost on the
+uncapped spinning route: `flickfix-u-1` 488.7 fps mean, p99 7.2 ms, ~15 % more bakes per period
+(`jvm-zulu-g1-1` reference 508.7 / 7.3), GPU 96 % in both.
