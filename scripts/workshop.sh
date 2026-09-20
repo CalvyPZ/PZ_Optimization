@@ -93,6 +93,10 @@ else
   echo "warning: no $src_img or no ffmpeg; put a square preview.png in $out and poster.png in $MOD" >&2
 fi
 
+# the animated preview (harness/showcase-thumbnail-gif.py); the in-game uploader only takes
+# preview.png, so this one goes up with steamcmd (item.vdf below)
+[[ -f docs/workshop/images/00-showcase-thumbnail.gif ]] && cp docs/workshop/images/00-showcase-thumbnail.gif "$out/preview.gif"
+
 # workshop.txt: keep the id= of an earlier upload (the game writes it back after the first one)
 id=""
 for f in "$out/workshop.txt" docs/workshop/workshop.txt; do
@@ -118,7 +122,23 @@ if [[ -f "$out/preview.png" ]]; then
   [[ $psz -le 1024000 ]] || { echo "preview.png is $psz bytes, the limit is 1024000" >&2; exit 1; }
 fi
 
+# steamcmd item file: same content folder, the GIF as preview, text left to the in-game upload
+# (steamcmd only touches the fields present).  steamcmd +login <user> +workshop_build_item <vdf> +quit
+if [[ -n "$id" ]]; then
+  cat > "$out/item.vdf" <<VDF
+"workshopitem"
+{
+	"appid"		"108600"
+	"publishedfileid"	"$id"
+	"contentfolder"		"$out/Contents"
+	"previewfile"		"$out/preview.gif"
+	"changenote"		"$(date -u +%Y-%m-%d): revision $rev, commit ${commit:-?}, animated preview"
+}
+VDF
+fi
+
 echo "staged $out"
 echo "  classes: $CLASSES ($nfiles files, revision $rev, from $zip)"
 echo "  id: ${id:-<none yet; the first in-game upload writes it into workshop.txt>}"
 echo "next: launch the game through Steam, Main menu > Workshop > Create/Update item > PZ_Optimization > Upload"
+[[ -f "$out/preview.gif" && -n "$id" ]] && echo "animated preview: steamcmd +login <steam user> +workshop_build_item $out/item.vdf +quit"

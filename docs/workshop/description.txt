@@ -5,8 +5,8 @@ Class overrides for Project Zomboid Build @VERSION@ (game revision @REV@) that s
 Source, measurements, videos and the same files as a GitHub release:
 https://github.com/DiegoVillalobosFlores/PZ_Optimization
 
-[url=https://github.com/DiegoVillalobosFlores/PZ_Optimization#readme][img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.jpg[/img][/url]
-[i]Stock vs all optimizations, same PC, same save, same routes, no frame cap on either side (the full video is on the repository page).[/i]
+[url=https://github.com/DiegoVillalobosFlores/PZ_Optimization#readme][img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.gif[/img][/url]
+[i]Uncapped at 5120x2160 with the overrides on; the in-game overlay (F9) in the corner is the live frame time. The stock-vs-optimized video is on the repository page.[/i]
 
 [h1]What it does[/h1]
 Project Zomboid loads and bakes the map in chunks; on stock, the loading, baking and lighting work of a busy screen lands in the same frame and shows as stutter while driving or turning. These overrides move that work off the game thread, spread it over frames, and cache what stock recomputes every frame (puddles, rain, cutaways, light info, sound zones). Bench numbers on the repository page; the short version at 5120x2160 on an RTX 4090: driving p99 frame time 19 -> 8 ms, uncapped ~270 -> ~500 fps, thunderstorms 83 -> 188 fps.
@@ -30,6 +30,10 @@ Without the script: copy the contents of the item's pzopt-classes folder into th
 [h1]Install on Linux[/h1]
 [code]bash ~/.local/share/Steam/steamapps/workshop/content/108600/@ID@/mods/PZ_Optimization/42/install.bash[/code]
 (Steam Workshop items cannot contain .sh files, hence .bash.) Same flags: --status, --uninstall, --dir <game folder>.
+
+[h1]Performance overlay (F9)[/h1]
+[img]https://raw.githubusercontent.com/DiegoVillalobosFlores/PZ_Optimization/master/docs/workshop/images/09-performance-overlay.jpg[/img]
+Presented frame time, p50 / p99 / p99.9 / max, 1 %-low, jitter and spikes over the last 5 s, GPU busy (GL timer query), game-thread and render-thread load, process and machine CPU, heap, a verdict line (GPU bound / game thread bound / at the cap) and the frame graph. Same numbers on Windows and Linux, no MangoHud or RivaTuner needed; every run also logs it to Zomboid/pzopt-overlay.out.
 
 [h1]Settings[/h1]
 Options > Optimizations in the game (saved to Zomboid/pzopt/options.ini, applied on the next launch) has every key with a tick box, plus "Disable all (stock game)" / "Enable all". Options > Display gains an "Uncapped" framerate entry and a separate menu framerate. F9 toggles the performance overlay.

@@ -13,6 +13,8 @@ page states the commit and the zip sha256 so the two can be checked against each
 ~/Zomboid/Workshop/PZ_Optimization/          staging folder the in-game uploader reads
 ├── workshop.txt                             title / description= lines / tags=Build 42; / visibility
 ├── preview.png                              512x512 (256 or 512 square, <= 1 MB) from the showcase thumbnail
+├── preview.gif                              animated preview (steamcmd route, see Images)
+├── item.vdf                                 steamcmd workshop_build_item file (written once id= is known)
 └── Contents/mods/PZ_Optimization/42/        B42 versioned mod layout
     ├── mod.info                             id=PZ_Optimization, modversion=<commit>, versionMin
     ├── poster.png
@@ -69,6 +71,27 @@ hable tone-map at 18 / 33 / 50 / 65 / 82 / 98 / 116 s), `08` the options-tab clo
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
 the header) and a YouTube URL for the showcase video.
+
+### Animated thumbnail
+
+`docs/workshop/images/00-showcase-thumbnail.gif` (`harness/showcase-thumbnail-gif.py`): the
+results-card capture from 25 s, a square view of the fight, then a smooth zoom and pan into the
+performance overlay, held while its numbers tick; "PZ Optimized" on a band at the bottom.
+512x512, 8 fps, 43 frames, 112 colours, no dither, 732 KB (Steam's preview limit is 1 MB and
+the palette size, not the pixel count, decides it). `09-performance-overlay.jpg` is the overlay
+panel cropped from the same frame for the carousel and the "Performance overlay" section.
+
+The game's uploader hard-codes `preview.png` and rejects anything that is not a PNG, so the GIF
+cannot go up from the in-game screen. Steam's own tool takes it: install `steamcmd` (AUR), then
+
+```sh
+steamcmd +login <steam user> +workshop_build_item ~/Zomboid/Workshop/PZ_Optimization/item.vdf +quit
+```
+
+`item.vdf` (written by `workshop.sh` once `id=` is known) names the same `Contents/` folder and
+`preview.gif`; it carries no title or description, so the page text stays what the in-game
+upload set. Steam Guard asks for the code on the first login. Any later in-game upload
+sends `preview.png` again and replaces the GIF, so re-run the steamcmd line after one.
 
 ## What the item cannot do
 
