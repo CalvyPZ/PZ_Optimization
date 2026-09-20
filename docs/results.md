@@ -587,3 +587,31 @@ the frames hit the 240 cap; in town on the spinning route the game thread is the
 
 Next, if pursued: repeat the Zulu G1 vs ZGC pair on AC before shipping `-XX:+UseG1GC` in
 the launcher JSON for laptop users (n=1, battery), and the same pair on the desktop.
+
+## 2026-09-20 (05:50–05:55): launcher JSON tuned for G1; GC pauses gone from the frame tail, tail unchanged
+
+`ProjectZomboid64.json` on the laptop now carries `-Xms4096m -Xmx4096m -XX:+UseG1GC
+-XX:MaxGCPauseMillis=25 -XX:+AlwaysPreTouch -XX:+PerfDisableSharedMem` (copies:
+`config/launcher/ProjectZomboid64.g1.json`, Steam's original as
+`config/launcher/ProjectZomboid64.stock.json`; Steam rewrites the file on an update, `cp`
+the tuned copy back). Reasons: the G1 log of `spin-opt-uncap-g1-1` showed the heap growing
+436 MB → 2.7 GB during the run with ~1.7 GB live, so a young collection every 2 to 3 s and
+pauses up to 53 ms; THP is already `always` here so `UseTransparentHugePages` adds nothing.
+`harness/run.sh` passes the JSON through (it only adds the gc log), so runs without `--gc`
+inherit these flags from now on.
+
+Spinning route, same conditions as the matrix above:
+
+| run | launcher | fps | mean | p50 / p90 | p99 | p99.9 / max | >33 ms | jitter | GC pauses (run): n / total / max |
+|---|---|---|---|---|---|---|---|---|---|
+| spin-opt-uncap-g1-1 | `-Xmx3072m -XX:+UseG1GC` | 81.8 | 12.2 | 10.6 / 20.2 | 40.8 | 72 / 110 | 46 | 4.8 | 92 / 762 ms / 53 ms |
+| spin-opt-uncap-g1tuned-1 | tuned set above | 82.6 | 12.1 | 10.5 / 20.1 | 42.1 | 77 / 122 | 39 | 4.9 | 54 / 623 ms / **9.9 ms** |
+
+The flags did what they are for (worst pause 53 → 9.9 ms, fewer pauses, no extra JIT+GC
+CPU: 102 → 100 s) and the frame distribution did not move at all: every column is within
+single-run noise. So the tail that remains on this route (p99 ~41 ms, p99.9 ~75 ms, a few
+100+ ms frames) is not GC; it is the game thread's own bursts while streaming (chunk
+hand-off and bakes, the same bursts the 03:10 game-thread pass attributed on the desktop).
+JVM flags are exhausted as a lever here. Kept anyway: no 50 ms stop-the-world hits, no
+heap growth, no hsperfdata writes, for ~1 GB more RSS and a slightly longer boot
+(`AlwaysPreTouch`).
