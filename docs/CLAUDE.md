@@ -13,6 +13,7 @@ classes are described in words.
 | `plan-resource-use.md` | 2026-09-19 verdict on why the uncapped game idles (Zink swap stall; NVIDIA GL is GPU-bound) |
 | `plan-game-load.md` | the load after "Continue" (LoadTrace, loadtime.py) |
 | `plan-vulkan-renderer.md` | plan to move from OpenGL to Vulkan |
+| `plan-wayland.md` | 2026-09-19 native Wayland vs XWayland A/B: a wash at the cap, XWayland stays default |
 | `plan-diagram.md` | plan at a glance |
 | `proton-run-prep-2026-09-19.md` | command sequence for the pending Proton comparison |
 | `windows-test.md` | installing the prebuilt class zip on a Windows depot and testing it; 2026-09-19 results of the first Windows bench (stock vs optimized, utilization) |

@@ -5,7 +5,7 @@
 #                  [--flag k=v]... [--prop k=v]... [--mangohud secs]
 #                  [--mangohud-config path]
 #                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
-#                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]...
+#                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]... [--mod ID]... [--vmarg ARG]...
 #                  [--lead secs] [--route-seconds secs] [--launcher auto|steam|direct] [--option key=value]...
 #
 # --launcher direct starts the native game itself (projectzomboid.sh, -Dzomboid.steam=0) instead of
@@ -18,6 +18,10 @@
 #                    both hooks at once killed the game at "VSync: OFF" on 2026-09-18, native-zink-1);
 #                    recorded in run.opts and in console.txt's "OpenGL version" line
 #   --env K=V        any other variable for the game process (repeatable)
+#   --vmarg ARG      extra JVM option appended to the launcher JSON vmArgs for this run (repeatable; e.g. -javaagent:...;
+#                    JAVA_TOOL_OPTIONS is the wrong place for an agent: the launcher's libjvm-locating helper JVM picks it up too)
+#   --mod ID         extra mod (from ~/Zomboid/mods) enabled in mods/default.txt and the bench save for this run (repeatable;
+#                    default.txt is restored on exit, the bench save is rebuilt every run)
 #
 # Profiling / A-B options (each restores what it touched on exit):
 #   --jfr            record a JFR flight recording of the run (settings=profile, dumped on exit)
@@ -57,7 +61,7 @@ FLAG_FILE="$ZOMBOID/Lua/pzopt-harness.txt"
 NATIVE_FLAG_FILE="${NATIVE_ZOMBOID:-$HOME/Zomboid}/Lua/pzopt-harness.txt"
 
 label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
-record=0; jfr=0; jfr_period=""; jfr_settings=(); game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=()
+record=0; jfr=0; jfr_period=""; jfr_settings=(); game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=(); extra_mods=(); vmargs=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --label) label="$2"; shift 2 ;;
@@ -81,6 +85,8 @@ while [[ $# -gt 0 ]]; do
                                                      # fit). Default: none; the route starts settle s after the world is up (see below)
     --route-seconds) route_seconds="$2"; shift 2 ;;  # expected route length (bench: tiles/speed = 100; drive: max_seconds)
     --env) game_env+=("$2"); shift 2 ;;
+    --mod) extra_mods+=("$2"); shift 2 ;;
+    --vmarg) vmargs+=("$2"); shift 2 ;;
     --record) record=1; shift ;;
     --launcher) launcher="$2"; shift 2 ;;                # auto|steam|direct (see the header)
     --option) game_options+=("$2"); shift 2 ;;           # key=value written into ~/Zomboid/options.ini for the run (restored on exit)                     # screen recording of the run (gpu-screen-recorder, first monitor, native res, AV1 HDR) -> <run>/recording.mp4
@@ -129,11 +135,19 @@ fi
 # 1. harness mod
 rm -rf "$ZOMBOID/mods/$MOD_ID"
 cp -r "$MOD_SRC" "$ZOMBOID/mods/$MOD_ID"
-enable_mod() { # $1 = mods.txt path
+enable_mod() { # $1 = mods.txt path, $2 = mod id (default: the harness mod); inserted at the top of the list
+  local id="${2:-$MOD_ID}"
   # files written by the Windows build under Proton are CRLF; the native build writes LF
-  grep -q "mod = $MOD_ID," "$1" || sed -i "0,/^mods\r$/{n;s/^{\r$/{\r\n    mod = $MOD_ID,\r/}" "$1"
-  grep -q "mod = $MOD_ID," "$1" || sed -i "0,/^mods$/{n;s/^{$/{\n    mod = $MOD_ID,/}" "$1"
-  grep -q "mod = $MOD_ID," "$1" || { echo "could not enable $MOD_ID in $1" >&2; exit 1; }
+  grep -q "mod = $id," "$1" || sed -i "0,/^mods\r$/{n;s/^{\r$/{\r\n    mod = $id,\r/}" "$1"
+  grep -q "mod = $id," "$1" || sed -i "0,/^mods$/{n;s/^{$/{\n    mod = $id,/}" "$1"
+  grep -q "mod = $id," "$1" || { echo "could not enable $id in $1" >&2; exit 1; }
+}
+enable_extra_mods() { # $1 = mods.txt path; --mod IDs go in above the harness mod, in the order given
+  local i
+  for (( i=${#extra_mods[@]}-1; i>=0; i-- )); do
+    [[ -d "$ZOMBOID/mods/${extra_mods[i]}" ]] || { echo "--mod ${extra_mods[i]}: not found in $ZOMBOID/mods" >&2; exit 1; }
+    enable_mod "$1" "${extra_mods[i]}"
+  done
 }
 [[ -f "$ZOMBOID/mods/default.txt.pzopt-orig" ]] || cp "$ZOMBOID/mods/default.txt" "$ZOMBOID/mods/default.txt.pzopt-orig"
 enable_mod "$ZOMBOID/mods/default.txt"
@@ -142,6 +156,10 @@ disable_dashboard() { sed -i "/^    mod = $DASH_ID,\r\{0,1\}\$/d" "$1"; grep -q 
 if (( no_dashboard )); then
   cp "$ZOMBOID/mods/default.txt" "$ZOMBOID/mods/default.txt.pzopt-dash"
   disable_dashboard "$ZOMBOID/mods/default.txt"
+fi
+if (( ${#extra_mods[@]} )); then
+  [[ -f "$ZOMBOID/mods/default.txt.pzopt-dash" ]] || cp "$ZOMBOID/mods/default.txt" "$ZOMBOID/mods/default.txt.pzopt-dash"
+  enable_extra_mods "$ZOMBOID/mods/default.txt"
 fi
 
 # 2. bench save: a pristine template is made once from the source save, and
@@ -176,11 +194,14 @@ echo "bench save: $BENCH_SAVE (template $(basename "$TEMPLATE"))"
 rm -rf "$ZOMBOID/Saves/$BENCH_SAVE"
 cp -r "$TEMPLATE" "$ZOMBOID/Saves/$BENCH_SAVE"
 (( no_dashboard )) && disable_dashboard "$ZOMBOID/Saves/$BENCH_SAVE/mods.txt"  # the save is rebuilt from the template every run; nothing to restore
+(( ${#extra_mods[@]} )) && enable_extra_mods "$ZOMBOID/Saves/$BENCH_SAVE/mods.txt"
 
 # 3. point the game at the bench save and write the flag file
 # read by harness/steam-launch.sh (the Steam launch option) at this fixed path, whatever the layout: under Proton
 # $ZOMBOID is the compatdata prefix, which the wrapper does not look at
 LAUNCH_ENV="$HOME/Zomboid/pzopt-launch.env"; mkdir -p "$HOME/Zomboid"
+# native Wayland window (--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1): xdotool keypresses cannot reach it
+native_wayland=0; for e in "${game_env[@]}"; do [[ "$e" == *zomboid.wayland=1* ]] && native_wayland=1; done
 write_launch_env() {
   {
     [[ -n "$mangohud_secs" ]] && echo "PZOPT_MANGOHUD=1"
@@ -306,8 +327,8 @@ JFR_OUT="$PZ_DIR/pzopt.jfr"
 {
   cp "$LAUNCHER" "$LAUNCHER.pzopt-orig"
   rm -f "$JFR_OUT"
-  python3 - "$LAUNCHER" "$jfr" "$jfr_period" "$gc" "$PZ_DIR_JVM/pzopt.jfr" "$PZ_DIR_JVM/gc.log" "$launcher" "$(IFS=,; echo "${jfr_settings[*]:-}")" <<'PY'
-import json, sys
+  PZOPT_VMARGS="$(printf '%s\n' "${vmargs[@]}")" python3 - "$LAUNCHER" "$jfr" "$jfr_period" "$gc" "$PZ_DIR_JVM/pzopt.jfr" "$PZ_DIR_JVM/gc.log" "$launcher" "$(IFS=,; echo "${jfr_settings[*]:-}")" <<'PY'
+import json, sys, os
 path, jfr, period, gc, jfr_file, gc_log, launcher, jfr_settings = sys.argv[1:]
 j = json.load(open(path))
 if launcher == "direct":
@@ -331,6 +352,9 @@ if gc:
         v["vmArgs"] = swap(v["vmArgs"])
     if want not in j["vmArgs"] and not any(want in v["vmArgs"] for v in j.get("windows", {}).values()):
         j["vmArgs"].append(want)
+for a in os.environ.get("PZOPT_VMARGS", "").split("\n"):
+    if a and a not in j["vmArgs"]:
+        j["vmArgs"].append(a)
 json.dump(j, open(path, "w"), indent="\t")
 PY
   echo "launcher vmArgs for this run: $(python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(" ".join(a for a in j["vmArgs"]+[x for v in j.get("windows",{}).values() for x in v["vmArgs"]] if "GC" in a or "Flight" in a or "Xm" in a or "Xlog" in a))' "$LAUNCHER")"
@@ -454,14 +478,18 @@ PYC
             say "mangohud: control socket not reachable (attempt $attempt)" >&2; sleep 1
           fi
         done
-        if (( ! started )) && command -v xdotool >/dev/null; then
+        if (( ! started )) && (( native_wayland )); then
+          say "mangohud: control socket failed and the toggle_logging key cannot reach a native Wayland window; use --lead for the fixed schedule" >&2
+        elif (( ! started )) && command -v xdotool >/dev/null; then
           xdotool keydown Shift_L keydown F2; sleep 0.3; xdotool keyup F2 keyup Shift_L
           say "mangohud: falling back to the toggle_logging key at +$(( $(date +%s) - launch_epoch )) s" >&2
         elif (( ! started )); then
           say "mangohud: could not start the log (no control socket, no xdotool); use --lead for the fixed schedule" >&2
         fi
       fi
-      if [[ "$mode" == drive ]] && command -v xdotool >/dev/null; then
+      if [[ "$mode" == drive ]] && (( native_wayland )); then
+        say "mangohud: native Wayland window, fps metrics reset key skipped (xdotool cannot reach it; the HUD metrics are a rolling 10000-frame window anyway)"
+      elif [[ "$mode" == drive ]] && command -v xdotool >/dev/null; then
         sleep_until_ms $((start_ms + 500))
         xdotool keydown Shift_R keydown F9; sleep 0.3; xdotool keyup F9 keyup Shift_R
         say "mangohud: fps metrics reset key sent $(( $(date +%s) - launch_epoch )) s after launch"
@@ -524,7 +552,7 @@ cp "$ZOMBOID/console.txt" "$out/console.txt"
 cp "$ZOMBOID"/pzopt-*.out "$out/" 2>/dev/null || true
 cp "$PZ_DIR/pzopt.properties" "$out/pzopt.properties"
 cp "$LAUNCHER" "$out/ProjectZomboid64.json"
-{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
+{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mods=${extra_mods[*]:-}"; echo "vmargs=${vmargs[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
 # gc.log rolls over (filecount=3); keep the segments that were written during this run
 for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
   [[ -f "$g" ]] || continue

@@ -6,7 +6,7 @@ the zip built on Linux carries the finished class files, and the runtime guard
 class it shadows against the Windows jar. If anything differs it logs one line and
 the game runs as stock, so the worst case of a mismatch is "no effect".
 
-Package: `build/pzopt-b0bbce05d5-classes.zip`, built by `scripts/release.sh` (the
+2026-09-20 release from `aa9482b` is 606 KB, 114 files plus the manifest
 2026-09-20 release from `2d34aa9` is 543 KB, 104 files plus the manifest
 `pzopt-files.txt`; the 2026-09-19 test build from `a202778` had 97) for game
 revision `b0bbce05d5` (Build 42.20.4).
@@ -63,7 +63,7 @@ touches `projectzomboid.jar`.
 
 ```powershell
 Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 105 (97 on the 2026-09-19 test build)
+Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 115 (105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
 Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
 ```
 
