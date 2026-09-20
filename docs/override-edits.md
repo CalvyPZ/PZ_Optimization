@@ -935,6 +935,18 @@ to the game thread this frame (`doLoadGridsquare`: loot roll, erosion, recalc, p
 5 ms each) is capped at 1 + queue / divisor on top of the stock 1 + 3 * queue / gridWidth, so a
 chunk row arriving at once is spread over a few frames instead of one 10 to 25 ms frame.
 
+Edit of 2026-09-21 (mid-scroll guard): `getGridSquareDirect` returns null when the chunk found at
+the indexed slot is not the chunk that slot should hold (`c.wx != getWorldXMin() + chunkX` or the
+same for y). `LoadLeft/Right/Up/Down` move `worldX`/`worldY` (the origin every caller subtracts)
+before `SwapChunkBuffers` publishes the shifted grid, so a lookup from the streamer or a recalc
+worker inside that window indexes the old grid with the new origin and gets a square one chunk
+off. Stock `IsoGridSquare.isWallTo(other, depth)` then asks for the orthogonal intermediate,
+receives that same off-by-a-chunk (still diagonal) square and recurses on it until the stack
+overflows (the `depth > 100` branch is an empty debug hook). Seen in a Windows user's console,
+chunk 1071,1434: the worker's pass and the streamer retry both overflowed. A square that is not
+where the index says reads as not loaded, exactly what the map edge returns; two int compares on
+fields already in cache.
+
 ## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, occlusion grid on lighting-only frames)
 
 `renderTilesInternal` decides whether to rebuild the occluded-squares grid through
@@ -1154,3 +1166,16 @@ that the maintainer saw as the rain freezing and jumping every ~6 s (`docs/findi
 flash ramps (chunks baked at different points of the ramp). `lightingRebakeMs=100` was tried
 with budgets 8 and 16 and is worse on the tail (chunks become eligible about as often as the
 cap, so the cap keeps dumping the backlog).
+
+## zombie.iso.LightingJNI (2026-09-20 night, harness see-all view)
+
+`updatePlayer` passes `pzopt.Scene.seeAll()` to the native `playerSet` where stock passes a
+constant false (B41 passed the player's dead state there: a dead player's visibility pass marks
+every square seen and visible, the spectator view). The flag comes from the harness flag file
+(`see_all=true`, read once at world-ready by `Scene.apply`; false in normal play, so the class
+behaves as stock outside a run). Why: the Louisville preset walks through downtown blocks whose
+tall buildings stop the vision cone, and the never-seen squares behind them draw black, so the
+recordings were mostly black. With the flag every square is lit and drawn on both sides of an
+A/B (more visible tiles and characters than a normal view; compare only same-flag runs). No
+Config key: it is a scene flag, not an optimization. The class also gains the usual
+`pzopt.Overrides.onClassLoaded` static initializer.

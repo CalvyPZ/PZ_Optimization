@@ -486,6 +486,15 @@ public final class IsoChunkMap {
             return null;
          }
 
+         // pzopt: mid-scroll guard. LoadLeft/Right/Up/Down move worldX/worldY (so the callers' origin) before
+         // pzopt: SwapChunkBuffers publishes the shifted grid, so a streamer/recalc-thread lookup in that window
+         // pzopt: indexes the old grid with the new origin and gets a square one chunk off. IsoGridSquare.isWallTo
+         // pzopt: then recurses on that same wrong square until the stack overflows (its depth check is a no-op).
+         // pzopt: A chunk that is not where the index says it is reads as not loaded, as it does at the map edge.
+         if (c.wx != this.getWorldXMin() + chunkMapChunkX || c.wy != this.getWorldYMin() + chunkMapChunkY) {
+            return null;
+         }
+
          int chunkSquareX = this.chunkMapSquareToChunkSquareXY(chunkMapSquareX);
          int chunkSquareY = this.chunkMapSquareToChunkSquareXY(chunkMapSquareY);
          return c.getGridSquare(chunkSquareX, chunkSquareY, worldSquareZ);
