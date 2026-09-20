@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.lwjgl.opengl.ARBMapBufferRange;
 import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL30;
 import org.lwjglx.opengl.OpenGLException;
@@ -21,11 +22,29 @@ public class GLVertexBufferObject {
    private int vertexAttribArray = -1;
    // pzopt: persistent mapping (GL_ARB_buffer_storage) for the fixed-size sprite ring buffers
    private boolean pzoptPersistent;
-   private long pzoptFence;
+   // pzopt: K storage slots per buffer object (Config.PERSISTENT_VBO_SLOTS); each map() rotates to the next slot and
+   // re-binds it, so the reuse distance of a 128-buffer ring becomes 128*K batches. slot 0 keeps the original id.
+   private int[] pzoptSlotIds;
+   private ByteBuffer[] pzoptSlotBuffers;
+   private long[] pzoptSlotFences;
+   private long[] pzoptSlotUnmapFrame;
+   private int pzoptSlot;
+   private int pzoptUnmappedSlot;
    private static final java.util.ArrayList<GLVertexBufferObject> pzoptUnmappedSinceFence = new java.util.ArrayList<>();
    private static boolean pzoptLogged;
    private static long pzoptWaits, pzoptWaitNs, pzoptStalls;
-   private static final int PZOPT_STORAGE_FLAGS = 0x0002 | 0x0040 | 0x0080; // MAP_WRITE | MAP_PERSISTENT | MAP_COHERENT
+   // pzopt: frame fences — a buffer unmapped in frame F is rewritten only after the GPU finished frame F
+   // (the per-batch fence alone left chunk floors black: bs-vbo-1, 2026-09-20)
+   private static final int PZOPT_FRAME_RING = 8;
+   private static final long[] pzoptFrameFences = new long[PZOPT_FRAME_RING];
+   private static long pzoptFrame = 1; // frame counter; index = frame % ring
+   private static long pzoptFrameDone; // newest frame whose fence has been seen signalled
+   private static long pzoptMaps, pzoptMapsThisFrame, pzoptMaxMapsPerFrame, pzoptFrameWaits, pzoptFrameWaitNs, pzoptSameFrameReuse;
+   private static long pzoptLastLogNs;
+   // MAP_WRITE | MAP_PERSISTENT (| MAP_COHERENT); without the coherent bit the map adds MAP_FLUSH_EXPLICIT and unmap()
+   // flushes the written range (glFlushMappedBufferRange), the spec'd way to publish client writes to the GPU
+   private static final int PZOPT_STORAGE_FLAGS = 0x0002 | 0x0040 | (pzopt.Config.PERSISTENT_VBO_COHERENT ? 0x0080 : 0);
+   private static final int PZOPT_MAP_FLAGS = 0x0002 | 0x0040 | (pzopt.Config.PERSISTENT_VBO_COHERENT ? 0x0080 : 0x0010);
 
    static {
       pzopt.Overrides.onClassLoaded("zombie.core.VBO.GLVertexBufferObject");
@@ -43,34 +62,128 @@ public class GLVertexBufferObject {
       java.util.ArrayList<GLVertexBufferObject> pending = pzoptUnmappedSinceFence;
       for (int i = 0; i < pending.size(); i++) {
          GLVertexBufferObject prev = pending.get(i);
-         if (prev.pzoptFence != 0L) {
-            org.lwjgl.opengl.GL32.glDeleteSync(prev.pzoptFence);
+         int slot = prev.pzoptUnmappedSlot;
+         if (prev.pzoptSlotFences[slot] != 0L) {
+            org.lwjgl.opengl.GL32.glDeleteSync(prev.pzoptSlotFences[slot]);
          }
-         prev.pzoptFence = org.lwjgl.opengl.GL32.glFenceSync(0x9117, 0); // SYNC_GPU_COMMANDS_COMPLETE
+         prev.pzoptSlotFences[slot] = org.lwjgl.opengl.GL32.glFenceSync(0x9117, 0); // SYNC_GPU_COMMANDS_COMPLETE
       }
       pending.clear();
    }
 
+   /**
+    * Called by the RenderThread override once per frame after SpriteRenderer.postRender(): every draw of the
+    * frame has been issued, so one fence here covers all reads of the buffers unmapped during the frame.
+    */
+   public static void pzoptFrameEnd() {
+      if (!pzopt.Config.PERSISTENT_VBO || !pzopt.Config.PERSISTENT_VBO_FRAME_FENCE) {
+         return;
+      }
+      int i = (int)(pzoptFrame % PZOPT_FRAME_RING);
+      if (pzoptFrameFences[i] != 0L) {
+         org.lwjgl.opengl.GL32.glDeleteSync(pzoptFrameFences[i]);
+      }
+      pzoptFrameFences[i] = org.lwjgl.opengl.GL32.glFenceSync(0x9117, 0);
+      if (pzoptMapsThisFrame > pzoptMaxMapsPerFrame) {
+         pzoptMaxMapsPerFrame = pzoptMapsThisFrame;
+      }
+      pzoptMapsThisFrame = 0;
+      pzoptFrame++;
+      long now = System.nanoTime();
+      if (pzopt.Config.INSTRUMENT && now - pzoptLastLogNs > 5_000_000_000L) {
+         if (pzoptLastLogNs != 0L) {
+            pzopt.Log.info("persistent VBO: maps=" + pzoptMaps + " max/frame=" + pzoptMaxMapsPerFrame + " batch waits=" + pzoptWaits + " (" + pzoptWaitNs / 1_000_000 + " ms) stalls=" + pzoptStalls
+                  + " frame waits=" + pzoptFrameWaits + " (" + pzoptFrameWaitNs / 1_000_000 + " ms) same-frame reuse=" + pzoptSameFrameReuse);
+         }
+         pzoptLastLogNs = now;
+         pzoptMaps = pzoptMaxMapsPerFrame = pzoptWaits = pzoptWaitNs = pzoptStalls = pzoptFrameWaits = pzoptFrameWaitNs = pzoptSameFrameReuse = 0L;
+      }
+   }
+
+   /** Wait until the GPU has finished the frame this buffer was last used in (no-op when that frame is already known done). */
+   private void pzoptWaitFrame(long f) {
+      if (f == 0L) {
+         return;
+      }
+      if (f >= pzoptFrame) {
+         pzoptSameFrameReuse++; // the ring wrapped inside the current frame: only the per-batch fence protects it
+         return;
+      }
+      f = Math.min(f + pzopt.Config.PERSISTENT_VBO_FRAME_LAG, pzoptFrame - 1); // diagnostic lag: also wait for the following frames
+      if (f <= pzoptFrameDone) {
+         return;
+      }
+      if (pzoptFrame - f > PZOPT_FRAME_RING - 1) {
+         return; // fence already recycled: that frame is many frames old
+      }
+      long sync = pzoptFrameFences[(int)(f % PZOPT_FRAME_RING)];
+      if (sync == 0L) {
+         return;
+      }
+      long t0 = System.nanoTime();
+      int r = org.lwjgl.opengl.GL32.glClientWaitSync(sync, 0x0001, 1_000_000_000L);
+      long dt = System.nanoTime() - t0;
+      if (r == 0x911B || r == 0x911D) {
+         pzopt.Log.warn("persistent VBO: frame fence wait returned 0x" + Integer.toHexString(r));
+         return;
+      }
+      pzoptFrameDone = f; // fences signal in order: every older frame is done too
+      if (dt > 20_000L) {
+         pzoptFrameWaits++;
+         pzoptFrameWaitNs += dt;
+      }
+   }
+
    private ByteBuffer pzoptMapPersistent() {
       pzoptFencePrevious();
+      pzoptMaps++;
+      pzoptMapsThisFrame++;
       if (this.buffer == null) {
-         org.lwjgl.opengl.GL44.glBufferStorage(this.type, this.size, PZOPT_STORAGE_FLAGS);
-         this.buffer = GL30.glMapBufferRange(this.type, 0L, this.size, PZOPT_STORAGE_FLAGS, null);
-         if (this.buffer == null) {
-            throw new OpenGLException("Failed to persistently map a buffer " + this.size + " bytes long");
+         // first map: allocate the slots (the caller has bound this.id; slot 0 keeps it) and leave slot 0 bound
+         int k = Math.max(1, pzopt.Config.PERSISTENT_VBO_SLOTS);
+         this.pzoptSlotIds = new int[k];
+         this.pzoptSlotBuffers = new ByteBuffer[k];
+         this.pzoptSlotFences = new long[k];
+         this.pzoptSlotUnmapFrame = new long[k];
+         for (int i = 0; i < k; i++) {
+            int id = i == 0 ? this.id : funcs.glGenBuffers();
+            funcs.glBindBuffer(this.type, id);
+            org.lwjgl.opengl.GL44.glBufferStorage(this.type, this.size, PZOPT_STORAGE_FLAGS);
+            ByteBuffer b = GL30.glMapBufferRange(this.type, 0L, this.size, PZOPT_MAP_FLAGS, null);
+            if (b == null) {
+               throw new OpenGLException("Failed to persistently map a buffer " + this.size + " bytes long");
+            }
+            this.pzoptSlotIds[i] = id;
+            this.pzoptSlotBuffers[i] = b;
          }
+         this.pzoptSlot = 0;
+         this.id = this.pzoptSlotIds[0];
+         funcs.glBindBuffer(this.type, this.id);
+         this.buffer = this.pzoptSlotBuffers[0];
          this.pzoptPersistent = true;
          this.cleared = true; // immutable storage: never glBufferData again
          if (!pzoptLogged) {
             pzoptLogged = true;
-            pzopt.Log.info("persistent VBO mapping active (GL_ARB_buffer_storage)");
+            pzopt.Log.info("persistent VBO mapping active (GL_ARB_buffer_storage), " + k + " slot(s) per buffer");
          }
-      } else if (this.pzoptFence != 0L) {
-         // the GPU may still be reading the batch written into this buffer 128 batches ago
+      } else {
+         if (this.pzoptSlotIds.length > 1) {
+            this.pzoptSlot = (this.pzoptSlot + 1) % this.pzoptSlotIds.length;
+            this.id = this.pzoptSlotIds[this.pzoptSlot];
+            funcs.glBindBuffer(this.type, this.id); // the caller bound the previous slot; the draws must see this one
+            this.buffer = this.pzoptSlotBuffers[this.pzoptSlot];
+         }
+         if (pzopt.Config.PERSISTENT_VBO_FRAME_FENCE) {
+            this.pzoptWaitFrame(this.pzoptSlotUnmapFrame[this.pzoptSlot]);
+         }
+      }
+      long fence = this.pzoptSlotFences[this.pzoptSlot];
+      if (fence != 0L) {
+         // the GPU may still be reading the batch written into this slot 128*K batches ago
          long t0 = System.nanoTime();
-         int r = org.lwjgl.opengl.GL32.glClientWaitSync(this.pzoptFence, 0x0001, 1_000_000_000L); // SYNC_FLUSH_COMMANDS_BIT, 1 s
-         org.lwjgl.opengl.GL32.glDeleteSync(this.pzoptFence);
-         this.pzoptFence = 0L;
+         int r = org.lwjgl.opengl.GL32.glClientWaitSync(fence, 0x0001, 1_000_000_000L); // SYNC_FLUSH_COMMANDS_BIT, 1 s
+         org.lwjgl.opengl.GL32.glDeleteSync(fence);
+         this.pzoptSlotFences[this.pzoptSlot] = 0L;
          // 0x911A ALREADY_SIGNALED, 0x911C CONDITION_SATISFIED (had to wait: the GPU was 128 batches behind), 0x911B TIMEOUT_EXPIRED, 0x911D WAIT_FAILED
          if (r == 0x911B || r == 0x911D) {
             pzopt.Log.warn("persistent VBO: fence wait returned 0x" + Integer.toHexString(r));
@@ -83,6 +196,12 @@ public class GLVertexBufferObject {
             pzoptWaits++;
             pzoptWaitNs += dt;
          }
+      }
+      if (pzopt.Config.PERSISTENT_VBO_DELAY_US > 0) {
+         java.util.concurrent.locks.LockSupport.parkNanos(pzopt.Config.PERSISTENT_VBO_DELAY_US * 1000L); // pzopt: diagnostic, CPU-only
+      }
+      if (pzopt.Config.PERSISTENT_VBO_FINISH) {
+         GL11.glFinish(); // pzopt: diagnostic — rules a GPU read-after-overwrite race in or out
       }
       this.buffer.order(ByteOrder.nativeOrder()).clear().limit((int)this.size);
       this.mapped = true;
@@ -149,15 +268,21 @@ public class GLVertexBufferObject {
       if (this.id != 0) {
          this.unmap();
          if (this.pzoptPersistent) {
-            this.bind();
-            funcs.glUnmapBuffer(this.type);
+            for (int i = 0; i < this.pzoptSlotIds.length; i++) {
+               funcs.glBindBuffer(this.type, this.pzoptSlotIds[i]);
+               funcs.glUnmapBuffer(this.type);
+               if (this.pzoptSlotFences[i] != 0L) {
+                  org.lwjgl.opengl.GL32.glDeleteSync(this.pzoptSlotFences[i]);
+                  this.pzoptSlotFences[i] = 0L;
+               }
+               if (i > 0) {
+                  funcs.glDeleteBuffers(this.pzoptSlotIds[i]);
+               }
+            }
+            this.id = this.pzoptSlotIds[0]; // deleted below with the stock path
             this.pzoptPersistent = false;
             this.buffer = null;
             pzoptUnmappedSinceFence.remove(this);
-            if (this.pzoptFence != 0L) {
-               org.lwjgl.opengl.GL32.glDeleteSync(this.pzoptFence);
-               this.pzoptFence = 0L;
-            }
          }
          funcs.glDeleteBuffers(this.id);
          this.id = 0;
@@ -242,7 +367,13 @@ public class GLVertexBufferObject {
       if (this.mapped) {
          this.mapped = false;
          if (this.pzoptPersistent) {
+            if (!pzopt.Config.PERSISTENT_VBO_COHERENT) {
+               funcs.glBindBuffer(this.type, this.id);
+               GL30.glFlushMappedBufferRange(this.type, 0L, this.size); // publish the batch (MAP_FLUSH_EXPLICIT)
+            }
             pzoptUnmappedSinceFence.add(this); // the draws from this buffer follow; fenced at the next map()
+            this.pzoptUnmappedSlot = this.pzoptSlot;
+            this.pzoptSlotUnmapFrame[this.pzoptSlot] = pzoptFrame; // and covered by this frame's fence (pzoptFrameEnd)
             return true;
          }
          return funcs.glUnmapBuffer(this.type);

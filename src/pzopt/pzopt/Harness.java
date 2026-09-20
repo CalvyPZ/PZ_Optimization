@@ -34,6 +34,9 @@ import zombie.vehicles.BaseVehicle;
  *                      load burst and the forced-zoom bake are over ~2 s after the world is up)
  *   zoom     max|level  force the camera zoom before the route (auto-zoom off); drive mode defaults to max, other modes keep the save's zoom
  *   max_seconds        drive mode: give up (route_status=timeout) after this long on the route (default 90)
+ *   shot_at  seconds   bench/parity: this far into the route hold the camera (no teleport, no turn) for 6 s and,
+ *                      2 s into the hold, write Zomboid/Screenshots/pzopt-shot.png (Core.TakeFullScreenshot) and
+ *                      touch Zomboid/pzopt-shot.now so run.sh can take a desktop capture too (artifact checks)
  *   route_start_epoch  unix seconds: do not start the route before this instant (puts the route on the
  *                      schedule the external MangoHud log was configured for); absent = the route starts
  *                      settle seconds after the world is up, whenever that is
@@ -77,6 +80,11 @@ public final class Harness {
    /** bench: degrees per second the player facing rotates while on the route (flag turn, 0 = off). */
    private static float turnDegPerSec = 0f;
    private static float turnAngle = 0f;
+   /** bench: seconds into the route at which the camera is held for a screenshot (flag shot_at, 0 = off). */
+   private static float shotAt = 0f;
+   private static int shotPhase; // 0 = pending, 1 = holding, 2 = done
+   private static long shotHoldNs;
+   private static boolean shotRequested, shot2Requested;
    private static float settle = 15f;
    private static final List<float[]> legs = new ArrayList<>(); // {dx, dy, length}
    private static int leg = 0;
@@ -189,6 +197,7 @@ public final class Harness {
          }
          speed = Float.parseFloat(HarnessFlags.get("speed", "18"));
          turnDegPerSec = Float.parseFloat(HarnessFlags.get("turn", "0"));
+         shotAt = Float.parseFloat(HarnessFlags.get("shot_at", "0"));
          settle = Float.parseFloat(HarnessFlags.get("settle", "15"));
          maxSeconds = Float.parseFloat(HarnessFlags.get("max_seconds", "90"));
          cruiseKmh = Float.parseFloat(HarnessFlags.get("kmh", "60"));
@@ -201,12 +210,24 @@ public final class Harness {
       float dt = lastFrameNs == 0L ? 0f : (nowNs - lastFrameNs) / 1e9f;
       lastFrameNs = nowNs;
       IsoPlayer p = IsoPlayer.getInstance();
+      if (p != null && (state == SETTLE || state == RUN)) {
+         Scene.tick(p, nowNs); // keeps the forced weather pinned and fires the scheduled lightning
+      }
       switch (state) {
          case WAIT_WORLD -> {
             if (p != null && p.getCurrentSquare() != null) {
                 HarnessFlags.markStarted();
                 p.setGodMod(true, true);
                 p.setInvisible(true, true);
+                // scene presets (time of day, weather, torch): forced now, at the start of the settle time,
+                // so the lighting rebake a jump to night or a storm causes is over before the route
+                try {
+                   Scene.apply(p);
+                } catch (Exception e) {
+                   // a throw here would repeat every frame (the state never advances) and the run never exits
+                   reject("scene setup failed: " + e);
+                   return;
+                }
                 if (driving) {
                    vehicle = p.getVehicle();
                    if (vehicle == null && !"none".equals(HarnessFlags.get("vehicle", DEFAULT_VEHICLE))) {
@@ -287,6 +308,7 @@ public final class Harness {
                    lastTelemetryNs = 0L;
                 }
                 Log.info("harness: route start");
+               Scene.routeStart(nowNs);
                chunksAtStart = Stats.chunkCount();
                runStartNs = nowNs;
                runStartEpochMs = System.currentTimeMillis();
@@ -349,6 +371,9 @@ public final class Harness {
                 }
                 return;
              }
+            if (shotAt > 0f && shotPhase < 2 && !holdForScreenshot(nowNs)) {
+               return; // camera held for the screenshot: no teleport, no turn this frame
+            }
              float step = speed * Math.min(dt, 0.1f);
             while (step > 0f && leg < legs.size()) {
                float[] l = legs.get(leg);
@@ -398,6 +423,49 @@ public final class Harness {
       }
    }
 
+   /**
+    * shot_at: from that instant on the route the camera is held for 6 s; 2 s into the hold the game writes
+    * Screenshots/pzopt-shot.png and Zomboid/pzopt-shot.now appears (run.sh takes a desktop capture on it).
+    * Returns false while the route must not advance.
+    */
+   private static boolean holdForScreenshot(long nowNs) {
+      float t = (nowNs - runStartNs) / 1e9f;
+      if (shotPhase == 0) {
+         if (t < shotAt) {
+            return true;
+         }
+         shotPhase = 1;
+         shotHoldNs = nowNs;
+         Log.info("harness: holding the camera at t=" + (int)t + "s for the screenshot (x=" + (int)x + ",y=" + (int)y + ", facing " + (int)turnAngle + ")");
+      }
+      float held = (nowNs - shotHoldNs) / 1e9f;
+      if (!shotRequested && held >= 2f) {
+         shotRequested = true;
+         try {
+            Core.getInstance().TakeFullScreenshot("pzopt-shot.png");
+            new File(ZomboidFileSystem.instance.getCacheDir(), "pzopt-shot.now").createNewFile();
+            Log.info("harness: screenshot requested at epoch_ms=" + System.currentTimeMillis());
+         } catch (Exception e) {
+            Log.warn("harness: screenshot failed: " + e);
+         }
+      }
+      if (shotRequested && !shot2Requested && held >= 4f) {
+         shot2Requested = true; // second capture 2 s later: a baked artifact stays put, a per-frame one changes
+         try {
+            Core.getInstance().TakeFullScreenshot("pzopt-shot2.png");
+            new File(ZomboidFileSystem.instance.getCacheDir(), "pzopt-shot2.now").createNewFile();
+         } catch (Exception e) {
+            Log.warn("harness: second screenshot failed: " + e);
+         }
+      }
+      if (held >= 6f) {
+         shotPhase = 2;
+         Log.info("harness: route resumes after the screenshot hold");
+         return true;
+      }
+      return false;
+   }
+
    private static void parseRoute(String route) {
       legs.clear();
       for (String part : route.split(",")) {
@@ -432,6 +500,7 @@ public final class Harness {
                 + "\nresolution=" + core.getScreenWidth() + "x" + core.getScreenHeight()
                 + "\nrenderer_backend=OpenGL\nrenderer_opengl33=" + (!core.getUseOpenGL21())
                 + "\ndashboard=" + HarnessFlags.get("dashboard", "enabled")
+                + "\n" + Scene.summary()
                 + "\nroute_start_epoch_ms=" + runStartEpochMs + "\nroute_end_epoch_ms=" + runEndEpochMs
                 + "\nroute_seconds=" + secs + "\nchunks_loaded=" + chunks + "\nchunks_per_second=" + (secs > 0f ? chunks / secs : 0f)
                 + "\nsettings=" + Config.describe() + "\n");

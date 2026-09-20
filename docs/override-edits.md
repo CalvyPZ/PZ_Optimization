@@ -123,6 +123,23 @@ stock.
    one stationary run with it on drew a whole building lot floor opaque black
    for a minute (`artfix-opt120-2`), which its fence logic is the only edit
    able to cause. Re-enable with `--prop persistentVbo=true` for uncapped runs.
+   2026-09-20 afternoon: the black chunk squares seen with it on were the light-info
+   chunk gate (see the FBORenderCell entry of that day), not the fence logic: a
+   `glFinish` before every map (`persistentVboFinish`) still showed them, and the
+   fix in FBORenderCell removes them with the fences untouched.
+3. **Diagnostics and variants added during that bisect (2026-09-20), all off by
+   default and marked `// pzopt:`:** `persistentVboFrameFence` (one fence per frame
+   from `RenderThread` after `SpriteRenderer.postRender`, `pzoptFrameEnd()`, kept in
+   an 8-entry ring; a slot is rewritten only after the frame it was drawn in is
+   done; `persistentVboFrameLag=N` also waits for the N following frames);
+   `persistentVboSlots=K` (K immutable storage buffers per `GLVertexBufferObject`,
+   rotated and re-bound on every `map()`, so the 128-buffer ring reuses a slot
+   after 128*K batches; slot 0 keeps the original buffer id);
+   `persistentVboCoherent=false` (MAP_FLUSH_EXPLICIT plus `glFlushMappedBufferRange`
+   at `unmap()` instead of MAP_COHERENT); `persistentVboDelayUs` (CPU-only park per
+   map); `persistentVboFinish` (`glFinish` per map). With `instrument=true` a
+   "persistent VBO:" line every 5 s counts maps, maps per frame, per-batch and
+   per-frame fence waits and stalls.
 
 ## zombie.iso.fboRenderChunk.FBORenderCell (added 2026-09-18)
 
@@ -964,6 +981,18 @@ data fetch when it is). Behind `pzopt.Config.LIGHT_INFO_CHUNK_GATE` the level fi
 `updateChunkLevelLighting`, uses as its gate) and skips the 64 square refreshes when the level
 has no dirty square; the `squareFlags` bookkeeping of the loop is unchanged. Counter
 `pzoptLightInfoLevelsGated`.
+
+**Black chunk squares fixed (2026-09-20 afternoon).** With the gate, a square whose light info had
+never been cached (a freshly streamed chunk whose lighting pass had already run and consumed the
+JNI dirty bit before the level's first bake) kept `lightInfo == null`; the loop's
+`getLightInfo(playerIndex) != null` test then left it out of `squareFlags` and the whole 8x8
+level baked black. Stock never hits it because it refreshes every square unconditionally. The
+gated branch now refreshes a square whose light info is null regardless of the chunk-level answer
+(`pzoptRefresh || sq.getLightInfo(playerIndex) == null`). This was the "black squares on the left
+of the screen" that had been attributed to `persistentVbo`: the persistent mapping only changed the
+render/lighting thread timing enough to expose it (bisect runs `bs-*`, screenshot rig
+`run.sh --shot-at`, metric `harness/blacktiles.py`; 0 black 32 px tiles after the fix in
+`bs-gatefix-*`, 225-303 before).
 
 **Staged hot save off by default (2026-09-20 night):** `hotsaveStaged` defaults to false. The
 parts are serialised a few frames apart while chunks keep loading, so `map_meta.bin` and the

@@ -90,9 +90,12 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 - Adopted Config defaults (max-zoom route mean 6.2 → 4.4 ms, p99 19.3 → 8.3):
   treesInChunkTexture, windowsInChunkTexture, bakeBudget=8 (never-baked
   levels only), lightingBudget=8 (queued, never drops JNI dirty bits), hotsaveIntervalSec=30,
-  on top of wake + recalc pool. translucentTilesInChunkTexture is OFF: it bakes
-  `Translucent` tileset tiles opaque black (black floor rectangles, 2026-09-19).
-  persistentVbo is OFF too: no gain at the 240 cap and suspected for a black building lot.
+  on top of wake + recalc pool. persistentVbo and translucentTilesInChunkTexture are ON by
+  default since 2026-09-20 afternoon (maintainer's decision after confirming the fix): the
+  chunk-sized black squares seen with them were `lightInfoChunkGate` leaving never-cached squares
+  out of the bake (fixed; persistentVbo only changed the timing). The 2026-09-19 reports (black
+  building lot, Translucent tiles baking black) were not reproduced on the bench route. Rig:
+  `run.sh --shot-at N` + `harness/blacktiles.py`; 0 black tiles after the fix, uncapped 512 fps.
   Black one-tile rectangles beside walls were cutawayFast replaying the stock int-shifted
   occluder mask (fixed with an exact mask); JUMBO trees missing near buildings were the
   FBORenderTrees batch in chunk-texture mode (trees now bake via the plain sprite path).

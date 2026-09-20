@@ -7,6 +7,14 @@
 #                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
 #                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]... [--mod ID]... [--vmarg ARG]...
 #                  [--lead secs] [--route-seconds secs] [--launcher auto|steam|direct] [--option key=value]...
+#                  [--preset night-torch|night-dark|storm]
+#
+# --preset NAME    scene preset: bench mode on the spinning game-thread route (route=S:450 turn=90 zoom=max,
+#                  --route-seconds 25) plus the scene flags pzopt.Scene reads (time_of_day, torch, weather).
+#                    night-torch  01:00, lit Base.HandTorch in the primary hand (cone sweeps with the turn)
+#                    night-dark   01:00, no light item
+#                    storm        the save's hour, pinned thunderstorm + a lightning strike every 6 s (thunder_secs)
+#                  Preset flags go first, so any --flag / --mode / --route-seconds given on the command line wins.
 #
 # --launcher direct starts the native game itself (projectzomboid.sh, -Dzomboid.steam=0) instead of
 # asking the running Steam client; auto (default) does that whenever Steam is not running or not
@@ -60,13 +68,15 @@ RUNS="$REPO/harness/runs"
 FLAG_FILE="$ZOMBOID/Lua/pzopt-harness.txt"
 NATIVE_FLAG_FILE="${NATIVE_ZOMBOID:-$HOME/Zomboid}/Lua/pzopt-harness.txt"
 
-label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
+shot_at=""; label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
 record=0; jfr=0; jfr_period=""; jfr_settings=(); game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=(); extra_mods=(); vmargs=()
+preset=""; mode_set=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --label) label="$2"; shift 2 ;;
     --quit-after) quit_after="$2"; shift 2 ;;
-    --mode) mode="$2"; shift 2 ;;
+    --mode) mode="$2"; mode_set=1; shift 2 ;;
+    --preset) preset="$2"; shift 2 ;;              # scene preset (see the header); expanded after parsing
     --source-save) source_save="$2"; shift 2 ;;
     --flag) extra_flags+=("$2"); shift 2 ;;   # extra key=value for pzopt-harness.txt
     --prop) props+=("$2"); shift 2 ;;         # key=value for the game dir's pzopt.properties (see pzopt.Config)
@@ -85,6 +95,7 @@ while [[ $# -gt 0 ]]; do
     --lead) lead="$2"; shift 2 ;;                    # fixed schedule: seconds from launch to the route start (world load + settle must
                                                      # fit). Default: none; the route starts settle s after the world is up (see below)
     --route-seconds) route_seconds="$2"; shift 2 ;;  # expected route length (bench: tiles/speed = 100; drive: max_seconds)
+    --shot-at) shot_at="$2"; extra_flags+=("shot_at=$2"); shift 2 ;;  # bench: hold the camera N s into the route and capture <run>/shot-game.png (in-game) + shot-desktop.png (spectacle)
     --env) game_env+=("$2"); shift 2 ;;
     --mod) extra_mods+=("$2"); shift 2 ;;
     --vmarg) vmargs+=("$2"); shift 2 ;;
@@ -94,6 +105,18 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+if [[ -n "$preset" ]]; then
+  # scene flags are read by pzopt.Scene (src/pzopt/pzopt/Scene.java); the route is the 2026-09-20 game-thread one
+  case "$preset" in
+    night-torch) preset_flags=(time_of_day=1 torch=on) ;;
+    night-dark)  preset_flags=(time_of_day=1 torch=off) ;;
+    storm)       preset_flags=(weather=storm) ;;
+    *) echo "unknown preset: $preset (night-torch|night-dark|storm)" >&2; exit 2 ;;
+  esac
+  extra_flags=(route=S:450 turn=90 zoom=max "${preset_flags[@]}" "${extra_flags[@]}")   # later duplicates win (Properties.load)
+  [[ $mode_set -eq 1 ]] || mode=bench
+  [[ -n "$route_seconds" ]] || route_seconds=25
+fi
 if [[ -z "$route_seconds" ]]; then
   if [[ "$mode" == drive ]]; then route_seconds=90; else route_seconds=100; fi
 fi
@@ -372,7 +395,7 @@ attempt=0
 crashed=0
 while :; do
   attempt=$((attempt+1))
-  rm -f "$ZOMBOID"/pzopt-*.out "$ZOMBOID/console.txt"
+  rm -f "$ZOMBOID"/pzopt-*.out "$ZOMBOID/console.txt" "$ZOMBOID/pzopt-shot.now" "$ZOMBOID/pzopt-shot2.now" "$ZOMBOID/Screenshots/pzopt-shot.png" "$ZOMBOID/Screenshots/pzopt-shot2.png"
   restore_harness_flag; write_flags; write_launch_env
   launch_epoch=$(date +%s)
   route_start_epoch=""; mangohud_end_epoch=""
@@ -443,6 +466,22 @@ while :; do
   # The control socket (control=mangoapp, abstract unix socket) speaks ":cmd=param;" and the game
   # accepts a client once per frame, then greets it; a client that sends and hangs up before that
   # (mangohudctl does) is dropped with its message unread. mh_control waits for the greeting first.
+  # --shot-at: the Java harness touches pzopt-shot.now when it has asked the game for its own screenshot;
+  # a desktop capture (spectacle, whole screen, Wayland session) follows one second later as a second source
+  shot_pid=""
+  if [[ -n "$shot_at" ]]; then
+    ( for _ in $(seq 1 3000); do [[ -f "$ZOMBOID/pzopt-shot.now" ]] && break; sleep 0.2; done
+      if [[ -f "$ZOMBOID/pzopt-shot.now" ]]; then
+        sleep 1; spectacle -b -n -f -o "$out/shot-desktop.png" >/dev/null 2>&1 || true
+        echo "shot-desktop.png at epoch $(date +%s)" | tee -a "$out/schedule.log"
+        for _ in $(seq 1 50); do [[ -f "$ZOMBOID/pzopt-shot2.now" ]] && break; sleep 0.2; done
+        if [[ -f "$ZOMBOID/pzopt-shot2.now" ]]; then
+          sleep 1; spectacle -b -n -f -o "$out/shot2-desktop.png" >/dev/null 2>&1 || true
+          echo "shot2-desktop.png at epoch $(date +%s)" | tee -a "$out/schedule.log"
+        fi
+      fi ) &
+    shot_pid=$!
+  fi
   sched_pid=""
   if [[ -n "$mangohud_secs" ]]; then
     ( sched="$ZOMBOID/pzopt-schedule.out"; start_ms=""; slog="$out/schedule.log"
@@ -529,6 +568,7 @@ PYC
   end=$(date +%s)
   kill "$watchdog_pid" 2>/dev/null || true; wait "$watchdog_pid" 2>/dev/null || true
   [[ -n "$sched_pid" ]] && { kill "$sched_pid" 2>/dev/null || true; wait "$sched_pid" 2>/dev/null || true; }
+  [[ -n "$shot_pid" ]] && { kill "$shot_pid" 2>/dev/null || true; wait "$shot_pid" 2>/dev/null || true; }
   kill "$sysmon_pid" 2>/dev/null; wait "$sysmon_pid" 2>/dev/null || true
   if [[ -n "$rec_pid" ]]; then kill -INT "$rec_pid" 2>/dev/null; wait "$rec_pid" 2>/dev/null || true; echo "recording: $out/recording.mp4 ($(du -h "$out/recording.mp4" 2>/dev/null | cut -f1))"; fi
   sleep 2
@@ -552,9 +592,11 @@ done
 [[ -f "$ZOMBOID/console.txt" ]] || { echo "fresh game produced no console.txt" >&2; exit 1; }
 cp "$ZOMBOID/console.txt" "$out/console.txt"
 cp "$ZOMBOID"/pzopt-*.out "$out/" 2>/dev/null || true
+[[ -f "$ZOMBOID/Screenshots/pzopt-shot.png" ]] && cp "$ZOMBOID/Screenshots/pzopt-shot.png" "$out/shot-game.png"
+[[ -f "$ZOMBOID/Screenshots/pzopt-shot2.png" ]] && cp "$ZOMBOID/Screenshots/pzopt-shot2.png" "$out/shot2-game.png"
 cp "$PZ_DIR/pzopt.properties" "$out/pzopt.properties"
 cp "$LAUNCHER" "$out/ProjectZomboid64.json"
-{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "no_mangohud=${no_mangohud:-0}"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mods=${extra_mods[*]:-}"; echo "vmargs=${vmargs[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
+{ echo "layout=$LAYOUT"; echo "mode=$mode"; echo "crashed=$crashed"; echo "attempts=$attempt"; echo "jfr=$jfr"; echo "jfr_period=$jfr_period"; echo "jfr_settings=${jfr_settings[*]:-}"; echo "game_profiler=$game_profiler"; echo "gc=${gc:-default}"; echo "no_dashboard=$no_dashboard"; echo "mangohud_secs=$mangohud_secs"; echo "no_mangohud=${no_mangohud:-0}"; echo "lead=${lead:-dynamic}"; echo "route_seconds=$route_seconds"; echo "renderer=$renderer"; echo "game_env=${game_env[*]:-}"; echo "record=$record"; echo "launcher=$launcher"; echo "game_options=${game_options[*]:-}"; echo "mods=${extra_mods[*]:-}"; echo "vmargs=${vmargs[*]:-}"; echo "mangohud_config=${mangohud_config:-default}"; echo "launch_epoch=$launch_epoch"; echo "run_seconds=$((end-start))"; echo "preset=${preset:-none}"; echo "flags=${extra_flags[*]:-}"; } > "$out/run.opts"
 # gc.log rolls over (filecount=3); keep the segments that were written during this run
 for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
   [[ -f "$g" ]] || continue

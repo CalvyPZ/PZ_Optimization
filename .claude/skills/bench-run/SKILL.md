@@ -28,6 +28,13 @@ Bench (camera route, max zoom):
 ```bash
 harness/run.sh --label <name> --mode bench --flag zoom=max --prop instrument=true --no-dashboard
 ```
+Scene presets (night with / without the torch, thunderstorm; spinning Rosewood route, 25 s):
+```bash
+harness/run.sh --label <name> --preset night-torch --prop instrument=true --no-dashboard   # or night-dark, storm
+```
+Presets only add flags (`time_of_day`, `torch`, `weather`, route, turn, zoom); later `--flag`s override.
+Check `weather=`/`torch=`/`night_strength=` in `pzopt-bench.out` and compare preset runs only with
+runs of the same preset.
 Drive, 60 km/h A/B route (the comparable one):
 ```bash
 harness/run.sh --label <name> --mode drive --flag route=E:1200 --route-seconds 90 \

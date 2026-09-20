@@ -258,6 +258,7 @@ public class RenderThread {
             pzopt.Overlay.gpuBegin(); // pzopt: GL timer query around the sprite replay (GPU busy time of the frame)
             SpriteRenderer.instance.postRender();
             pzopt.Overlay.gpuEnd(); // pzopt: end of the frame's GPU work; the swap is not timed
+            zombie.core.VBO.GLVertexBufferObject.pzoptFrameEnd(); // pzopt: frame fence for the persistent sprite buffers
          } catch (Throwable var8) {
             if (var10 != null) {
                try {

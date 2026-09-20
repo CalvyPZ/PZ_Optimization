@@ -31,6 +31,15 @@ Modes:
   Rosewood from the bench save, 55 chunks/s), reference runs `gt-q-*`. **Always** `--flag zoom=max` (the
   save's zoom drifts to 1.0; zoom 1.0 is CPU-bound near the 240 cap, zoom 2.5 is the real
   test). Check `zoom=2.5` in `pzopt-bench.out` before comparing.
+- Presets (`--preset name`, 2026-09-20): a named bundle of scene flags on top of the spinning
+  game-thread route (`route=S:450 turn=90 zoom=max`, 25 s; any later `--flag`/`--mode`/`--route-seconds`
+  wins). `night-torch` = 01:00 with a lit Base.HandTorch in the primary hand (the cone sweeps with
+  the turn), `night-dark` = 01:00 no light item, `storm` = the save's hour with a pinned
+  thunderstorm (rain/cloud 1.0, wind 0.9, dim ambient) and a lightning strike 60 tiles from the
+  player every 6 s (`--flag thunder_secs=N`). Scene flags on their own: `time_of_day=H`,
+  `weather=storm|clear`, `torch=on|off` (`pzopt.Scene`; applied at world-ready, re-pinned every
+  frame, recorded in `pzopt-bench.out` as `time_of_day/game_hour/weather/torch/night_strength/
+  precipitation/lightning_strikes`). Compare a preset only with runs of the same preset.
 - `drive`: spawns a car and follows the highway. Default route `--flag route=E:1200`,
   `--route-seconds 90`, cruise 60 km/h. `--flag kmh=193` gives the ~122 km/h cap
   (Base.RaceCar12 maxSpeed 120). At 120 km/h the steering oscillates and leaves the road at
@@ -38,6 +47,16 @@ Modes:
   A/Bs use the 60 km/h route. `--flag vehicle=none` requires a fixture instead of spawning.
 - `parity`: captures recalc output per chunk; `parity-gate.sh` compares with
   `baseline/parity-stock.out`.
+
+`--shot-at N` (bench): N s into the route the harness holds the camera for 6 s (no teleport, no
+turn); at +2 s the game writes its own `Screenshots/pzopt-shot.png` and touches
+`Zomboid/pzopt-shot.now`, on which run.sh takes a desktop capture (`spectacle -b -n -f`), and
+again at +4 s (`shot2-*`). Collected as `<run>/shot-game.png`, `shot-desktop.png`,
+`shot2-game.png`, `shot2-desktop.png`. `blacktiles.py <control.png> <run.png>...` counts pixels
+black in a run but drawn in a control capture at the same hold point, and the 32 px tiles that
+are entirely black; the control is a same-route run with the suspect key off (2026-09-20 bisect of
+the black chunk squares, runs `bs-*`). Two captures 2 s apart tell a baked artifact (identical)
+from a per-frame one.
 
 Flags that must be on every measured run: `--prop instrument=true` (else no
 `pzopt-chunks.out` / `pzopt-frames.out` and compare.py crashes), `--flag zoom=max` on bench,
@@ -94,6 +113,7 @@ real above twice that.
 | `loadtime.py <runs>` | pzopt-loadtrace.out | load-after-Continue phases side by side |
 | `loadsheet.sh <run>` | recording.mp4 + loadtrace | contact sheet around the load |
 | `parity.py a b` | pzopt-parity.out | square-by-square recalc diff |
+| `blacktiles.py ctrl.png run.png...` | `--shot-at` captures | newly-black pixels and fully black 32 px tiles of a run against a control capture |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe) |
 | `stitch-triple.sh` | three bench recordings (stock settings, optimized 2026-09-19, optimized + game-thread pass) | 2:1 quad video with a results panel; clip starts derived from run.opts launch_epoch and pzopt-schedule.out (recorder starts ~1 s after launch_epoch) |

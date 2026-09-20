@@ -476,7 +476,7 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `hotsaveIntervalSec` | `30` | minimum seconds between game-thread hot saves (`0` = stock) |
 | `treesInChunkTexture` | `true` | static trees bake into the chunk texture |
 | `windowsInChunkTexture` | `true` | windows and glass doors bake |
-| `translucentTilesInChunkTexture` | `false` | `Translucent`-flagged tiles bake (black tile bug open) |
+| `translucentTilesInChunkTexture` | `true` | `Translucent`-flagged tiles (fences, railings, decorations) bake |
 | `bakeBudget` | `8` | chunk textures baked per frame (`0` = unlimited) |
 | `lightingBudget` | `8` | chunk lighting refreshes per frame (`0` = stock) |
 | `cutawayFast` | `true` | replay the stored occluder mask on clean levels |
@@ -496,7 +496,7 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `hotsaveStaged` | `false` | hot save serialised one part per streamer update (off: the meta-grid files could disagree) |
 | `gpuSections` | `false` | GPU microseconds per frame section in the log (timestamp queries; measurement only) |
 | `lightSwitchCheckFrames` | `15` | a light switch reuses its has-electricity answer for this many frames (`0` = stock) |
-| `persistentVbo` | `false` | persistently mapped sprite buffers |
+| `persistentVbo` | `true` | persistently mapped sprite buffers (about 2.7x uncapped at max zoom) |
 | `fileThreads` / `fileInflight` | `max(4, cores/2)` / `4x` | async file system width and queue depth |
 | `parallelDepthMaps` | `true` | decode depth-map tilesets concurrently |
 | `loaderCpuFixes` | `true` | algorithmic fixes on the loader thread |
@@ -639,17 +639,26 @@ stored occluder bitmask instead of re-testing every square each frame. The mask
 is exact; an earlier int-shifted version drew black one-tile rectangles beside
 walls and was replaced.
 
-**Persistently mapped sprite buffers** (`persistentVbo`, **off by default**).
-Stock orphans and re-maps a 64 KB vertex buffer per sprite batch. The override
-allocates immutable storage once and fences per buffer. Render thread busy 63 to
-35 %, but no gain at the 240 cap and suspected in one black building lot, so it
-stays off until that is understood.
+**Persistently mapped sprite buffers** (`persistentVbo`, on by default since
+2026-09-20). Stock orphans and re-maps a 64 KB vertex buffer per sprite batch. The
+override allocates immutable storage once and fences per buffer. Render thread busy
+63 to 35 %, a wash at the 240 cap and about 2.7x the uncapped frame rate at max zoom
+(184 to 508 fps on the spinning Rosewood route). It was off for a day because chunk-sized
+black squares appeared with it on; those turned out to be the light-info chunk gate
+skipping squares that had never been lit (see below), which the persistent mapping only
+exposed by changing the thread timing.
 
-**Translucent-flagged tiles bake** (`translucentTilesInChunkTexture`, **off by
-default**). 16,476 tile definitions carry this flag (damaged fences, railings,
-crops, wall decorations). Baking them cut per-frame draws from about 3,000 to
-about 100, but some `Translucent` tileset tiles bake opaque black, so it is off
-until the tile set is filtered.
+**Translucent-flagged tiles bake** (`translucentTilesInChunkTexture`, on by default
+since 2026-09-20). 16,476 tile definitions carry this flag (damaged fences, railings,
+crops, wall decorations). Baking them cuts per-frame draws from about 3,000 to about
+100.
+
+**Black chunk squares, found and fixed (2026-09-20).** With the light-info chunk gate a
+square whose light info had never been cached (a freshly streamed chunk whose lighting
+pass ran before the level's first bake) was left out of the bake and the whole 8x8 level
+came out black. The gate now refreshes any square without light info. The bisect that
+found it is in `docs/results.md` (a screenshot rig, `harness/run.sh --shot-at`, holds the
+camera mid-route and `harness/blacktiles.py` scores the captures against a control run).
 
 **Game-thread trims on the Rosewood route** (2026-09-20). A 25 s teleport route south
 through Rosewood at max zoom with the player facing spinning (`--flag turn=90`, 55 chunks
@@ -842,8 +851,6 @@ What would move the needle now is structural, each with its own plan and gate:
   redrawn onto the offscreen buffer every frame with a depth-writing shader (about
   0.6 ms). A colour + depth cache scrolled by the camera delta, with only dirty levels
   redrawn, removes most of it; needs integer camera steps at every zoom.
-- **`Translucent`-flagged tiles bake** once the tile set that bakes opaque black
-  is filtered (the flag exists, off by default).
 
 Gate for each: byte-identical recalc parity where it applies, `harness/compare.py`
 on the Rosewood route, and a recorded run compared frame by frame with the keys off.

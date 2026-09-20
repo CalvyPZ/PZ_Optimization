@@ -687,3 +687,56 @@ translucentTilesInChunkTexture=true --prop hotsaveStaged=false` explicitly, see 
   `settings:` line in console.txt. Also: the launcher JSON had carried `-Dzomboid.steam=0` since
   an earlier run; steam=1 vs 0 made no difference (jvm-zulu-1 vs -2), the G1 JSON in the game dir
   keeps steam=0.
+
+## 2026-09-20 (13:55–14:50): the black chunk squares were the light-info chunk gate, not persistentVbo
+
+Question: why does `persistentVbo=true` (worth ~2.7x uncapped) draw black chunk-sized squares on
+the left of the screen, and can it be fixed instead of left off. Rig built for it: `run.sh --shot-at
+12` holds the camera 12 s into the spinning Rosewood route (`--flag route=S:450 --flag turn=90
+--route-seconds 25`, max zoom, 240 cap unless stated, `--no-mangohud`, no dashboard) and captures the
+screen twice 2 s apart; `harness/blacktiles.py` counts the 32 px tiles that are entirely black in a
+run but drawn in the control (`bs-off-1`, everything default). All 19 runs, one change each:
+
+| run | change vs defaults | fps mean | p99 | black tiles |
+|---|---|---|---|---|
+| bs-off-1 | control | 216.5 | 11.9 | 0 |
+| bs-both-1 | persistentVbo + translucentTiles | 283.9 | 7.5 | 290 |
+| bs-vbo-1 | persistentVbo | 226.2 | 11.2 | 225 |
+| bs-vbofinish-1 | + glFinish before every map | 134.5 | 17.9 | 2 |
+| bs-vboff-1 | + per-frame fence (rewrite after the drawing frame is done) | 221.7 | 11.4 | 284 |
+| bs-vbolag2-1 | + frame fence, 2 frames of extra lag | 213.4 | 12.6 | 81 |
+| bs-vbodelay-1 | + 40 us CPU park per map, no GPU sync | 191.3 | 11.7 | 9 |
+| bs-vboslots4-1 | + 4 storage slots per buffer (reuse after 512 batches) | 215.5 | 11.7 | 303 |
+| bs-vboflush-1 | + MAP_FLUSH_EXPLICIT instead of MAP_COHERENT | 208.1 | 11.9 | 147 |
+| bs-vbostock-1 | persistentVbo with every other key at stock | 140.8 | 21.8 | 0 |
+| bs-vbonobudget-1 | persistentVbo, bake/rebake/lighting budgets off | 214.4 | 14.4 | 237 |
+| bs-vbonotrees-1 | persistentVbo, trees/windows out of the chunk texture | 192.3 | 12.3 | 197 |
+| bs-vbonostream-1 | persistentVbo, parallel streamer / wake / hand-off off | 218.8 | 11.7 | 148 |
+| bs-vbonodepth-1 | persistentVbo, parallelDepthMaps off | 204.3 | 14.8 | 128 |
+| bs-vbonolightinfo-1 | persistentVbo, lightInfoChunkGate / OncePerFrame / occlusionSkip off | 200.5 | 12.4 | 1 |
+| bs-gatefix-1 | persistentVbo, **gate fix** | 199.9 | 13.1 | 0 |
+| bs-gatefix-both-1 | persistentVbo + translucentTiles, gate fix | 278.3 | 7.6 | 0 |
+| bs-gatefix-both-2 | same, held at 20 s (no matching control; clean by eye) | 276.2 | 7.9 | n/a |
+| bs-gatefix-uncap-1 | same, uncapped, uiRenderOffscreen | **511.7** | 6.7 | 0 |
+
+- **The GPU buffer race hypothesis is dead.** Every synchronisation variant on the persistent
+  mapping (per-frame fences, extra lag, four storage slots, explicit flush) left the squares; what
+  reduced them were the things that slowed the render thread down (glFinish 2, a CPU-only park 9),
+  i.e. timing, not memory. Both captures 2 s apart were identical every time: the black is baked into
+  the chunk texture.
+- **Cause: `lightInfoChunkGate`** (400 fps pass). In `prepareChunkForUpdating` a square whose light
+  info had never been cached (fresh chunk whose lighting pass consumed the JNI dirty bit before the
+  level's first bake) stayed `lightInfo == null`, failed the loop's null test and was left out of
+  `squareFlags`, so the whole level baked black. Stock refreshes every square unconditionally.
+  `persistentVbo` only shifts the render/lighting thread timing enough for the window to open often.
+  Fix: the gated branch refreshes any square with null light info. 0 black tiles in every
+  configuration afterwards, uncapped 511.7 fps mean / p99 6.7 ms / GPU 92 %: the experimental keys
+  keep their whole gain.
+- Left as opt-in diagnostics in `GLVertexBufferObject` (`persistentVboFrameFence`, `-FrameLag`,
+  `-Slots`, `-Coherent`, `-DelayUs`, `-Finish`; a "persistent VBO:" counter line every 5 s with
+  `instrument=true`). The 2026-09-19 "black building lot" (`artfix-opt120-2`) predates the gate and
+  was not reproduced today; the 2026-09-19 `translucentTilesInChunkTexture` black floor rectangles
+  did not show on this route either. The maintainer confirmed the fix in game the same afternoon and
+  both keys are ON by default from this commit (the Optimizations tab labels lose "experimental");
+  if either 2026-09-19 report comes back, `--shot-at` + `blacktiles.py` on a copy of the real save is
+  the way to bisect it.

@@ -4497,7 +4497,10 @@ public final class FBORenderCell {
                      IsoGridSquare sq = chunk.getGridSquare(x, y, z2);
                      levelData.squareFlags[playerIndex][x + y * 8] = 0;
                      if (sq != null) {
-                        if (pzoptRefresh) pzoptCacheLightInfo(playerIndex, chunk, z2, x + y * 8, sq); // pzopt: once per frame, dirty levels only
+                        // pzopt: once per frame, dirty levels only; a square that never had its light info cached (fresh
+                        // chunk whose lighting pass ran before this bake) must be filled regardless of the gate, or the
+                        // null test below leaves the whole square out of the texture (black chunk squares, 2026-09-20)
+                        if (pzoptRefresh || sq.getLightInfo(playerIndex) == null) pzoptCacheLightInfo(playerIndex, chunk, z2, x + y * 8, sq);
                         if (sq.getLightInfo(playerIndex) != null && this.shouldRenderSquare(sq)) {
                            levelData.squareFlags[playerIndex][x + y * 8] = (byte)(levelData.squareFlags[playerIndex][x + y * 8] | 1);
                         }
