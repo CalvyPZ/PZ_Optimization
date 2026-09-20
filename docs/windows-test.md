@@ -121,35 +121,17 @@ Do these in order and write down what happens at each step.
    fps the game shows (or use the Steam overlay's fps counter). No MangoHud on
    Windows; a rough number is enough.
 
-For a stock comparison on the same machine, create `$PZ\pzopt.properties` with
-every switch off and relaunch; delete the file to return to the defaults:
+For a stock comparison on the same machine, press **Disable all (stock game)** in
+Options > Optimizations and relaunch (**Enable all** brings the defaults back), or
+create `$PZ\pzopt.properties` with the master switch off and relaunch; delete the
+file to return to the defaults:
 
 ```properties
-parallel=false
-wake=false
-persistentVbo=false
-treesInChunkTexture=false
-windowsInChunkTexture=false
-translucentTilesInChunkTexture=false
-hotsaveIntervalSec=0
-bakeBudget=0
-lightingBudget=0
-cutawayFast=false
-fmodAsync=false
-bootPump=false
-earlyModels=false
-luaPrecompile=false
-preloadAnimSets=false
-animClipCache=false
-packIndex=false
-scriptParserFast=false
-itemParamSwitch=false
-loaderCpuFixes=false
-parallelDepthMaps=false
-shaderCache=false
-noLoadFade=false
-noIntroWait=false
+enabled=false
 ```
+
+Every override then takes its stock path, the same fallback a build mismatch uses;
+the per-key switches are ignored while it is off.
 
 For per-frame numbers add `instrument=true` to that file (or to an otherwise
 empty one): the game then writes `pzopt-frames.out` and `pzopt-chunks.out` in

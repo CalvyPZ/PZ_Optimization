@@ -23,6 +23,7 @@ public class UserOptionsTest {
       Check.check(UserOptions.read(new File(dir, "missing.ini")).isEmpty(), "missing file reads empty");
 
       // registry: every documented key is known, with its default recorded
+      Check.check(Config.knows("enabled") && "true".equals(Config.defaultValue("enabled")) && Config.ENABLED, "master switch enabled by default");
       Check.check(Config.knows("bakeBudget") && "8".equals(Config.defaultValue("bakeBudget")), "bakeBudget default 8");
       Check.check(Config.knows("treesInChunkTexture") && "true".equals(Config.defaultValue("treesInChunkTexture")), "trees default true");
       Check.check(Config.value("workers") != null && Integer.parseInt(Config.value("workers")) >= 1, "workers value present");

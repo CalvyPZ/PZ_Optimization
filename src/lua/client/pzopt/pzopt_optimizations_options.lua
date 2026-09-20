@@ -6,11 +6,19 @@
 --  launch, so a change away from the boot value raises the stock "restart required" dialog.
 --  A key set in the install dir's pzopt.properties or as -Dpzopt.<key> (harness runs) wins over the
 --  file; its control shows that value, is disabled, and the tooltip says what pins it.
+--  The top of the tab is the master switch (key `enabled`): off = every override takes its stock
+--  path, the same as a build mismatch, whatever the other keys say. "Disable all (stock)" turns it
+--  off; "Enable all" turns it on and puts every other control back to the build's defaults.
+--  Both only change the controls; Apply / Accept saves them like any other option.
 -- Installed by scripts/pzopt.sh into <game dir>/media/lua/client/pzopt/ (loose game-dir Lua is
 -- loaded like any other, no mod to enable).
 
 local TAB = "Optimizations"
 local RESTART_NOTE = "Takes effect on the next launch."
+
+-- The master switch, drawn before the sections with the two buttons.
+local MASTER = { key = "enabled", label = "Optimizations enabled (master switch)",
+  tip = "Off = the game runs stock: every override takes its original code path and the settings below are ignored. On = the settings below apply." }
 
 -- Keys, labels and tooltips. `choices` makes an integer combo; `note[value]` annotates an entry.
 local SECTIONS = {
@@ -241,7 +249,13 @@ local function addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
         store(entry, value)
         self:restartRequired(perf():getPzoptOption(entry.key), value)
     end
+    -- the "Enable all" button puts the control back to the build's default
+    function option.pzoptReset(self)
+        if pinnedBy ~= "" then return end
+        self.control:setSelected(1, perf():getPzoptOptionDefault(entry.key) == "true")
+    end
     self.gameOptions:add(option)
+    return option
 end
 
 local function addIntOption(self, entry, splitpoint, y, comboWidth)
@@ -278,7 +292,46 @@ local function addIntOption(self, entry, splitpoint, y, comboWidth)
         local effective = value ~= "" and value or perf():getPzoptOptionDefault(entry.key)
         self:restartRequired(perf():getPzoptOption(entry.key), effective)
     end
+    function option.pzoptReset(self)
+        if pinnedBy ~= "" then return end
+        self.control.selected = 1 -- "Default (...)"
+    end
     self.gameOptions:add(option)
+    return option
+end
+
+-- "Enable all": master on, every other control back to the build's default. "Disable all (stock)":
+-- master off, the other controls untouched (they are ignored while the master is off). Neither writes
+-- anything: the controls are marked changed and Apply / Accept saves them through the options above.
+local function setAll(self, enable)
+    local master = self.pzoptMaster
+    if master and master.control.enable then
+        master.control:setSelected(1, enable)
+        master:invokeOnChangeEvent()
+    end
+    if enable then
+        for _, option in ipairs(self.pzoptOptions) do
+            option:pzoptReset()
+            option:invokeOnChangeEvent()
+        end
+    end
+end
+
+local function addAllButtons(self, splitpoint, y)
+    local on = self:addButton(splitpoint, y, "Enable all (recommended defaults)")
+    on.tooltip = "Turns the master switch on and puts every setting below back to the build's default on this machine. " .. RESTART_NOTE
+    on.target = self
+    on.onclick = function(target) setAll(target, true) end
+    local off = self:addButton(splitpoint, y, "Disable all (stock game)")
+    off.tooltip = "Turns the master switch off: the game runs its original code everywhere, as if the overrides were not installed. The settings below are kept for when you enable them again. " .. RESTART_NOTE
+    off.target = self
+    off.onclick = function(target) setAll(target, false) end
+    if self.pzoptMaster and not self.pzoptMaster.control.enable then
+        on:setEnable(false)
+        off:setEnable(false)
+        on.tooltip = "Pinned by " .. perf():getPzoptOptionPinnedBy(MASTER.key) .. " for this install."
+        off.tooltip = on.tooltip
+    end
 end
 
 function MainOptions:pzoptAddOptimizationsPanel()
@@ -292,15 +345,26 @@ function MainOptions:pzoptAddOptimizationsPanel()
     self:addPage(TAB)
     local p = perf()
     local added, pinned = 0, 0
+    self.pzoptOptions = {}
+    self.pzoptMaster = nil
+    local state = p:isPzoptEnabled() and "on" or "OFF: the game is running stock"
+    self:addHorizontalLine(y, "All optimizations (since this boot: " .. state .. ")")
+    if p:isPzoptOptionKnown(MASTER.key) then
+        self.pzoptMaster = addBoolOption(self, MASTER, splitpoint, y, BUTTON_HGT)
+        if p:getPzoptOptionPinnedBy(MASTER.key) ~= "" then pinned = pinned + 1 end
+    end
+    addAllButtons(self, splitpoint, y)
     for _, section in ipairs(SECTIONS) do
         self:addHorizontalLine(y, section.title)
         for _, entry in ipairs(section.entries) do
             if p:isPzoptOptionKnown(entry.key) then
+                local option
                 if entry.choices then
-                    addIntOption(self, entry, splitpoint, y, comboWidth)
+                    option = addIntOption(self, entry, splitpoint, y, comboWidth)
                 else
-                    addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
+                    option = addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
                 end
+                table.insert(self.pzoptOptions, option)
                 added = added + 1
                 if p:getPzoptOptionPinnedBy(entry.key) ~= "" then pinned = pinned + 1 end
             else

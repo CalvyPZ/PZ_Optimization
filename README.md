@@ -373,7 +373,12 @@ file; `status` must print `installed: yes` with no `MISSING` or `MODIFIED` entri
 ### In the game menu
 
 Every optimization is a toggle in **Options > Optimizations**, a tab of its own right
-after Display & Performance, in nine titled groups: chunk textures (what bakes, bake
+after Display & Performance. The top of the tab is the master switch with two buttons:
+**Disable all (stock game)** unticks it, and after the next launch the game runs its
+original code everywhere, as if nothing were installed (the log says so, and the tab's
+heading reads "since this boot: OFF"); **Enable all (recommended defaults)** ticks it
+again and puts every setting back to the build's defaults. Both go through the usual
+Apply / Accept and restart dialog. Below the switch come nine titled groups: chunk textures (what bakes, bake
 budgets), cutaways / lighting / weather, sprite buffers, chunk streaming, boot
 (threads and caches, parsers) and world load (file system and decoding, loading
 screen). Tick boxes are the on/off switches; combos hold the numeric budgets and
@@ -430,6 +435,7 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 
 | Key | Default | What it controls |
 |---|---|---|
+| `enabled` | `true` | master switch; `false` = every override on its stock path, the other keys ignored |
 | `parallel` | `true` | recalc chunks on a worker pool (`false` = stock single thread) |
 | `workers` | `min(4, cores-1)` | recalc pool width |
 | `wake` | `true` | wake the streamer on enqueue instead of the 140 ms poll |
@@ -467,9 +473,9 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `uncappedFps` | `auto` | `true`/`false` force the cap off/on for a run |
 | `instrument` | `false` | write per-chunk and per-frame timings for the harness |
 
-To compare against stock on your own machine, put every switch off in
-`pzopt.properties` (the full list is in [docs/windows-test.md](docs/windows-test.md))
-and delete the file to return to the defaults.
+To compare against stock on your own machine, press **Disable all (stock game)** in the
+tab, or put `enabled=false` in `pzopt.properties`; remove it (or press **Enable all**) to
+return to the defaults. No reinstall is needed either way.
 
 ---
 

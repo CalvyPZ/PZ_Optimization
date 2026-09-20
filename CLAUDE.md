@@ -113,6 +113,9 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   `PerformanceSettings` forwards), saved to `~/Zomboid/pzopt/options.ini`, applied on the next
   launch; `-Dpzopt.*` and the game dir's `pzopt.properties` (harness `--prop`) still win, so runs
   never depend on menu choices.
+  Master switch `enabled` (2026-09-20 evening): `enabled=false` folds into `Overrides.enabled()`,
+  i.e. the build-mismatch stock path everywhere; tab buttons "Disable all (stock game)" /
+  "Enable all (recommended defaults)". `--prop enabled=false` is a stock run without a reinstall.
 - Game thread (2026-09-20, `docs/results.md`): new heavy bench route `--flag route=S:450 --flag turn=90
   --route-seconds 25` (south through Rosewood, facing spinning). Adopted: weatherMaskIdleSkip,
   cutawayRadius=6, gridStackInterval=8, lightingRebakeMs=250, rebakeBudget=4/rebakeMaxFrames=3,

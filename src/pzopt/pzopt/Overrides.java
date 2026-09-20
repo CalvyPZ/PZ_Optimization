@@ -17,7 +17,10 @@ import java.util.List;
  * mismatch every override falls back to stock behaviour and says so in the log.
  */
 public final class Overrides {
-   private static final boolean ENABLED = check();
+   /** The game is the build the overrides were compiled against. */
+   private static final boolean BUILD_OK = check();
+   /** ... and the player has not switched the optimizations off (Config.enabled, Options > Optimizations). */
+   private static final boolean ENABLED = BUILD_OK && userEnabled();
 
    private Overrides() {
    }
@@ -64,9 +67,32 @@ public final class Overrides {
 
    }
 
-   /** True when the running game is the build the overrides were compiled against. */
+   /**
+    * True when the overrides may change behaviour: the running game is the build they were compiled against
+    * and the master switch is on. False makes every override take its stock path.
+    */
    public static boolean enabled() {
       return ENABLED;
+   }
+
+   /** True when the build matches, whether or not the player switched the optimizations off. */
+   public static boolean buildMatches() {
+      return BUILD_OK;
+   }
+
+   /** Config.ENABLED, with the log line that says why the game is running stock. */
+   private static boolean userEnabled() {
+      if (Config.ENABLED) {
+         return true;
+      }
+      Log.info("all optimizations disabled (enabled=false, " + describeSource("enabled")
+            + "); running stock behaviour. Options > Optimizations, \"Enable all\", turns them back on.");
+      return false;
+   }
+
+   private static String describeSource(String key) {
+      String pinned = Config.pinnedBy(key);
+      return pinned != null ? "set by " + pinned : "set in Zomboid/pzopt/" + UserOptions.FILE_NAME;
    }
 
    private static boolean check() {

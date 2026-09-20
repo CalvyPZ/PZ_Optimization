@@ -658,7 +658,10 @@ in-game or loading: logo, main menu, options, character creation.
 
 Optimizations tab (added 2026-09-20): six more public instance methods, again
 one-line forwards and nothing else touched: `hasPzoptOptions` (true when the
-build guard is on), `isPzoptOptionKnown(key)`, `getPzoptOption(key)` (the value
+build guard is on; since the master switch of 2026-09-20 evening it returns
+`pzopt.Overrides.buildMatches()`, so the tab is offered when the build matches
+even if the player switched every optimization off, otherwise nothing could
+switch them back on), `isPzoptOptionKnown(key)`, `getPzoptOption(key)` (the value
 in force since boot, from `pzopt.Config.value`), `getPzoptOptionDefault(key)`,
 `getPzoptOptionSaved(key)` (the player's saved value or ""),
 `getPzoptOptionPinnedBy(key)` ("" or `pzopt.properties` / `-Dpzopt.<key>`) and
@@ -682,6 +685,22 @@ compares the boot value with the new one through the stock
 exactly when a change matters. Verified by a verify run (`opttab-smoke`,
 `--prop bakeBudget=8`): the console logs "options tab: 35 controls, 1 pinned",
 no Lua errors; the click path was not exercised hands-off.
+
+Master switch (added 2026-09-20 evening): one more forward, `isPzoptEnabled`
+(`pzopt.Overrides.enabled()`, the value since boot). The switch itself is
+`Config.enabled` (default true), folded into `Overrides.ENABLED` next to the
+build check: `enabled=false` makes `Overrides.enabled()` false, which is the
+same stock fallback every override already takes on a build mismatch, so the
+other keys are ignored and no override needs a change. `Overrides.buildMatches()`
+exposes the build check alone. The tab shows the switch as a tick box above the
+sections, with a "since this boot: on / OFF" note in its heading and two
+buttons: "Enable all (recommended defaults)" ticks the switch and puts every
+other control back to "Default", "Disable all (stock game)" unticks it and
+leaves the other controls alone. Both only change the controls and mark the
+options changed; Apply / Accept saves them through the same `apply` handlers,
+so the restart dialog and `options.ini` behave as for any single change. A
+pinned `enabled` (pzopt.properties / `-Dpzopt.enabled`, e.g. a harness
+`--prop enabled=false` stock run) disables both buttons.
 
 ## zombie.core.skinnedmodel.model.Model (added 2026-09-19, night, game load; GitHub issue #1)
 

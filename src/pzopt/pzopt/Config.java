@@ -14,6 +14,9 @@ import java.util.Properties;
  * takes effect on the next launch. A key set in pzopt.properties or -D is shown pinned in the tab.
  *
  * Keys:
+ *   enabled     true/false   master switch: false makes every override take its stock path, exactly as a build
+ *                            mismatch does (Overrides.enabled() is false); the other keys are then ignored. The
+ *                            "Disable all (stock)" / "Enable all" buttons of the Optimizations tab set it (default true)
  *   parallel    true/false   kill switch: false forces the stock single-threaded pass (default true)
  *   workers     int          recalc pool width; clamped to [1, availableProcessors - 1] (default: min(4, cores - 1))
  *   instrument  true/false   record per-chunk timings and frame times to pzopt-*.out (default false)
@@ -105,6 +108,8 @@ public final class Config {
    private static final Properties props = load();
    /** The player's Options > Optimizations choices (Zomboid/pzopt/options.ini), below props and -D. */
    private static final Properties userProps = UserOptions.load();
+   /** Master switch, read by {@link Overrides#enabled()}; false = stock behaviour everywhere. */
+   public static final boolean ENABLED = bool("enabled", true);
    public static final boolean PARALLEL = bool("parallel", true);
    public static final int WORKERS = clampWorkers(integer("workers", Math.min(4, Runtime.getRuntime().availableProcessors() - 1)));
    public static final boolean INSTRUMENT = bool("instrument", false);
