@@ -11,6 +11,7 @@ in `harness/baseline/` (committed).
 harness/run.sh --label <name> [--mode verify|bench|drive|parity] [--flag k=v]... [--prop k=v]...
                [--route-seconds N] [--source-save Mode/Name] [--renderer nvidia|zink]
                [--launcher auto|steam|direct] [--env K=V]... [--option key=value]...
+               [--mod ID]... [--vmarg ARG]...
                [--mangohud secs] [--mangohud-config path] [--record] [--no-dashboard]
                [--jfr] [--jfr-period ms] [--jfr-setting event#setting=value] [--game-profiler]
                [--gc g1|zgc] [--lead secs] [--quit-after secs] [--retries N] [--refresh-template]
@@ -24,7 +25,10 @@ into the run dir, restores `latestSave.ini`. `run.opts` records launcher, render
 Modes:
 - `verify`: nobody presses "Click to Start"; the game sits at the loading screen. Only for
   install smoke checks. Do not use it for HUD, Wayland or input tests.
-- `bench`: fixed camera route on the bench save, ~100 s. **Always** `--flag zoom=max` (the
+- `bench`: fixed camera route on the bench save, ~100 s. `--flag turn=90` spins the player facing
+  (degrees per second) so the vision cone, lighting cone and cutaways keep changing; the game-thread
+  route since 2026-09-20 is `--flag route=S:450 --flag turn=90 --route-seconds 25` (south through
+  Rosewood from the bench save, 55 chunks/s), reference runs `gt-q-*`. **Always** `--flag zoom=max` (the
   save's zoom drifts to 1.0; zoom 1.0 is CPU-bound near the 240 cap, zoom 2.5 is the real
   test). Check `zoom=2.5` in `pzopt-bench.out` before comparing.
 - `drive`: spawns a car and follows the highway. Default route `--flag route=E:1200`,
@@ -91,6 +95,7 @@ real above twice that.
 | `parity.py a b` | pzopt-parity.out | square-by-square recalc diff |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe) |
+| `stitch-triple.sh` | three bench recordings (stock settings, optimized 2026-09-19, optimized + game-thread pass) | 2:1 quad video with a results panel; clip starts derived from run.opts launch_epoch and pzopt-schedule.out (recorder starts ~1 s after launch_epoch) |
 | `stitch-sbs.sh` | stock + optimized 120 km/h recordings | side-by-side video with live boot/load counters and a hardware panel; header explains the HUD-clock sync. The first ~2.3 s of every capture show the desktop: never start a pane before the game window appears |
 | `stitch-sbs-gif.sh` | the stitch-sbs.sh mp4 | two README GIFs under GitHub's 10 MB limit: `-load.gif` (boot + load, real time) and `-drive.gif` (10 s of the route + the result lines) |
 | `proton-preflight.sh` | Steam manifests | read-only Proton readiness report |
@@ -120,3 +125,5 @@ focused. Reference numbers in `baseline/windows/`, findings in `docs/windows-tes
   your flags (game sits at the main menu). Check for run.sh processes, not just the game.
 - Do not add `no_display` or long lingers: The maintainer wants the overlay visible and the game to
   close by itself after a run.
+
+`native-threads.sh <out> [start-after] [window]`: run beside `run.sh`; snapshots every native thread's CPU (driver workers, MangoHud, JIT) and the GL-related environment of the live game process. `pzopt-threads.out` only sees Java threads.

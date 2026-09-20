@@ -300,6 +300,120 @@ sites in the route window).
   session's texture-buffer override installed during that run (256 MB decode
   budget, since reverted to 50), not from the Wayland GL path.
 
+## 2026-09-19 (20:48–22:15): native Wayland vs XWayland, capped 240, same build
+
+Question: should `-Dzomboid.wayland=1` (native Wayland window) become the default? Runs
+are NVIDIA GL 615.71, adopted Config defaults (persistentVbo and
+translucentTilesInChunkTexture off), `--no-dashboard`, instrument on, back to back.
+
+| Run | Display | Route | fps | frame mean / p99 / p99.9 (ms) | under cap | GPU | render thread |
+|---|---|---|---|---|---|---|---|
+| `xwl-bench-1` | XWayland | bench, max zoom | 203 | 4.9 / 14.0 / 20.3 | – | 56 % | 37–51 % + NVIDIA worker 47 % |
+| `wl-bench-glthr-2` | Wayland | bench, max zoom | 199 | 5.0 / 14.0 / 20.5 | – | 55 % | 80–88 %, no worker |
+| `wl-bench-1` / `wl-bench-jfr-1` / `wl-bench-glthr-1` | Wayland | bench, max zoom | 196 / 196 / 196 | 5.1 / 14.8–15.0 / 21–22 | 41–43 % | 55 % | 81 % |
+| `xwl-drive60-1` | XWayland | drive 60 km/h | 242 | 4.1 / 5.9 / 10.3 | 17.5 % | 54 % | 37 % |
+| `wl-drive60-1` | Wayland | drive 60 km/h | 242 | 4.1 / 6.3 / 10.1 | 17.5 % | 56 % | 65 % |
+
+- Verdict: at the 240 cap native Wayland is a wash. Bench mean 5.0 vs 4.9 ms and p99
+  14.0 vs 14.0; drive p99 6.3 vs 5.9 and p99.9 10.1 vs 10.3, all inside the
+  `compare.py` noise floor (0.2 ms mean, 0.6 ms p99). XWayland stays the default.
+- The first comparison (`wl-bench-1` 196 fps against `fpscap-stock240` 215 fps, logged
+  earlier tonight as a Wayland regression) was mostly a build difference: the artifact
+  fixes installed at 20:52 turned persistentVbo and translucentTilesInChunkTexture off,
+  and the two runs did not share settings. The same-build pair is 4 fps apart.
+- Where the CPU goes differs, and it is the one real Wayland finding. A per-thread
+  snapshot of the live process (`harness/native-threads.sh`, all native threads, not
+  only the Java ones `pzopt-threads.out` sees) shows an unnamed second `ProjectZomboid6`
+  thread at 47 % of a core on XWayland: NVIDIA's threaded-optimisation worker under GLX.
+  On native Wayland (EGL) there is no such thread, even with
+  `__GL_THREADED_OPTIMIZATIONS=1` in the process environment (verified in
+  `/proc/<pid>/environ`); the render thread does that work itself (88 % vs 56 % of a
+  core) and its JFR profile is dominated by `glDrawRangeElements` (15 % of samples)
+  where XWayland's is dominated by `glGetInteger` and `glClientWaitSync` sync points.
+  Total process CPU is equal (259 vs 281 % of a core). Capped, the render thread has
+  slack either way; uncapped the GL thread's wall time sets the frame, which matches the
+  earlier 527 fps (Wayland, `wl-gl60-1`) vs 570 fps (XWayland, `base60-gl-1`).
+- MangoHud on native Wayland: HUD and CSV work through the `Display` override's swap
+  hand-off, and the log starts and stops through the control socket in bench and drive
+  mode (`wl-drive60-1`). The only piece that cannot work is the xdotool keypress that
+  resets the HUD fps metrics at route start: MangoHud's Wayland keybind path needs its
+  `eglGetPlatformDisplay` hook to see GLFW's `wl_display`, which GLFW's private `dlsym`
+  bypasses, and the control socket has no reset command (only hud / logging / fcat).
+  It is cosmetic: MangoHud's fps metrics are a rolling window of the last 10 000 frames
+  (about 45 s at 240 fps), so by the end of any route the HUD shows route-only numbers.
+  `run.sh` now says so and skips the keypress on native Wayland instead of sending it to
+  nowhere (`native_wayland` flag from `--env ...zomboid.wayland=1`).
+- Also fixed tonight: `analyze.py` did not parse `gc.log` files with comma decimals
+  (runs before the `LC_NUMERIC=C` launch), so yesterday's benches showed "0 GC events".
+  With the fix every run has 6–12 ZGC cycles in the route window; there was no GC
+  regression.
+
+## 2026-09-19 (22:20–22:50): native Wayland vs XWayland, uncapped
+
+Same build and options as the capped pair above, `--prop uncappedFps=true`, back to back.
+
+| Run | Display | Route | fps | frame mean / p99 / p99.9 (ms) | jitter | GPU | game thread / render thread |
+|---|---|---|---|---|---|---|---|
+| `xwl-uncap-bench-1` | XWayland | bench, max zoom | 296 | 3.4 / 12.7 / 18.7 | 1.0 | 70 % | 95 % / 68 % |
+| `wl-uncap-bench-1` | Wayland | bench, max zoom | 262 | 3.8 / 13.7 / 20.0 | 0.7 | 65 % | 86 % / 94 % |
+| `xwl-uncap-drive60-1` | XWayland | drive 60 km/h | 471 | 2.1 / 5.1 / 8.8 | 0.5 | 86 % | 97 % / 73 % |
+| `wl-uncap-drive60-1` | Wayland | drive 60 km/h | 391 | 2.6 / 5.0 / 9.2 | 0.2 | 73 % | 82 % / 98 % |
+
+- Uncapped, native Wayland is 12 % (bench) to 17 % (drive) slower in mean frame time,
+  well outside the noise floor. The tails are the same: p99 12.7 vs 13.7 and 5.1 vs 5.0,
+  p99.9 within 1 ms. Jitter is slightly lower on Wayland because the render thread is the
+  steady bottleneck there.
+- The cause is the one found in the capped runs: no NVIDIA threaded-optimisation worker
+  under EGL. The render thread ("main") sits at 94–98 % of a core on Wayland with the game
+  thread waiting on it (82–86 %, down from 95–97 %), and the GPU is left at 65–73 % instead
+  of 70–86 %. On XWayland the driver worker takes the command building off the render
+  thread (73 % there) and the GPU is the limit on the drive route (86 %, p90 100 %).
+- Verdict unchanged and now stronger: XWayland stays the default; native Wayland costs
+  frame rate uncapped and gains nothing capped. Against the objective ("CPU and GPU maxed
+  if not pegged at 240"), Wayland is the worse state: one core pegged, GPU idle time.
+
+## 2026-09-19 (22:25–23:05): ZombieBuddy + ZBBetterFPS vs our overrides
+
+Zed's ZBBetterFPS (Steam Workshop build of 2026-08-09, `42.13` jar, supports 42.12–42.17;
+game is 42.20.4) loaded through ZombieBuddy 2.3.3 (GitHub release jar, `-javaagent` in the
+launcher JSON via the new `--vmarg`; `JAVA_TOOL_OPTIONS` is unusable because the launcher's
+libjvm-locating helper JVM picks the agent up and dies on `zombie.Lua.LuaManager`). Mods copied
+to `~/Zomboid/mods`, enabled per run with the new `--mod`. Every ZBBetterFPS option on except
+render distance (game default, 152 tiles, so the view is identical), uncapped FPS (default),
+instant zoom, background throttling ("never"). The mod runs use our build with every
+runtime optimization switched off (the same stock-behaviour property set as the showcase stock
+runs) so the harness route driver is present; "stock" below is that set without the mod.
+All six runs: XWayland, NVIDIA GL, 5120x2160, max zoom, no dashboard, `--option frameRate=240`
+(options.ini had drifted to 60 fps: the 22:06–22:16 forced-uncapped runs left uncappedFPS=true and
+stock Core.loadOptions rewrote it as frameRate=60 on the next boot; fixed in a0d323b, FrameCap now
+snapshots and restores the file. The boot log's `frame cap:` line is the tell).
+
+Findings:
+- **Object separation patch crashes 42.20.** `optimizeIsoMovingObject` reads
+  `IsoZombie.networkAi`, which no longer exists: `NoSuchFieldError` on the game thread 75 s
+  into `zbfps-bench-1`, game thread dead, native SIGSEGV on shutdown. Disabled for the runs below.
+- **Ring-buffer patch never applies in a fresh boot.** `SpriteRenderer$RingBuffer.create`
+  runs before the Lua `OnGameBoot` handler sets the flag, so its 1 MB buffers were not in effect
+  (no "Patching SpriteRenderer.RingBuffer" line). The other patches (IndieGL alpha/depth cache,
+  chunk-depth uniform cache, MVP matrix cache, IsoChunkMap width, MultiTextureFBO2, main-loop
+  sleeps) were transformed and enabled.
+- The mod is within noise of stock on both routes; our overrides are the only thing that
+  moves the tail.
+
+| run | route | fps mean | frame mean / p99 / p99.9 ms (game) | mangohud p99 / p99.9 | >33 ms | GPU busy | game CPU |
+|---|---|---|---|---|---|---|---|
+| `stock-bench-1` | teleport, max zoom | 156.7 | 6.4 / 19.3 / 27.4 | 22.4 / 35.5 | 24 | 78 % | 306 % |
+| `zbfps-bench-2` | teleport, max zoom | 161.8 | 6.2 / 18.6 / 27.9 | 22.1 / 34.2 | 19 | 79 % | 306 % |
+| `ours-bench-1` | teleport, max zoom | 198.1 | 5.0 / 14.4 / 20.2 | 16.9 / 25.2 | 4 | 55 % | 298 % |
+| `stock-drive120-1` | E:1200 at 122 km/h | 121.3 | 8.2 / 19.1 / 22.1 | 17.6 / 21.9 | 0 | 90 % | 288 % |
+| `zbfps-drive120-1` | E:1200 at 122 km/h | 122.5 | 8.2 / 18.8 / 22.2 | 17.2 / 20.7 | 1 | 90 % | 286 % |
+| `ours-drive120-1` | E:1200 at 122 km/h | 234.8 | 4.3 / 7.3 / 13.9 | 9.3 / 17.0 | 1 | 58 % | 291 % |
+
+Stock and the mod are GPU-bound at the 240 cap (90 % busy while driving, 16 % of the machine's
+CPU); the chunk-texture baking in our build is what halves the GPU work and puts the drive at the
+cap. Nothing in ZBBetterFPS touches that path, so stacking it on top of our build is not worth a
+run. Recordings of the three drives were checked frame-by-frame: identical scenes, no artifacts.
+
 ## 2026-09-19 (23:00): side-by-side video, stock 244 fps cap vs optimized uncapped, 120 km/h
 
 `harness/stitch-sbs.sh` -> `docs/media/drive-120kmh-stock-244cap-vs-optimized-uncapped.mp4`
@@ -320,3 +434,83 @@ direct I/O through ZFS).
 
 Side finding: `zpool status zpcachyos` reports 5 permanent data errors (ZFS-8000-8A) on the
 T705 pool that holds /games and /home; `zpool status -v` lists the files.
+
+## 2026-09-20 (03:10–04:00): game-thread pass on a Rosewood teleport route
+
+Question: nothing so far touched the simulation half of the game thread; what
+does the thread spend on, and how far is 240 locked? New route: the bench save
+loads at 8002,11204 just north of Rosewood; `--flag route=S:1800` (100 s) goes
+south through the town, and the short form `--flag route=S:450 --flag turn=90
+--route-seconds 25` (new harness flag: the player facing spins 90°/s so the
+vision cone, lighting cone and cutaways keep changing) loads 55 chunks/s. All
+runs: NVIDIA GL, 5120x2160, zoom 2.5, 240 cap, no dashboard, `gt-*` in
+`harness/runs/`.
+
+Attribution (5 ms JFR, route window, share of game-thread samples): on the 100 s
+route render-command recording 67 % (`IsoCell.render` 46 %, Lua UI draw 15 %,
+weather mask 2.6 %), logic 30 % (`IsoWorld.update` 19 %: player 4 %, zombies
+and animation post-update 5 %, chunk hand-off 5 %), lighting JNI 3 %. The
+over-budget time is bursts: 90 % of the excess over 4.17 ms came from frames
+over 6 ms, and those were chunk-texture bakes (36 % of their samples), world
+update (21 %), chunk hand-off (10 %), cutaway visits (6 %). Bakes were 2.4 to
+4.3 per frame and 87 % of them re-bakes (lighting drift, neighbour-loaded seam
+redraws, cutaway changes); the existing bake budget only defers never-baked
+levels, which is why `bakeBudget=3` changed nothing.
+
+| run | change | fps mean | frame mean | p90 | p99 | p99.9 | under the cap | game thread |
+|---|---|---|---|---|---|---|---|---|
+| gt-q-1 | reference, previous defaults | 199.1 | 5.0 ms | 8.1 | 16.9 | 29.8 | 31.2 % | 92 % |
+| gt-q-3 | + weather-mask scan gate and building-only scan | 203.1 | 4.9 | 7.6 | 16.5 | 28.1 | 29.9 % | 92 % |
+| gt-q-cut-1 | + `cutawayRadius=6 gridStackInterval=8` | 208.2 | 4.8 | 7.1 | 15.9 | 28.1 | 30.2 % | 91 % |
+| gt-q-bake3-1 | + `bakeBudget=3` | 208.3 | 4.8 | 7.1 | 15.6 | 27.0 | 30.2 % | not adopted |
+| gt-q-ui-1 | + `uiRenderOffscreen=true` (stock option) | 208.4 | 4.8 | 7.0 | 16.2 | 28.8 | 32.6 % | not adopted |
+| gt-q-lrb-1 | + `lightingRebakeMs=250` | 215.6 | 4.6 | 6.5 | 13.6 | 23.8 | 29.1 % | 95 % |
+| gt-q-rb-1 | + `rebakeBudget=4` (new) | 225.9 | 4.4 | 5.5 | 11.2 | 19.7 | 28.3 % | 97 % |
+| gt-q-def-1 | + light-switch cache, all as defaults | 225.6 | 4.4 | 5.5 | 11.3 | 20.4 | 27.9 % | 97 % |
+| gt-q-lrb1000-1 | `lightingRebakeMs=1000` | 225.7 | 4.4 | 5.5 | 11.1 | 21.7 | 26.7 % | not adopted |
+| gt-q-lua-1 | + single-lookup Kahlua `rawget` | 228.1 | 4.4 | 5.3 | 10.5 | 20.0 | 27.8 % | 97 % |
+| gt-q-occ-1 | + occluder masks on the chunk | **228.8** | **4.4** | **5.4** | **10.2** | **17.8** | **27.1 %** | 97 % |
+| gt-base-1 | 100 s route, previous defaults | 230.1 | 4.3 | 5.1 | 10.5 | 20.9 | 24.4 % | 90 % |
+| gt-long-final-1 | 100 s route, final build | **238.5** | **4.2** | **4.6** | **7.3** | **14.4** | **20.6 %** | 94 % |
+
+Visual check: `gt-q-rb-2` (final keys) and `gt-q-ref-1` (every new key off)
+were recorded; frames every 2 s over the route are the same, including the
+dark unloaded and unlit areas at the leading edge that both show at 18
+tiles/s. Console errors are the same stock map warnings in both.
+
+What each trim was (details in `docs/override-edits.md`): the weather mask
+rasterized the whole view every frame even when it could add no mask
+(`isInteriorLocation` per exterior tile, 70 % of the pass in slow frames);
+`checkTreeTranslucency` did a `HashSet.remove` per tree per frame on an
+almost always empty set (our own edit) and read the aim key per tree;
+`LightingJNI.checkLights` asked every light switch for power every frame
+(2.3 %); the exact occluder mask lookup was a `HashMap.get` per on-screen
+level per frame (1.8 %); Kahlua's `rawget` did `containsKey` then `get`.
+
+Honest reading against the objective. The game thread is now 97 % busy on the
+spinning route and 94 % on the plain one with the GPU at 59 to 68 %, so the
+frame is game-thread-bound and the remaining cost is broad: chunk texture
+bakes 20 % (create and object changes while streaming; the re-bakes that can
+be held are held), `IsoWorld.update` 23 % (player 4 %, zombies 3 %, animation
+post-update 6 %, vehicles 2 %, chunk hand-off 4 %), the Lua UI draw 10 % plus
+its update 3 %, JNI light info caching 3 %, `LightingJNI.update` 3 %. There is
+no single hot spot left worth a class override; 240 locked on this route needs
+the game thread to do less per frame structurally: recording chunk-texture
+bakes off the game thread, or overlapping the render-command recording with
+the next frame's logic (`docs/plan-resource-use.md`). Both are multi-day
+changes with real race risk and need their own plan and gate.
+
+Video (04:26–04:31): `docs/media/rosewood-spin-stock-vs-optimized-vs-game-thread.mp4`
+(`harness/stitch-triple.sh`, 3840x1920, 28 s) from three recorded runs of the spinning
+route with the showcase HUD: `gtshow-stock-2` (every Config key at its stock value, the
+harness plumbing still installed so the run auto-starts: 105.3 fps mean, 9.5 ms, p99
+28.3), `gtshow-opt-1` (today's keys off: 197.4 fps, 5.1 ms, p99 18.0) and `gtshow-gt-1`
+(defaults: 225.8 fps, 4.4 ms, p99 11.6). The "optimized before" cell still carries the
+three key-less code trims (tree check, Kahlua rawget, occluder masks on the chunk),
+which are within noise. A stock run with the overrides uninstalled cannot auto-start
+(click-to-start is pressed by pzopt.AutoStart), which is why the keys-at-stock form is used.
+
+Small measured negatives, not adopted: `bakeBudget=3` (bursts are re-bakes,
+not first bakes), `uiRenderOffscreen=true` (UI draw 10 → 7 % but frame time
+unchanged at 240), `lightingRebakeMs=1000` (fewer bakes, same frame time).
+

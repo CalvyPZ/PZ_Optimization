@@ -11,7 +11,9 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   BuildingRoomsEditor, GameLoadingState, se.krka LuaCompiler, AnimationSet,
   AnimationAssetManager, TexturePackDevice, scripting.objects.Item, PerformanceSettings
   (frame limiter, 2026-09-19), and skinnedmodel.model.Model (shader cache, issue #1, 2026-09-19
-  night), and core.textures.ImageData (byte[] mipmap loops, issue #2, 2026-09-20). Inner classes
+  night), and core.textures.ImageData (byte[] mipmap loops, issue #2, 2026-09-20), and the game-thread
+  trims of 2026-09-20: iso.weather.fx.WeatherFxMask (mask scan gate), iso.objects.IsoLightSwitch
+  (electricity check cache), se.krka KahluaTableImpl (single-lookup rawget). Inner classes
   are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md` and marked `// pzopt:` in the
   source.** After a game update, `scripts/regen-overrides.sh` decompiles the new jar so the
@@ -20,7 +22,9 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   `build/classes/media/lua/` so `pzopt.sh` installs it into the game dir's `media/lua/` with the
   classes. No mod to enable. Currently the "Menu framerate" Display-options combo
   (`pzopt_framecap_options.lua`) and the "Optimizations" options tab
-  (`pzopt_optimizations_options.lua`: every Config key as a tick box or combo, saved to
+  (`pzopt_optimizations_options.lua`: every Config key as a tick box or combo in nine titled
+  categories (chunk textures ×2, cutaways/lighting/weather, sprite buffers, chunk streaming, boot ×2,
+  world load ×2; 2026-09-20), saved to
   `~/Zomboid/pzopt/options.ini`, applied on the next launch).
 - `src/shims/`: small replacement classes (e.g. the TISLogoState shim that skips the boot
   splash screens).

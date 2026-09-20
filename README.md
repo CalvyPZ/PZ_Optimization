@@ -1,7 +1,7 @@
 # PZ_Optimization
 
 Performance patches for **Project Zomboid Build 42**, on the Java side of the game.
-Not a Lua mod: a set of drop-in `.class` files that shadow 25 game classes and remove
+Not a Lua mod: a set of drop-in `.class` files that shadow 28 game classes and remove
 the worst stalls from the chunk streamer, the renderer and the loading path.
 `projectzomboid.jar` is never modified. Every change has a kill switch, and every
 number in this file comes from the hands-off benchmark harness in this repo.
@@ -50,6 +50,32 @@ All runs: same save, same car, same 1,200-tile highway route east of Rosewood, m
 zoom, 5120x2160. Machine: Ryzen 7 9800X3D, RTX 4090, Crucial T705 NVMe, 32 GB DDR5.
 "Stock" is this build with every optimization switched off, which reproduces the
 shipped game exactly.
+
+### Rosewood at max zoom: stock vs optimized vs the game-thread pass (2026-09-20)
+
+The newest comparison, and a different route from the ones below: a 25 s teleport
+route south through Rosewood at max zoom with the player's facing spinning at
+90°/s, so the view cone, lighting cone and wall cutaways change every frame while
+55 chunks a second stream in. Three recordings of the same route with the live
+MangoHud overlay: stock settings, the optimized build as of 2026-09-19, and the same
+build after the game-thread pass of 2026-09-20 (`harness/stitch-triple.sh`, runs
+`gtshow-stock-2`, `gtshow-opt-1`, `gtshow-gt-1`).
+
+[![Stock vs optimized vs optimized + game-thread pass on the Rosewood route](docs/media/rosewood-spin-stock-vs-optimized-vs-game-thread.jpg)](docs/media/rosewood-spin-stock-vs-optimized-vs-game-thread-1080.mp4)
+
+| Metric | Stock settings | Optimized (2026-09-19) | + game-thread pass (2026-09-20) |
+|---|---|---|---|
+| fps, mean | 105 | 197 | 226 |
+| Frame time, mean | 9.5 ms | 5.1 ms | 4.4 ms |
+| Frame time, p90 | 17.6 ms | 8.1 ms | 5.5 ms |
+| Frame time, p99 | 28.3 ms | 18.0 ms | 11.6 ms |
+| Frame time, p99.9 | 42.2 ms | 32.7 ms | 19.2 ms |
+| Frames below the 240 fps cap | 74 % | 32 % | 29 % |
+| Game thread busy | | 92 % | 97 % |
+
+On the plain 100 s south route without the spin the pass takes the build from 230 to
+238.5 fps mean and the p99 from 10.5 to 7.3 ms. What the pass changed is in
+[Renderer](#2-renderer) below; the run-by-run table is in `docs/results.md`.
 
 ### 120 km/h drive: stock at its 244 fps cap vs optimized uncapped
 
@@ -347,15 +373,17 @@ file; `status` must print `installed: yes` with no `MISSING` or `MODIFIED` entri
 ### In the game menu
 
 Every optimization is a toggle in **Options > Optimizations**, a tab of its own right
-after Display & Performance. Tick boxes are the on/off switches; combos hold the
-numeric budgets and thread counts, with the build's default on your machine as the
-first entry. Hover a control for what it does and its key name. Changes apply on the
+after Display & Performance, in nine titled groups: chunk textures (what bakes, bake
+budgets), cutaways / lighting / weather, sprite buffers, chunk streaming, boot
+(threads and caches, parsers) and world load (file system and decoding, loading
+screen). Tick boxes are the on/off switches; combos hold the numeric budgets and
+thread counts, with the build's default on your machine as the first entry. Hover a control for what it does and its key name. Changes apply on the
 next launch: the game shows its usual "restart required" dialog when a change
 matters, and the choices are kept in `Zomboid/pzopt/options.ini` (Linux
 `~/Zomboid`, Windows `%USERPROFILE%\Zomboid`). Choosing "Default" removes the key
 again.
 
-![Options > Optimizations: every optimization as a tick box or combo, grouped as rendering, chunk streaming, boot and load](docs/media/options-optimizations-tab.jpg)
+![Options > Optimizations: every optimization as a tick box or combo (screenshot from before the 2026-09-20 regrouping into nine categories)](docs/media/options-optimizations-tab.jpg)
 
 Display & Performance keeps the stock layout and gains the **Uncapped** entry, the
 300 to 500 fps caps and the separate **Menu framerate** combo:
@@ -544,6 +572,22 @@ crops, wall decorations). Baking them cut per-frame draws from about 3,000 to
 about 100, but some `Translucent` tileset tiles bake opaque black, so it is off
 until the tile set is filtered.
 
+**Game-thread trims on the Rosewood route** (2026-09-20). A 25 s teleport route south
+through Rosewood at max zoom with the player facing spinning (`--flag turn=90`, 55 chunks
+per second loaded) is the heaviest bench route now. On it the game thread was 92 % busy at
+199 fps; the wins, all on that thread: the weather-mask view scan skipped when it can add
+nothing and limited to the player's building when it can (`weatherMaskIdleSkip`); the
+cutaway visit radius and grid-stack interval adopted (6 chunks, 8 frames); lighting-only
+re-bakes held 250 ms; a re-bake budget of 4 per frame for textures dirtied by lighting,
+redraw or cutaways with the previous image shown for at most 3 frames (`rebakeBudget`,
+87 % of bakes on that route were re-bakes); the light-switch electricity check cached for
+15 frames (`lightSwitchCheckFrames`); the Kahlua table read done with one hash lookup; the
+exact occluder masks stored on the chunk. Together: 199 → 229 fps mean, p90 8.1 → 5.4 ms,
+p99 16.9 → 10.2 ms on the spinning route; on the plain 100 s south route 230 → 238.5 fps,
+p99 10.5 → 7.3 ms, frames under the 240 cap 24 → 21 %. Recordings with the keys off show
+the same frames. What is left on the game thread is broad: chunk texture bakes (20 %), the
+world update (23 %: player, zombies, vehicles, chunk hand-off) and the Lua UI (10 %).
+
 ### 3. Boot: launch to main menu
 
 **FMOD on a boot thread** (`fmodAsync`). Sound system and 12 bank files (1.6 s)
@@ -609,22 +653,6 @@ thread and waited one loading-screen step per model. On a laptop whose
 loading-screen step is 220 ms the 73 animal models cost 16.5 s (GitHub issue #1).
 Repeat shaders now come from a cache.
 
-**Game-thread trims on the Rosewood route** (2026-09-20). A 25 s teleport route south
-through Rosewood at max zoom with the player facing spinning (`--flag turn=90`, 55 chunks
-per second loaded) is the heaviest bench route now. On it the game thread was 92 % busy at
-199 fps; the wins, all on that thread: the weather-mask view scan skipped when it can add
-nothing and limited to the player's building when it can (`weatherMaskIdleSkip`); the
-cutaway visit radius and grid-stack interval adopted (6 chunks, 8 frames); lighting-only
-re-bakes held 250 ms; a re-bake budget of 4 per frame for textures dirtied by lighting,
-redraw or cutaways with the previous image shown for at most 3 frames (`rebakeBudget`,
-87 % of bakes on that route were re-bakes); the light-switch electricity check cached for
-15 frames (`lightSwitchCheckFrames`); the Kahlua table read done with one hash lookup; the
-exact occluder masks stored on the chunk. Together: 199 → 229 fps mean, p90 8.1 → 5.4 ms,
-p99 16.9 → 10.2 ms on the spinning route; on the plain 100 s south route 230 → 238.5 fps,
-p99 10.5 → 7.3 ms, frames under the 240 cap 24 → 21 %. Recordings with the keys off show
-the same frames. What is left on the game thread is broad: chunk texture bakes (20 %), the
-world update (23 %: player, zombies, vehicles, chunk hand-off) and the Lua UI (10 %).
-
 **Mipmaps on byte arrays** (`mipmapArrays`). Mip levels and alpha premultiply are built row
 by row on `byte[]` copies instead of per-byte direct-buffer accesses, byte-identical to stock.
 Written for GitHub issue #2 (a JVM SIGSEGV in `ImageData.scaleMipLevelMaxAlpha` on a laptop),
@@ -671,32 +699,36 @@ two. Dates are not promised.
 
 ### 1. Game thread (next)
 
-`docs/plan-driving-frame-time.md` §3, `docs/plan-resource-use.md` §4.3.
+`docs/plan-driving-frame-time.md` §3, `docs/plan-resource-use.md` §4.3,
+`docs/results.md` 2026-09-20.
 
-Measured shares of game-thread CPU on a CPU-visible run: `IsoCell.render` 58 %,
-of which the translucent pass (windows, glass doors, `Translucent` tiles, wall
-lighting) is still about 35 % of the whole thread; the Lua UI 25 to 34 %; the
-view-cone stencil (`VisibilityPolygon2`) about 7 %; cutaway occlusion recompute
-every frame while any chunk texture is dirty.
+The 2026-09-20 pass took the cheap wins (weather-mask scan gate, re-bake budget,
+cutaway radius and grid-stack interval, light-switch cache, single-lookup Lua table
+reads, occluder masks on the chunk). After it the game thread is 97 % busy on the
+spinning Rosewood route with the GPU at 60 to 68 %, and the remaining cost is broad:
+chunk texture bakes 20 % (first bakes and object changes while streaming), the world
+update 23 % (player 4 %, zombies 3 %, animation post-update 6 %, vehicles 2 %,
+chunk hand-off 4 %), the Lua UI draw 10 % plus its update 3 %, JNI light-info
+caching 3 %, `LightingJNI.update` 3 %. No single hot spot is left worth a class
+override; measured non-gains: `bakeBudget=3`, `uiRenderOffscreen=true`,
+`lightingRebakeMs=1000`.
 
-- **Translucent list built once per invalidation, not once per frame**
-  (`translucentCache`, off today). The per-frame walk over every object of every
-  chunk level is the largest single cost left; the list only changes when a chunk
-  level is invalidated, which the bake path already tracks.
-- **View-cone polygon off the game thread.** `calculateVisibilityPolygon` reads
-  only state that changes in `logic()`, so it can start on the game's own fork-join
-  pool right after `logic()` and be joined in `renderMain`. Gate: vertex-list
-  parity, then the frame-time compare on a zoom-1.0 route, where the CPU is the limit.
-- **Cutaway skip while driving outdoors** and the remaining per-frame lookups
-  (`TilePropertyAliasMap` string lookups per object, per-sprite uniform HashMap
-  lookups, `IOpenGLState` redundant sets, 5 %).
-- **Lua UI** stays where it is: the stock `uiRenderOffscreen` option already moves
-  it to its own rate, and the Lua VM itself is out of scope.
+What would move the needle now is structural, each with its own plan and gate:
+
+- **Chunk-texture bake recording off the game thread.** The bake of a chunk level
+  records sprite commands from static chunk state; recording it on a worker into its
+  own state buffer and splicing it in would remove most of the 20 %. Needs the
+  sprite recorder's static state made per-thread.
+- **Overlap the draw-command recording with the next frame's logic.** The frame is
+  `logic()` then `renderInternal()` on one thread; running them on two threads one
+  frame apart is the largest gain and the largest race risk (`docs/plan-resource-use.md`).
+- **View-cone polygon off the game thread** (`calculateVisibilityPolygon`, about 2 %):
+  small, low risk, a good first exercise of the fork-join hand-off.
 - **`Translucent`-flagged tiles bake** once the tile set that bakes opaque black
   is filtered (the flag exists, off by default).
 
 Gate for each: byte-identical recalc parity where it applies, `harness/compare.py`
-on the bench route, and the visual verify run on a real-save copy.
+on the Rosewood route, and a recorded run compared frame by frame with the keys off.
 
 ### 2. Vulkan renderer (measured gate first)
 
@@ -777,12 +809,13 @@ class inside the jar. The overrides are copied in as loose files and removed by
 deleting them; the jar's checksum never changes. This is the "manual class
 replacement" method described on the [PZ wiki's Java page](https://pzwiki.net/wiki/Java).
 
-Shadowed classes (25 game classes plus one from-scratch shim):
+Shadowed classes (28 game classes plus one from-scratch shim):
 
 | Area | Classes |
 |---|---|
 | Streaming and render | `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`, `zombie.iso.ChunkSaveWorker`, `zombie.iso.IsoMetaCell`, `zombie.core.VBO.GLVertexBufferObject`, `zombie.iso.fboRenderChunk.FBORenderCell`, `zombie.GameWindow`, `zombie.core.PerformanceSettings` |
 | Boot and load | `zombie.fileSystem.FileSystemImpl`, `zombie.fileSystem.TexturePackDevice`, `zombie.tileDepth.TileDepthTextures`, `zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`, `zombie.iso.IsoMetaGrid`, `zombie.gameStates.GameLoadingState`, `zombie.buildingRooms.BuildingRoomsEditor`, `zombie.core.skinnedmodel.advancedanimation.AnimationSet`, `zombie.core.skinnedmodel.model.AnimationAssetManager`, `zombie.core.skinnedmodel.model.Model`, `zombie.core.textures.ImageData`, `zombie.scripting.ScriptParser`, `zombie.scripting.objects.Item`, `se.krka.kahlua.luaj.compiler.LuaCompiler` |
+| Game thread (2026-09-20) | `zombie.iso.weather.fx.WeatherFxMask`, `zombie.iso.objects.IsoLightSwitch`, `se.krka.kahlua.j2se.KahluaTableImpl` |
 | Window shims | `org.lwjglx.opengl.Display`, `org.lwjglx.input.Mouse` |
 | From scratch | `zombie.gameStates.TISLogoState` |
 
@@ -906,7 +939,7 @@ game itself when Steam is not running. Pass `--no-dashboard` on measurement runs
 | Path | What |
 |---|---|
 | `src/pzopt/pzopt/` | New classes: `Config`, `Overrides`/`BuildInfo` (build guard), `RecalcPool`, `OrderedPublisher`, `StreamerWake`, `BootPump`, `LuaPrecompiler`, `AnimClipCache`, `ModelShaders`, `FrameCap`, `Stats`, `Harness`/`Parity` |
-| `src/overrides/` | The 25 shadowed game classes, edits marked `// pzopt:` |
+| `src/overrides/` | The 28 shadowed game classes, edits marked `// pzopt:` |
 | `src/shims/` | From-scratch replacements (`TISLogoState`) |
 | `src/lua/` | The frame-cap and Optimizations-tab options Lua, installed under `media/lua/client/pzopt/` |
 | `install.sh`, `install.ps1` | Standalone installers (Linux, Windows) for the release zip; also attached to every release |

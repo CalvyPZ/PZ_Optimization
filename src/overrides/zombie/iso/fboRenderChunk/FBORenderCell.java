@@ -1169,6 +1169,7 @@ public final class FBORenderCell {
 
       ArrayList<IsoGridSquare> squares = renderLevels.treeSquares;
       boolean bChanged = false;
+      boolean pzoptAiming = IsoPlayer.getPlayer(IsoCamera.frameState.playerIndex).isAnyAimKeyDown(); // pzopt: hoisted out of the tree loop
 
       for (int i = 0; i < squares.size(); i++) {
          IsoGridSquare square = squares.get(i);
@@ -1179,7 +1180,7 @@ public final class FBORenderCell {
                   if (this.pzoptTreesAwaitingTexture.add(tree)) {
                      pzoptTreesWaited++;
                   }
-               } else if (this.pzoptTreesAwaitingTexture.remove(tree)) {
+               } else if (!this.pzoptTreesAwaitingTexture.isEmpty() && this.pzoptTreesAwaitingTexture.remove(tree)) { // pzopt: the set is empty almost always; skip the hash per tree
                   pzoptTreesArrived++;
                   bChanged = true;
                   square.invalidateRenderChunkLevel(4096L);
@@ -1197,7 +1198,7 @@ public final class FBORenderCell {
                   bChanged2 = true;
                }
 
-               if (this.isTranslucentTree(tree) != tree.renderFlag) {
+               if (this.pzoptIsTranslucentTree(tree, pzoptAiming) != tree.renderFlag) { // pzopt: aim key read once per chunk, not per tree
                   tree.renderFlag = !tree.renderFlag;
                   bChanged = true;
                   bChanged2 = true;
@@ -1346,6 +1347,7 @@ public final class FBORenderCell {
       this.renderWindowFrameOutline = false;
       FBORenderChunkManager.instance.startFrame();
       this.pzoptBakesThisFrame = 0;
+      this.pzoptRebakesThisFrame = 0; // pzopt: re-bake budget
       this.pzoptDeferredTextures.clear();
       IsoPuddles.getInstance().clearThreadData();
       IsoWater.getInstance().clearThreadData();
@@ -1679,6 +1681,34 @@ public final class FBORenderCell {
                pzoptDefer = pzoptLightingOnly || (pzoptBudget > 0 && this.pzoptBakesThisFrame >= pzoptBudget && renderLevels.isDirty(level, 512L, zoom));
                if (pzoptLightingOnly) {
                   pzoptLightingRebakesHeld++;
+               }
+               // pzopt: re-bake budget. A texture already on screen whose only dirty reasons are lighting drift (32),
+               // a redraw (1024: neighbour loaded, came on screen, light switch) or a cutaway change (2048) keeps its
+               // previous image for up to REBAKE_MAX_FRAMES frames once REBAKE_BUDGET such re-bakes have started this
+               // frame. Object, tree and obscuring changes are never held (their per-frame lists must match the texture).
+               int pzoptRebakeBudget = pzopt.Overrides.enabled() ? pzopt.Config.REBAKE_BUDGET : 0;
+               if (!pzoptDefer && pzoptRebakeBudget > 0 && pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom)
+                     && !renderLevels.isDirty(level, ~(32L | 1024L | 2048L), zoom)) {
+                  int pzoptNow = IsoWorld.instance.getFrameNo();
+                  if (this.pzoptRebakesThisFrame >= pzoptRebakeBudget) {
+                     Integer since = this.pzoptRebakeHeldSince.get(pzoptRc);
+                     if (since == null) {
+                        if (this.pzoptRebakeHeldSince.size() > 4096) {
+                           this.pzoptRebakeHeldSince.clear();
+                        }
+                        this.pzoptRebakeHeldSince.put(pzoptRc, pzoptNow);
+                        pzoptDefer = true;
+                     } else if (pzoptNow - since < pzopt.Config.REBAKE_MAX_FRAMES) {
+                        pzoptDefer = true;
+                     }
+                  }
+                  if (!pzoptDefer) {
+                     this.pzoptRebakesThisFrame++;
+                     this.pzoptRebakeHeldSince.remove(pzoptRc);
+                     pzoptRebakesTotal++;
+                  } else {
+                     pzoptRebakesHeld++;
+                  }
                }
                if (pzoptDefer) {
                   pzoptDeferredTotal++;
@@ -2680,6 +2710,13 @@ public final class FBORenderCell {
       } else {
          int playerIndex = IsoCamera.frameState.playerIndex;
          boolean isAiming = IsoPlayer.getPlayer(playerIndex).isAnyAimKeyDown();
+         return this.pzoptIsTranslucentTree(object, isAiming);
+      }
+   }
+
+   /** pzopt: isTranslucentTree with the aim-key state supplied by the caller (checkTreeTranslucency reads it once per chunk). */
+   private boolean pzoptIsTranslucentTree(IsoObject object, boolean isAiming) {
+      {
          IsoGridSquare square = object.square;
          square.IsOnScreen();
          if (isAiming
@@ -3651,11 +3688,14 @@ public final class FBORenderCell {
 
    // pzopt: bake budget — chunk-level textures (re)baked per frame; the rest keep their previous texture for a frame
    private int pzoptBakesThisFrame;
+   private int pzoptRebakesThisFrame; // pzopt: re-bake budget (Config.REBAKE_BUDGET)
+   private final java.util.IdentityHashMap<FBORenderChunk, Integer> pzoptRebakeHeldSince = new java.util.IdentityHashMap<>();
+   private static long pzoptRebakesTotal;
+   private static long pzoptRebakesHeld;
    private final java.util.HashSet<FBORenderChunk> pzoptDeferredTextures = new java.util.HashSet<>();
    private static long pzoptDeferredTotal;
    private static long pzoptLightingRebakesHeld;
    // pzopt: cutaway savings (Config.CUTAWAY_FAST / CUTAWAY_RADIUS / GRID_STACK_INTERVAL)
-   private final java.util.HashMap<ChunkLevelData, Long> pzoptOccluderMaskValid = new java.util.HashMap<>();
    private final java.util.ArrayList<IsoChunk> pzoptNearChunks = new java.util.ArrayList<>();
    private IsoGridSquare pzoptGridStackSquare;
    private zombie.iso.IsoDirections pzoptGridStackDir;
@@ -3702,7 +3742,7 @@ public final class FBORenderCell {
       }
       if (!pzoptTlSets.isEmpty()) {
          final int frames = pzoptTlFrames;
-         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" flags:");
+         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld).append(" flags:");
       for (int b = 0; b < 16; b++) {
          if (pzoptBakeFlags[b] > 0) sb.append(' ').append(PZOPT_FLAG_NAMES[b]).append('=').append(pzoptBakeFlags[b]);
          pzoptBakeFlags[b] = 0;
@@ -4247,9 +4287,6 @@ public final class FBORenderCell {
       // grid instead of re-testing all 64 squares; only dirty or never-computed levels run the full test
       boolean pzoptFast = pzopt.Config.CUTAWAY_FAST && pzopt.Overrides.enabled();
       float pzoptZoom = pzoptFast ? Core.getInstance().getZoom(playerIndex) : 0.0F;
-      if (pzoptFast && this.pzoptOccluderMaskValid.size() > 8192) {
-         this.pzoptOccluderMaskValid.clear();
-      }
       int pzoptWidth = perPlayerData1.occludedGridX2 - perPlayerData1.occludedGridX1 + 1;
 
       for (int i = 0; i < perPlayerData1.onScreenChunks.size(); i++) {
@@ -4258,13 +4295,12 @@ public final class FBORenderCell {
 
          for (int z = c.minLevel; z <= c.maxLevel; z++) {
             if (renderLevels.isOnScreen(z)) {
-               ChunkLevelData levelData = c.getCutawayData().getDataForLevel(z);
-               Long pzoptStored = pzoptFast && !renderLevels.isDirty(z, pzoptZoom) ? this.pzoptOccluderMaskValid.get(levelData) : null;
-               if (pzoptStored != null) {
+               int pzoptSlot = z + 32; // pzopt: levels are -32..31
+               if (pzoptFast && (c.pzoptOccluderMaskSet & (1L << pzoptSlot)) != 0L && !renderLevels.isDirty(z, pzoptZoom)) {
                   // the stock mask (levelData.occludingSquares) is built with an int shift: bits 32-63 wrap and bit 31
-                  // sign-extends, so it is only good for change detection; the exact mask is kept here (black rows of
-                  // tiles along house walls, 2026-09-19)
-                  long mask = pzoptStored;
+                  // sign-extends, so it is only good for change detection; the exact mask is kept on the chunk (black
+                  // rows of tiles along house walls, 2026-09-19; was a map keyed by ChunkLevelData until 2026-09-20)
+                  long mask = c.pzoptOccluderMask[pzoptSlot];
                   while (mask != 0L) {
                      int b = Long.numberOfTrailingZeros(mask);
                      mask &= mask - 1L;
@@ -4277,6 +4313,7 @@ public final class FBORenderCell {
                   }
                   continue;
                }
+               ChunkLevelData levelData = c.getCutawayData().getDataForLevel(z);
                boolean bChanged = levelData.calculateOccludingSquares(
                   playerIndex,
                   perPlayerData1.occludedGridX1,
@@ -4286,7 +4323,8 @@ public final class FBORenderCell {
                   perPlayerData1.occludedGrid
                );
                if (pzoptFast) {
-                  this.pzoptOccluderMaskValid.put(levelData, pzoptExactOccluderMask(playerIndex, c, z, levelData));
+                  c.pzoptOccluderMask[pzoptSlot] = pzoptExactOccluderMask(playerIndex, c, z, levelData);
+                  c.pzoptOccluderMaskSet |= 1L << pzoptSlot;
                }
                if (bChanged) {
                   FBORenderOcclusion.getInstance().invalidateOverlappedChunkLevels(playerIndex, c, z);

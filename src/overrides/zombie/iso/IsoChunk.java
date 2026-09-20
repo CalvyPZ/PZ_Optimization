@@ -142,6 +142,10 @@ import zombie.vispoly.VisibilityPolygon2;
 
 @UsedFromLua
 public final class IsoChunk {
+   // pzopt: exact occluder mask per level (index z + 32) and a bit per level saying the mask is stored; replaces the
+   // per-frame map lookup FBORenderCell.calculateOccludingSquares used for clean levels (cutawayFast)
+   public final long[] pzoptOccluderMask = new long[64];
+   public long pzoptOccluderMaskSet;
    // pzopt: marker so the game log shows the loose class was loaded, not the jar's copy
    static {
       pzopt.Overrides.onClassLoaded("zombie.iso.IsoChunk");
@@ -5373,6 +5377,7 @@ public final class IsoChunk {
 
    public void resetForStore() {
       loadGridSquare.remove(this);
+      this.pzoptOccluderMaskSet = 0L; // pzopt: a reused chunk object starts without stored occluder masks
       this.randomId = 0;
       this.revision = 0L;
       this.nextSplatIndex = 0;

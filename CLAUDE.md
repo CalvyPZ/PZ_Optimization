@@ -113,6 +113,13 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   `PerformanceSettings` forwards), saved to `~/Zomboid/pzopt/options.ini`, applied on the next
   launch; `-Dpzopt.*` and the game dir's `pzopt.properties` (harness `--prop`) still win, so runs
   never depend on menu choices.
+- Game thread (2026-09-20, `docs/results.md`): new heavy bench route `--flag route=S:450 --flag turn=90
+  --route-seconds 25` (south through Rosewood, facing spinning). Adopted: weatherMaskIdleSkip,
+  cutawayRadius=6, gridStackInterval=8, lightingRebakeMs=250, rebakeBudget=4/rebakeMaxFrames=3,
+  lightSwitchCheckFrames=15, single-lookup Kahlua rawget, occluder masks on IsoChunk. 199 → 229 fps
+  there, 230 → 238.5 on the 100 s route. No gain from bakeBudget=3, uiRenderOffscreen or
+  lightingRebakeMs=1000. Game thread now 97 % busy with broad work (bakes 20 %, world update 23 %,
+  Lua UI 10 %): 240 locked on that route needs a structural change, not more trims.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under

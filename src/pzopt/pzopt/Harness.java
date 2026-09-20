@@ -28,6 +28,8 @@ import zombie.vehicles.BaseVehicle;
  *   vehicle  script    drive mode: vehicle spawned on the nearest road when the player is on foot (default the race car; "none" = fixture required)
  *   kmh      km/h      drive mode: cruise-control speed (default 60); the route follows the road (roadFollow)
  *   speed    tiles/s   default 18 (about car speed on a road)
+ *   turn     deg/s     bench/parity: spin the player's facing at this rate along the route so the view cone, lighting
+ *                      cone and cutaways keep changing (default 0 = keep the save's facing)
  *   settle   seconds   wait after the world is up before moving (default 15; harness/run.sh passes 5: the
  *                      load burst and the forced-zoom bake are over ~2 s after the world is up)
  *   zoom     max|level  force the camera zoom before the route (auto-zoom off); drive mode defaults to max, other modes keep the save's zoom
@@ -72,6 +74,9 @@ public final class Harness {
    private static long stateSinceNs;
    private static long lastFrameNs;
    private static float speed = 18f;
+   /** bench: degrees per second the player facing rotates while on the route (flag turn, 0 = off). */
+   private static float turnDegPerSec = 0f;
+   private static float turnAngle = 0f;
    private static float settle = 15f;
    private static final List<float[]> legs = new ArrayList<>(); // {dx, dy, length}
    private static int leg = 0;
@@ -182,6 +187,7 @@ public final class Harness {
             return;
          }
          speed = Float.parseFloat(HarnessFlags.get("speed", "18"));
+         turnDegPerSec = Float.parseFloat(HarnessFlags.get("turn", "0"));
          settle = Float.parseFloat(HarnessFlags.get("settle", "15"));
          maxSeconds = Float.parseFloat(HarnessFlags.get("max_seconds", "90"));
          cruiseKmh = Float.parseFloat(HarnessFlags.get("kmh", "60"));
@@ -361,6 +367,11 @@ public final class Harness {
             // which plain setX/setY does not survive
             if ((int)x != p.getXi() || (int)y != p.getYi()) {
                p.teleportTo((int)x, (int)y, 0);
+            }
+            if (turnDegPerSec != 0f) {
+               // spin the facing so the vision cone, lighting cone and buildings-in-front scans keep changing
+               turnAngle = (turnAngle + turnDegPerSec * Math.min(dt, 0.1f)) % 360f;
+               p.setDirectionAngle(turnAngle);
             }
             if (leg >= legs.size()) {
                float secs = (nowNs - runStartNs) / 1e9f;

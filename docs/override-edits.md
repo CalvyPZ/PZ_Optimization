@@ -214,9 +214,12 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
    occluded grid (bit → square x/y, level z, same window test and `max`
    update as the stock per-square loop); dirty or never-computed levels run
    the stock `ChunkLevelData.calculateOccludingSquares`. The replayed mask is
-   pzopt's own (`pzoptExactOccluderMask`, a `HashMap<ChunkLevelData, Long>`,
-   computed after the stock call with the stock test but without the
-   on-screen clip). The stock `occludingSquares` mask is built with an `int`
+   pzopt's own (`pzoptExactOccluderMask`, computed after the stock call with
+   the stock test but without the on-screen clip). Since 2026-09-20 the mask
+   lives on the `IsoChunk` override (a `long[64]` indexed by level + 32 plus a
+   bit per stored level, cleared in `resetForStore`) instead of a map keyed by
+   `ChunkLevelData`: the per-frame map lookup for every on-screen level was
+   1.8 % of the game thread. The stock `occludingSquares` mask is built with an `int`
    shift (`1 << x + y * 8`): bits 32-63 wrap and bit 31 sign-extends when cast
    to long, which stock never notices because it only compares the mask with
    its previous value. Replaying it marked whole rows of tiles beside house
@@ -235,6 +238,29 @@ objects, chunks by lighting counter, translucent squares). Every fix is marked
     last scan and fewer than that many frames have passed (never skipped when
     `player.dirtyRecalcGridStack` is set); `recalculateAnyGridStacks` still
     runs every frame.
+11. **Tree translucency check** (2026-09-20). In `checkTreeTranslucency` the
+    `HashSet.remove` of the trees-awaiting-texture set is only attempted
+    when the set is not empty (it almost always is: 1.9 % of the game thread
+    was that remove per tree per frame), and the aim-key state is read once
+    per chunk level instead of once per tree: `isTranslucentTree(IsoObject)`
+    now delegates to a private overload that takes the aim flag.
+12. **Re-bake budget** (`pzopt.Config.REBAKE_BUDGET`, default 4;
+    `REBAKE_MAX_FRAMES`, default 3; 2026-09-20). Inside the bake-budget block
+    of `renderOneLevel`: a texture that was baked before and whose dirty flags
+    are only lighting (32), redraw (1024) and/or cutaways (2048) is deferred
+    (previous image drawn through the existing stale-texture path) once that
+    many such re-bakes have started this frame, for at most
+    `REBAKE_MAX_FRAMES` frames per texture (an identity map from texture to
+    the frame it was first held, bounded at 4096). Object, item, tree and
+    obscuring changes are never held, for the flicker reason in item 6. On
+    the 25 s Rosewood teleport route with the facing spinning, bakes were
+    2.4 to 4.3 per frame and 87 % of them re-bakes; this took the p99 from
+    15.6 to 11.2 ms (`docs/results.md`, 2026-09-20). Counters
+    `budgeted rebakes` / `held` join the instrument line.
+13. **Defaults changed 2026-09-20**: `lightingRebakeMs` 0 → 250,
+    `cutawayRadius` 0 → 6, `gridStackInterval` 0 → 8 (measured on the same
+    route: +8 fps for the two cutaway keys, +7 fps for the lighting hold;
+    recordings side by side with the keys off show the same frames).
 
 ## zombie.GameWindow
 
@@ -720,3 +746,59 @@ warmed). Config key `mipmapArrays` (default true); off, or with the debug
 colours on, the stock loops run untouched. Class-load marker in a static
 initializer. It is not a fix for the laptop: if the crash recurs there, boot
 the packaged kernel and run a memory test before touching the code.
+
+## zombie.iso.weather.fx.WeatherFxMask (added 2026-09-20, game thread)
+
+Regenerated with Vineflower; one decompiler fix (the "Calc Bounds" profile
+area local shared its name with the `bRender` boolean captured by the two
+rasterize lambdas; renamed, marked `// pzopt: decompiler fix`).
+
+1. **Load marker** in a `static {}` block.
+2. **Idle skip** (`pzopt.Config.WEATHER_MASK_IDLE_SKIP`, default true). At the
+   top of the masked branch of `renderFxMask`, a private `pzoptMaskIdle`
+   returns when nothing of the pass could reach the screen: the player is
+   exterior (no interior tint layer), no cloud layer, no fog layer at fog
+   quality 2, no precipitation layer at the precipitation option 1, and no
+   debug mask view. Then neither `scanForTiles` nor `drawFxMask` runs; the
+   mask state is left as it was, so the next active frame continues it.
+3. **Scan gate.** `scanForTiles` returns at once when the scan could not add a
+   mask: the player mask needs no update or has nothing to draw, or the
+   player is in no building and no fog-mask region (`isInPlayerBuilding` can
+   then never be true). Stock rasterizes the whole view every frame in that
+   state (tens of thousands of squares at max zoom, `isInteriorLocation` per
+   exterior tile: 1.5 to 3.7 % of the game thread, 70 % of the pass in slow
+   frames).
+4. **Building-only scan.** When the player stands in a building and not in
+   a fog-mask region, a private `pzoptScanBuildingOnly` visits the squares of
+   the building's `BuildingDef` bounds plus one tile of margin (a square
+   outside the building only consults its N, W and NW neighbours) that pass
+   the class's own `isOnScreen`, calling `addMaskLocation` for each, instead
+   of rasterizing the view; `scanForTiles` then returns. The mask contents
+   are the same squares stock would have found. Same Config key. The whole
+   pass went from 2.6 to 0.5 % of the game thread outdoors and from 6.6 to
+   2.4 % on the spinning route through Rosewood.
+
+## zombie.iso.objects.IsoLightSwitch (added 2026-09-20, game thread)
+
+1. **Load marker** in a `static {}` block.
+2. **Electricity check cache** (`pzopt.Config.LIGHT_SWITCH_CHECK_FRAMES`,
+   default 15; 0 = stock). `hasElectricityAround()` keeps its last answer and
+   the frame it was computed (`IsoWorld.getFrameNo`) in two new fields and
+   returns it while fewer than that many frames have passed; the stock body
+   moved to a private `pzoptHasElectricityAroundNow`. `LightingJNI.checkLights`
+   asks every light source's first switch for power every frame (grid power,
+   generators, the 3x3x2 neighbourhood): 2.3 % of the game thread on the
+   Rosewood route, 0.3 % after. A power change shows on a lamp up to 15
+   frames late.
+
+## se.krka.kahlua.j2se.KahluaTableImpl (added 2026-09-20, Lua VM)
+
+1. **Load marker** in a `static {}` block.
+2. **Single lookup in `rawget(Object)`.** Stock does `containsKey` and then
+   `get` on the delegate map (two hash lookups per table read; the Lua UI and
+   `OnTick` handlers do millions per second). Now one `get`; a null result
+   means the key is absent, which is exactly the stock `containsKey` test
+   because `rawset` removes the key on a nil value and never stores null.
+   The metatable fallback is unchanged. The reload-replace and data-breakpoint
+   code before it is untouched.
+
