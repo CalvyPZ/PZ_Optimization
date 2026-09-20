@@ -75,11 +75,15 @@ the header) and a YouTube URL for the showcase video.
 ### Animated thumbnail
 
 `docs/workshop/images/00-showcase-thumbnail.gif` (`harness/showcase-thumbnail-gif.py`): the
-results-card capture from 25 s, a square view of the fight, then a smooth zoom and pan into the
-performance overlay, held while its numbers tick; "PZ Optimized" on a band at the bottom.
-512x512, 8 fps, 43 frames, 112 colours, no dither, 732 KB (Steam's preview limit is 1 MB and
-the palette size, not the pixel count, decides it). `09-performance-overlay.jpg` is the overlay
-panel cropped from the same frame for the carousel and the "Performance overlay" section.
+results-card capture from 25 s, a square crop centred on the character (the game camera follows
+them, so the crop is fixed and the overlay stays outside it), "PZ Optimized" on a band at the top.
+448x448, 6 fps, 28 frames (4.6 s: the shot, then the in-game zoom-out and the walk), 96 colours,
+median-3 denoise, gifsicle `--lossy=80`: 985 KB under Steam's 1 MB preview limit. The asphalt
+grain is what costs (plain LZW is ~145 KB a frame at 512 px whatever the palette); ImageMagick's
+fuzz transparency ghosts on the panning camera and dither triples the size, so neither is used.
+Needs `gifsicle` (`pacman -S gifsicle`, or `GIFSICLE=<binary>`). `GIF_END=x:y:w` gives the
+older zoom-into-the-overlay variant. `09-performance-overlay.jpg` is the overlay panel cropped
+from the 25 s frame for the carousel and the "Performance overlay" section.
 
 The game's uploader hard-codes `preview.png` and rejects anything that is not a PNG, so the GIF
 cannot go up from the in-game screen. Steam's own tool takes it: install `steamcmd` (AUR), then
