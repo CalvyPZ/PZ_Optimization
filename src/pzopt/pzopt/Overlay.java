@@ -45,7 +45,9 @@ import zombie.ui.UIFont;
  * itself is the bottleneck, in which case it tracks the render thread's CPU share (shown next
  * to it) instead. Reading it against that column tells the two apart.
  *
- * Config: {@code overlay=true} shows it from boot; the key bound to "Toggle performance overlay"
+ * Config: {@code overlaySampling=true} (Optimizations tab, off by default) turns the measurement on
+ * at all; without it the toggle key shows a notice pointing at the tick box and the restart.
+ * {@code overlay=true} shows it from boot (and implies sampling); the key bound to "Toggle performance overlay"
  * (Options > Key Bindings, default F9; {@code overlayKey=<lwjgl code>} is the fallback when the
  * binding is missing) toggles it any time. {@code overlayLog=true}, or any harness run, writes
  * {@code Zomboid/pzopt-overlay.out}: one CSV row per presented frame in MangoHud's column names
@@ -55,11 +57,27 @@ import zombie.ui.UIFont;
  *
  * Cost: one nanoTime and a ring write per frame on the render thread, two GL query calls per
  * frame, a stats pass every {@link #REFRESH_NS} on the game thread (sorting at most a few
- * thousand floats), and about 300 sprite quads per frame while visible.
+ * thousand floats), about 300 sprite quads per frame while visible, and a daemon thread that
+ * samples the CPU / GPU utilization every {@link #UTIL_NS} (the JMX load calls are slow on
+ * Windows and must never run on the game thread).
  */
 public final class Overlay {
    private static final boolean ACTIVE = Overrides.enabled();
-   private static final boolean LOG = ACTIVE && (Config.OVERLAY_LOG || Harness.REQUESTED);
+   /**
+    * Whether the overlay measures anything: the presented-frame ring, the GL timer queries and the
+    * utilization sampler thread. Off unless {@code overlaySampling=true} (the Optimizations tab),
+    * something that needs the numbers ({@code overlay}, {@code overlayLog}) or a harness run; with
+    * it off the toggle key only shows {@link #NOTICE}. Decided at boot, like every Config key.
+    */
+   private static final boolean SAMPLING = ACTIVE && (Config.OVERLAY_SAMPLING || Config.OVERLAY || Config.OVERLAY_LOG || Harness.REQUESTED);
+   private static final boolean LOG = SAMPLING && (Config.OVERLAY_LOG || Harness.REQUESTED);
+   private static final long NOTICE_NS = 8_000_000_000L;
+   private static final String[] NOTICE = {
+      "Performance overlay: sampling is off.",
+      "Tick \"Sample frame times and utilization\" under Options > Optimizations > Performance overlay,",
+      "then restart the game for it to take effect."
+   };
+   private static long noticeUntilNs;
    private static final long WINDOW_NS = 5_000_000_000L;
    private static final long REFRESH_NS = 250_000_000L;
    private static final long UTIL_NS = 500_000_000L;
@@ -84,10 +102,16 @@ public final class Overlay {
    private static int activeQuery = -1;
    private static float pendingGpuMs; // the most recent completed query, attributed to the next frame's slot
 
-   // --- utilization, sampled on the game thread every UTIL_NS ---
+   // --- utilization, sampled by a daemon thread every UTIL_NS, never on the game thread ---
+   // On Windows the JDK serves OperatingSystemMXBean.getProcessCpuLoad() / getCpuLoad() through PDH:
+   // every call re-enumerates the "Process" performance object (every process on the machine) and
+   // collects the counter query once per 500 ms. Cheap on Linux (/proc), 5-50 ms on an older
+   // Windows PC, and it ran here on the game thread even with the overlay hidden: the reported
+   // "micro stutter every half second". The sampler thread also reads the thread CPU times.
    private static volatile float gameLoad, renderLoad, processLoad, systemLoad;
    private static volatile float gpuLoad; // last-second GPU busy share, 0..100
-   private static long utilSampledNs, gameCpuNs, renderCpuNs;
+   private static volatile long gameThreadId = -1L;
+   private static Thread utilThread;
    private static final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
    private static final com.sun.management.OperatingSystemMXBean os = osBean();
 
@@ -136,7 +160,7 @@ public final class Overlay {
 
    /** Before {@code SpriteRenderer.postRender()}: start the frame's GL_TIME_ELAPSED query. */
    public static void gpuBegin() {
-      if (!ACTIVE || gpuState < 0) {
+      if (!SAMPLING || gpuState < 0) {
          return;
       }
       try {
@@ -202,7 +226,7 @@ public final class Overlay {
 
    /** After {@code Display.update(true)}: one presented frame. */
    public static void onSwap() {
-      if (!ACTIVE) {
+      if (!SAMPLING) {
          return;
       }
       long now = System.nanoTime();
@@ -290,13 +314,30 @@ public final class Overlay {
       if (!ACTIVE) {
          return;
       }
-      if (toggled()) {
-         visible = !visible;
-         Log.info("overlay: " + (visible ? "shown" : "hidden"));
-      }
       long now = System.nanoTime();
-      if (now - utilSampledNs >= UTIL_NS) {
-         sampleUtilization(now);
+      if (toggled()) {
+         if (SAMPLING) {
+            visible = !visible;
+            Log.info("overlay: " + (visible ? "shown" : "hidden"));
+         } else {
+            noticeUntilNs = now + NOTICE_NS;
+            Log.info("overlay: sampling is off (overlaySampling=false); " + NOTICE[1] + " " + NOTICE[2]);
+         }
+      }
+      if (!SAMPLING) {
+         if (noticeUntilNs > now && !fontFailed) {
+            try {
+               renderNotice();
+            } catch (Throwable t) {
+               fontFailed = true;
+               Log.warn("overlay: draw failed, overlay off: " + t);
+            }
+         }
+         return;
+      }
+      if (gameThreadId < 0) {
+         gameThreadId = Thread.currentThread().threadId();
+         startUtilSampler();
       }
       if (!visible || fontFailed) {
          return;
@@ -328,40 +369,72 @@ public final class Overlay {
       return false;
    }
 
-   private static void sampleUtilization(long now) {
-      long dt = now - utilSampledNs;
-      long g = 0L, r = 0L;
-      try {
-         if (!threads.isThreadCpuTimeEnabled()) {
-            threads.setThreadCpuTimeEnabled(true);
-         }
-         g = threads.getThreadCpuTime(Thread.currentThread().threadId());
-         long rid = renderThreadId;
-         r = rid >= 0 ? threads.getThreadCpuTime(rid) : 0L;
-      } catch (Throwable ignored) {
+   /** Starts the utilization sampler once the game thread is known (its id is what it samples). */
+   private static synchronized void startUtilSampler() {
+      if (utilThread != null) {
+         return;
       }
-      if (utilSampledNs != 0L && dt > 0) {
-         if (g > 0 && gameCpuNs > 0) {
-            gameLoad = Math.min(100f, 100f * (g - gameCpuNs) / dt);
+      Thread t = new Thread(Overlay::utilLoop, "pzopt-overlay-util");
+      t.setDaemon(true);
+      t.setPriority(Thread.MIN_PRIORITY);
+      t.start();
+      utilThread = t;
+   }
+
+   /** The sampler thread: thread CPU shares, process / machine load, GPU busy share, every UTIL_NS. */
+   private static void utilLoop() {
+      long sampledNs = 0L, gameCpuNs = 0L, renderCpuNs = 0L;
+      while (true) {
+         try {
+            Thread.sleep(UTIL_NS / 1_000_000L);
+         } catch (InterruptedException e) {
+            return;
          }
-         if (r > 0 && renderCpuNs > 0) {
-            renderLoad = Math.min(100f, 100f * (r - renderCpuNs) / dt);
+         long now = System.nanoTime();
+         long dt = now - sampledNs;
+         long g = 0L, r = 0L;
+         try {
+            if (!threads.isThreadCpuTimeEnabled()) {
+               threads.setThreadCpuTimeEnabled(true);
+            }
+            long gid = gameThreadId;
+            long rid = renderThreadId;
+            g = gid >= 0 ? threads.getThreadCpuTime(gid) : 0L;
+            r = rid >= 0 ? threads.getThreadCpuTime(rid) : 0L;
+         } catch (Throwable ignored) {
          }
+         if (sampledNs != 0L && dt > 0) {
+            if (g > 0 && gameCpuNs > 0) {
+               gameLoad = Math.min(100f, 100f * (g - gameCpuNs) / dt);
+            }
+            if (r > 0 && renderCpuNs > 0) {
+               renderLoad = Math.min(100f, 100f * (r - renderCpuNs) / dt);
+            }
+         }
+         gameCpuNs = g;
+         renderCpuNs = r;
+         sampledNs = now;
+         // The PDH-backed calls: only while someone reads the numbers (the overlay or the frame log),
+         // and off the game thread either way.
+         if (os != null && (visible || LOG)) {
+            try {
+               double p = os.getProcessCpuLoad();
+               double s = os.getCpuLoad();
+               if (p >= 0) {
+                  processLoad = (float)(p * 100);
+               }
+               if (s >= 0) {
+                  systemLoad = (float)(s * 100);
+               }
+            } catch (Throwable ignored) {
+            }
+         }
+         gpuLoad = gpuBusyShare(now);
       }
-      gameCpuNs = g;
-      renderCpuNs = r;
-      utilSampledNs = now;
-      if (os != null) {
-         double p = os.getProcessCpuLoad();
-         double s = os.getCpuLoad();
-         if (p >= 0) {
-            processLoad = (float)(p * 100);
-         }
-         if (s >= 0) {
-            systemLoad = (float)(s * 100);
-         }
-      }
-      // GPU busy share over the last second of presented frames
+   }
+
+   /** GPU busy share over the last second of presented frames (reads the ring the render thread writes). */
+   private static float gpuBusyShare(long now) {
       int h = head;
       long gpuSum = 0L;
       long wall = 0L;
@@ -373,7 +446,7 @@ public final class Overlay {
          gpuSum += (long)(gpuMs[slot] * 1000f);
          wall += (long)(frameMs[slot] * 1000f);
       }
-      gpuLoad = wall > 0 ? Math.min(100f, 100f * gpuSum / wall) : 0f;
+      return wall > 0 ? Math.min(100f, 100f * gpuSum / wall) : 0f;
    }
 
    private static void refreshStats(long now) {
@@ -512,8 +585,7 @@ public final class Overlay {
       return sorted[Math.max(0, Math.min(sorted.length - 1, i))];
    }
 
-   private static void render() {
-      TextManager tm = TextManager.instance;
+   private static UIFont font() {
       if (font == null) {
          try {
             font = UIFont.valueOf(Config.OVERLAY_FONT);
@@ -521,6 +593,36 @@ public final class Overlay {
             font = UIFont.CodeMedium;
          }
       }
+      return font;
+   }
+
+   /** The toggle key with sampling off: {@link #NOTICE} in the overlay's corner for {@link #NOTICE_NS}. */
+   private static void renderNotice() {
+      TextManager tm = TextManager.instance;
+      UIFont font = font();
+      int lineH = tm.getFontHeight(font);
+      int pad = 8;
+      int textW = 0;
+      for (String line : NOTICE) {
+         textW = Math.max(textW, tm.MeasureStringX(font, line));
+      }
+      int w = textW + pad * 2;
+      int h = NOTICE.length * lineH + pad * 2;
+      String corner = Config.OVERLAY_CORNER;
+      int x = corner.endsWith("r") ? Core.getInstance().getScreenWidth() - w - 10 : 10;
+      int y = corner.startsWith("b") ? Core.getInstance().getScreenHeight() - h - 10 : 10;
+      SpriteRenderer.instance.renderi(null, x, y, w, h, 0f, 0f, 0f, 0.65f, null);
+      int ty = y + pad;
+      for (int i = 0; i < NOTICE.length; i++) {
+         float[] c = i == 0 ? AMBER : WHITE;
+         tm.DrawString(font, x + pad, ty, NOTICE[i], c[0], c[1], c[2], 1.0);
+         ty += lineH;
+      }
+   }
+
+   private static void render() {
+      TextManager tm = TextManager.instance;
+      UIFont font = font();
       int lineH = tm.getFontHeight(font);
       int pad = 8;
       int graphH = lineH * 4;

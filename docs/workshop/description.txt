@@ -37,7 +37,7 @@ Without the script: copy the contents of the item's pzopt-classes folder into th
 
 [h1]Performance overlay (F9)[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/09-performance-overlay.jpg[/img]
-Presented frame time, p50 / p99 / p99.9 / max, 1 %-low, jitter and spikes over the last 5 s, GPU busy (GL timer query), game-thread and render-thread load, process and machine CPU, heap, a verdict line (GPU bound / game thread bound / at the cap) and the frame graph. Same numbers on Windows and Linux, no MangoHud or RivaTuner needed; every run also logs it to Zomboid/pzopt-overlay.out.
+Off by default: tick "Sample frame times and utilization" in Options > Optimizations > Performance overlay and restart the game, then F9 toggles it (without the tick box F9 only shows a notice). Presented frame time, p50 / p99 / p99.9 / max, 1 %-low, jitter and spikes over the last 5 s, GPU busy (GL timer query), game-thread and render-thread load, process and machine CPU, heap, a verdict line (GPU bound / game thread bound / at the cap) and the frame graph. Same numbers on Windows and Linux, no MangoHud or RivaTuner needed; every run also logs it to Zomboid/pzopt-overlay.out.
 
 [h1]Settings[/h1]
 Options > Optimizations in the game (saved to Zomboid/pzopt/options.ini, applied on the next launch) has every key with a tick box, plus "Disable all (stock game)" / "Enable all". Options > Display gains an "Uncapped" framerate entry and a separate menu framerate. F9 toggles the performance overlay.

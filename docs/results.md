@@ -931,3 +931,37 @@ Earlier attempts: at 18 tiles/s (`show-louisville-opt-1`, 33.9 fps) the walk out
 the second half of the route was black; without `see_all` (`-2`, 89.6 fps because most of the screen
 was black) the recording was unwatchable. The 5,116-zombie first run also had 21 GC events / 1.2 s in
 the window (max 567 ms).
+
+## 2026-09-21 (07:30–07:55): the Windows "micro stutter every 0.5 s" — overlay utilization sampling on the game thread
+
+Several Windows 10 users on older hardware reported a stutter every half second. The only 500 ms
+cadence in the overrides was `pzopt.Overlay.sampleUtilization`, which `Overlay.draw()` ran on the game
+thread every `UTIL_NS` (500 ms) whether or not the overlay was visible, calling
+`OperatingSystemMXBean.getProcessCpuLoad()` and `getCpuLoad()`. On Linux the JDK reads `/proc` for
+those (microseconds, so no desktop or laptop run ever showed it). On Windows
+(`jdk.management/windows/native/libmanagement_ext/OperatingSystemImpl.c`) they go through PDH:
+`getProcessCpuLoad` re-enumerates the "Process" performance object (every process on the machine,
+`PdhEnumObjectItems`) on every call to find the JVM's `java#N` instance, then `PdhCollectQueryData`
+once per `MIN_UPDATE_INTERVAL` (500 ms) reads the counters of every process. That is 5-50 ms on an
+older PC, on the game thread, twice a second: the reported stutter.
+
+Fix (`Overlay`): the sampling moved to a daemon thread (`pzopt-overlay-util`, min priority, started on
+the first `draw()` once the game thread id is known); it reads the game / render thread CPU times,
+the process and machine load, and the GPU busy share, and publishes them in volatiles. The PDH-backed
+calls only run while the overlay is visible or the frame log is on. Nothing periodic is left on the
+game thread apart from the 250 ms stats refresh while the overlay is shown (sorting the 5 s window).
+
+Smoke run `util-thread` (spinning Rosewood route, `--prop overlay=true`, `--no-mangohud`): 281 fps mean,
+p99 8.7 ms; all four utilization columns of `pzopt-overlay.out` populate from the sampler thread
+(game 97 %, GPU 81 %, process 21 %, render 29 %). The stall itself cannot be reproduced on Linux; the
+Windows test is the next release build.
+
+Second step (maintainer's call, same morning): the overlay's measurement is now opt-in. New key
+`overlaySampling` (Optimizations tab > Performance overlay, "Sample frame times and utilization",
+**default false**) gates everything the overlay does — the presented-frame ring, the GL timer queries
+on the render thread and the sampler thread. With it off the toggle key draws an 8 s notice in the
+overlay's corner ("Performance overlay: sampling is off. Tick ... then restart the game for it to take
+effect.") and logs the same line; `overlay=true`, `overlayLog=true` and harness runs imply sampling, so
+`--prop overlay=true` runs and `pzopt-overlay.out` are unchanged. Verified with verify runs
+`notice-f9`: on this machine `~/Zomboid/pzopt/options.ini` has `overlay=true`, so F9 toggled the
+overlay as before; with `--prop overlay=false` F9 drew the notice (`notice-desktop.png` in the run dir).

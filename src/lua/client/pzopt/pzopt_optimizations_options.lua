@@ -127,6 +127,8 @@ local SECTIONS = {
     {
         title = "Performance overlay (F9, or the \"Toggle performance overlay\" key binding)",
         entries = {
+            { key = "overlaySampling", label = "Sample frame times and utilization (needed for F9)",
+              tip = "Records every presented frame, times the GPU with GL timer queries and samples the CPU load twice a second on a background thread. Off by default: without it F9 only shows a notice. \"Show the overlay from boot\" and \"Log every presented frame\" turn it on too. Applies on the next launch." },
             { key = "overlay", label = "Show the overlay from boot",
               tip = "Frame rate, frame-time tail (p99, p99.9, max, 1%-low, jitter, spikes), GPU busy share, game and render thread load, and a frame-time graph. The key toggles it any time." },
             { key = "overlayLog", label = "Log every presented frame",

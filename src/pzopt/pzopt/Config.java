@@ -219,6 +219,7 @@ public final class Config {
    public static final boolean RAIN_TILES = bool("rainTiles", true); // weather particles rendered once as a template and drawn once per screen cell (pzopt.RainTiles)
    public static final int VBO_BATCH_KB = integer("vboBatchKb", 1024); // VBORenderer element buffer (4 = stock): rain particles flush every 28 quads at 4 KB
    public static final boolean VBO_FAST_QUADS = bool("vboFastQuads", true); // VBORenderer.addQuad writes the four vertices with one position advance
+   public static final boolean OVERLAY_SAMPLING = bool("overlaySampling", false); // measure at all (ring, GL timer queries, sampler thread); off by default since 2026-09-21
    public static final boolean OVERLAY = bool("overlay", false);
    public static final boolean OVERLAY_LOG = bool("overlayLog", false);
    public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent

@@ -459,10 +459,13 @@ Display & Performance keeps the stock layout and gains the **Uncapped** entry, t
 
 ### Performance overlay
 
-Press **F9** (the "Toggle performance overlay" key binding, listed after "Display FPS")
-for the build's own profiler. It is drawn by the game itself, so it reads the same on
-Windows and Linux, in the menus, on the loading screen and in the world, with no
-MangoHud or RivaTuner:
+Tick **"Sample frame times and utilization"** in Options > Optimizations > Performance
+overlay, restart the game, then press **F9** (the "Toggle performance overlay" key
+binding, listed after "Display FPS") for the build's own profiler. Sampling is off by
+default (the overlay then does no measuring at all, and F9 only shows a notice pointing
+at the tick box); "Show the overlay from boot" and "Log every presented frame" turn it on
+too. It is drawn by the game itself, so it reads the same on Windows and Linux, in the
+menus, on the loading screen and in the world, with no MangoHud or RivaTuner:
 
 ![The performance overlay in the world: fps, frame-time tail, utilization, verdict and frame graph](docs/media/performance-overlay.png)
 
@@ -481,8 +484,8 @@ MangoHud or RivaTuner:
 - **Graph**: the last 240 frames as bars (green at budget, amber above it, red past
   twice), the cap's budget as a line, the GPU time of each frame in blue.
 
-The "Performance overlay" group in Options > Optimizations shows it from boot, picks
-the corner and the font, and turns on the frame log; the "fps colour" group below it
+The "Performance overlay" group in Options > Optimizations turns the sampling on, shows
+it from boot, picks the corner and the font, and turns on the frame log; the "fps colour" group below it
 switches the colouring off, chooses whether it follows the cap (off = the fixed fps
 thresholds even when capped), and sets the three thresholds and the four colours
 (named, or an `RRGGBB` hex typed into `Zomboid/pzopt/options.ini`). The frame log is
