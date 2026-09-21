@@ -5,7 +5,32 @@ description: Launch a hands-off Project Zomboid measurement run (bench, drive, p
 
 # Launch a measurement run
 
-## 1. Preflight (every time)
+## 0. Use the queue (preferred, 2026-09-21; the `run-queue` skill has the full workflow)
+
+```bash
+harness/queue.sh submit run --wait -- --label <name> --mode bench --flag zoom=max --prop instrument=true --no-dashboard
+harness/queue.sh submit run -- --label <name> --preset storm --prop instrument=true --no-dashboard   # then: harness/queue.sh wait <name>
+harness/queue.sh submit run --goal "puddleVbo halves storm frame time" --against storm-stock-1 --parity-against storm-stock-1 \
+    -- --label <name> --preset storm --record --prop instrument=true --no-dashboard          # Jev verdict + visual parity in the result
+harness/queue.sh submit run --install stock -- --label <name>-stock ...   # uninstall first, reinstalled when the queue drains
+harness/queue.sh submit mp -- <label> [stock]                             # the multiplayer drive against the stock server
+harness/queue.sh submit run --machine flip -- --label <name> --mode bench ...   # a laptop: first submit binds this session to it
+harness/queue.sh list; harness/queue.sh machines                          # who is ahead, what is blocking, which laptop is connected
+harness/queue.sh watch --exit-on any                                      # background Bash: woken when a job finishes or a machine drops
+```
+A session always runs on the machine it first submitted to (`--rebind` to move); laptop jobs are rsync'd
+out, run there through the machine's conf entry (`harness/queue/machines.conf`) and collected back as
+`harness/runs/<machine>-<label>-*`. A disconnected laptop's jobs wait and the session is told the moment
+the monitor sees the drop.
+The worker does the preflight below itself (waits while a game / run.sh outside the queue / a locked
+desktop holds the machine), runs jobs one at a time in submit order and writes
+`~/.local/state/pzopt-queue/jobs/<id>-<label>/result.txt` (run dir, validity lines, analyze.py output, and
+Jev's `verdict=` line from `judge.py`: without `--goal` it judges the run as a stand-alone measurement, with
+`--goal`/`--against` it judges the uplift; `--parity-against` adds `parity-judge.py`'s `parity=` line).
+`--wait` prints it and exits with the job's status; otherwise `Monitor` the job's `status` file. Still
+announce to the user that a run is queued. Steps 1-3 below are for a run outside the queue only.
+
+## 1. Preflight (every time, when not using the queue)
 
 ```bash
 pgrep -fa '[P]rojectZomboid64'      # game already running?

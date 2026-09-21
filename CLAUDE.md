@@ -22,6 +22,12 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
   Before a launch or a reinstall check both `pgrep -f '[P]rojectZomboid64'` and
   `pgrep -f '[h]arness/run.sh'` (excluding your own). Message busy peers (ListAgents /
   SendMessage) before reinstalling or starting a batch. See `.claude/skills/bench-run`.
+  **Preferred since 2026-09-21: submit through the run queue** (`harness/queue.sh submit run|mp|workshop|cmd
+  [--machine desktop|flip|dell|mac] ... -- <args>`, `harness/CLAUDE.md` "Run queue"): one worker per machine
+  runs its jobs FIFO, waits for a game or run.sh outside the queue, routes laptop jobs over a monitored ssh
+  connection, keeps a session on the machine it first used, notifies sessions (`watch`, `events`) when a
+  machine drops or a job ends, and writes each job's `result.txt` with Jev's verdict; `--wait` blocks on it.
+  No pgrep dance, no peer messages, no hand-rolled ssh wrappers for a run.
 - **Run etiquette.** The maintainer is usually at the machine. Say a run is about to start before
   launching, one run at a time, never long batches. Never edit `harness/run.sh` while a run is in
   progress (bash reads it incrementally; a mid-edit launch died and its EXIT trap corrupted
@@ -106,7 +112,8 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 
 | Skill | Use when |
 |---|---|
-| `bench-run` | launching any measurement run (bench / drive / parity / verify) |
+| `run-queue` | scheduling any run (bench / drive / preset / mp / Workshop upload / showcase) on the desktop or a laptop through `harness/queue.sh`, reading its result, reacting to machine events |
+| `bench-run` | the run.sh arguments of a measurement run (bench / drive / parity / verify); launch them through `run-queue` |
 | `showcase-drive` | recording the stock-vs-optimized drive videos and the quad stitch |
 | `build-install` | compiling the overrides and installing them into the game dir |
 | `release-windows` | building the Windows zip and publishing it as a GitHub release asset |
