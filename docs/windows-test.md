@@ -10,6 +10,7 @@ the game runs as stock, so the worst case of a mismatch is "no effect".
 2026-09-20 night release from `cc99c05` (thunderstorm pass: puddle cache, rain tiles, VBORenderer batch, lighting re-bake spread, play mode; includes the 100f441 flicker fix and the overlay colours) is 740 KB, 145 files plus the manifest (146 lines); tag `win-b0bbce05d5-cc99c05`.
 2026-09-21 release from `4dbe655` (RecalcPool: a failed chunk-recalc retry no longer leaves the publisher blocked, which stopped every later chunk from loading; found in a Windows user's console, StackOverflowError in the stock `isWallTo` recursion) is 741 KB, 145 files plus the manifest (146 lines, unchanged); tag `win-b0bbce05d5-4dbe655`.
 2026-09-21 release from `75f9365` (issue #4: curtains draw in the same pass as the window they cover and baked curtains sit in front of the glass, key `curtainDepthNudgePct`; supersedes f93158f) is 743 KB, 145 files plus the manifest (146 lines, unchanged); tag `win-b0bbce05d5-75f9365`.
+2026-09-21 release from `667b210` (issue #5: baked trees drawn by their own pass into every chunk texture the crown reaches, with a height-tilted depth, key `treeBakePass`; also the carport roof debounce `roofHideDebounceFrames`, the LightingJNI see-all override and new harness scene flags; supersedes 75f9365) is 782 KB, 151 files plus the manifest (152 lines); tag `win-b0bbce05d5-667b210`.
 2026-09-21 release from `f93158f` (IsoChunkMap mid-scroll guard: `getGridSquareDirect` rejects a chunk that is not where the index says, closing the stock race that made `isWallTo` overflow the stack on the streamer; supersedes 4dbe655) is 741 KB, 145 files plus the manifest (146 lines, unchanged); tag `win-b0bbce05d5-f93158f`.
 2026-09-20 release from `b0d4fe6` (black chunk squares fixed, persistentVbo and translucentTilesInChunkTexture on by default) is 694 KB, 130 files plus the manifest
 2026-09-20 release from `e398ce5` (master switch) is 607 KB, 114 files plus the manifest
@@ -70,7 +71,7 @@ touches `projectzomboid.jar`.
 
 ```powershell
 Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 146 on the 75f9365, f93158f, 4dbe655 and cc99c05 releases (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
+Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 152 on the 667b210 release, 146 on the 75f9365, f93158f, 4dbe655 and cc99c05 releases (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
 Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
 ```
 
