@@ -243,7 +243,9 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   (it was shut down mid-pass). A reduced-resolution puddle layer and a two-texture flash blend were rejected.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
-  still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).
+  still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread),
+  `docs/plan-untouched-systems-2026-09-21.md` (the 2026-09-21 stock-take of every system without a
+  `pzopt` edit, ranked by cost; next pass = character update/animation, verified on the Louisville preset).
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under
   GLX). `docs/plan-wayland.md`.
