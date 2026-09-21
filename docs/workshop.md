@@ -84,7 +84,10 @@ section's text and the date, the description holds only the `[img]`, see the rel
 `12` the "New! macOS support" table (`docs/media/mac-comparison.png` from `harness/mac-table.py`: the
 M1 Pro 120 km/h drive, two-run means, the Terminal install line in the footer; 2026-09-21), `13` the "New! Better
 profiling" card (`docs/media/profiler-card.png` from `harness/profiler-card.py`: the whole F9 overlay cropped from a
-recorded run, `docs/media/profiler-overlay-full.png`, with the caption lines; 2026-09-22).
+recorded run, `docs/media/profiler-overlay-full.png`, with the caption lines; 2026-09-22), `14` the "New! See what
+every setting does" card (`docs/media/preview-card.png` from `harness/preview-card.py`: the Optimizations tab with its
+preview panel, `docs/media/options-preview-full.png`; 2026-09-22; the macOS section left the page with it, macOS stays
+in the intro line).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes

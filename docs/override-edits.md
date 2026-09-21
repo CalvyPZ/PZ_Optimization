@@ -719,6 +719,26 @@ so the restart dialog and `options.ini` behave as for any single change. A
 pinned `enabled` (pzopt.properties / `-Dpzopt.enabled`, e.g. a harness
 `--prop enabled=false` stock run) disables both buttons.
 
+Preview clips (added 2026-09-21 night): five more forwards, one line each,
+for the tab's preview panel: `getPzoptGifFrame(path, nowMs)` (the frame of an
+animated GIF under the game dir, as a `Texture`, or null while it decodes / if
+the file is missing), `getPzoptGifState(path)` ("loading" / "ready" / "missing" /
+"error"), `getPzoptGifWidth` / `getPzoptGifHeight(path)` and `releasePzoptGifs()`.
+They call `pzopt.GifTextures`, which decodes the GIF with ImageIO on a daemon
+thread (compositing the frame deltas per their disposal rule, thinning to 96
+frames and scaling to 512 px wide), and makes one game `Texture` per frame on the
+game thread the way a Steam avatar is made (`ImageData` from RGBA rows ->
+`TextureID` -> `Texture`, uncompressed, at most four per call). The tab (Lua)
+draws, right of the control list, the stock and the optimized clip of the same
+route side by side for the setting under the mouse, the setting's description,
+its value since boot and at the next launch, and the effect bars (game thread,
+render thread, other cores, GPU, VRAM, RAM, disk, load time, chunk arrival, from
+a table in the Lua); the clips are `media/ui/pzopt/compare/<clip>-{stock,opt}.gif`
+(`harness/menu-gifs.py`). The two clips in use are the only textures held (96 x
+512x256 RGBA each at most); `MainOptions:setVisible(false)` releases them.
+Verified in game on 2026-09-21 (queue job `menu-check4`: hover, scroll, wheel
+over the preview, clips playing, panel sized to its content).
+
 ## zombie.core.skinnedmodel.model.Model (added 2026-09-19, night, game load; GitHub issue #1)
 
 `CreateShader(name)`: the stock method always posts a lambda to the render

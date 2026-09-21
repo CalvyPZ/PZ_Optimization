@@ -513,7 +513,21 @@ apply on the next launch (the game shows its usual restart dialog) and are kept 
 `Zomboid/pzopt/options.ini`; "Default" removes the key again. A key pinned in
 `pzopt.properties` shows as a disabled control whose tooltip names the file.
 
-![Options > Optimizations: every optimization as a tick box or combo](docs/media/options-optimizations-tab.jpg)
+Right of the list, a preview panel that fills the rest of the screen follows the mouse (its parts keep
+their places from row to row): for the setting you point at it plays
+the **stock game and the optimized build side by side** on the same route (short clips of
+the harness recordings — the 120 km/h drive, the Rosewood spin, fog, a thunderstorm, the
+Louisville horde, night with a torch or headlights, and launch-to-world for the boot and load
+settings — with each run's live frame rate burned in; the performance-overlay settings show the overlay off
+and on, each element cropped from the same recording), repeats what the setting does, shows
+its value since this boot and at the next launch, and draws one bar per resource: **CPU game
+thread, CPU render thread, other cores, GPU, VRAM, RAM, disk / caches, boot and load time,
+chunk arrival**, on a labelled axis from *lowest* through *mid* (the stock game) to *max*. Green bars
+grow left for less load (or a shorter load, chunks sooner), amber right for more, blue for idle
+cores put to work; the level word next to each bar says the same. The clips are 512 px, 24 fps GIFs under
+`media/ui/pzopt/compare/`, decoded in the game and freed when the options screen closes.
+
+![Options > Optimizations: the controls on the left, the preview panel with the stock and optimized clips and the effect bars on the right](docs/media/options-optimizations-tab.jpg)
 
 To compare against stock on your own machine, press **Disable all**, or put `enabled=false`
 in `pzopt.properties`; no reinstall is needed either way.

@@ -2,6 +2,7 @@ package zombie.core;
 
 import zombie.UsedFromLua;
 import zombie.core.math.PZMath;
+import zombie.core.textures.Texture; // pzopt: preview clip frames for the Optimizations tab
 import zombie.iso.IsoPuddles;
 import zombie.iso.IsoWater;
 import zombie.ui.UIManager;
@@ -120,6 +121,31 @@ public final class PerformanceSettings {
       if (pzopt.Config.knows(key)) {
          pzopt.UserOptions.set(key, value);
       }
+   }
+
+   // pzopt: the tab's stock-vs-optimized preview clips (animated GIFs under media/ui/pzopt/compare/), decoded and
+   // held as textures by pzopt.GifTextures. The Lua draws the frame returned for its clock and frees the clips
+   // when the options screen closes.
+   /** The frame of the GIF at {@code path} (media-relative) for {@code nowMs}, or null while it loads / if missing. */
+   public Texture getPzoptGifFrame(String path, double nowMs) {
+      return pzopt.GifTextures.frame(path, (long) nowMs);
+   }
+
+   /** "loading", "ready", "missing" or "error". */
+   public String getPzoptGifState(String path) {
+      return pzopt.GifTextures.state(path);
+   }
+
+   public int getPzoptGifWidth(String path) {
+      return pzopt.GifTextures.width(path);
+   }
+
+   public int getPzoptGifHeight(String path) {
+      return pzopt.GifTextures.height(path);
+   }
+
+   public void releasePzoptGifs() {
+      pzopt.GifTextures.releaseAll();
    }
 
    public void setLightingQuality(int lighting) {

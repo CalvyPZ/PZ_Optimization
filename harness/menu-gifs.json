@@ -1,0 +1,186 @@
+{
+ "drive": {
+  "opt": {
+   "bytes": 2118044,
+   "run": "show-drive120-opt-1-20260920-181054",
+   "video_t0": 16.31
+  },
+  "stock": {
+   "bytes": 2107632,
+   "run": "show-drive120-stock-1-20260920-180929",
+   "video_t0": 23.86
+  },
+  "title": "120 km/h highway drive, clear day"
+ },
+ "fog": {
+  "opt": {
+   "bytes": 2377117,
+   "run": "show-fog120-opt-1-20260920-181556",
+   "video_t0": 16.27
+  },
+  "stock": {
+   "bytes": 2243113,
+   "run": "show-fog120-stock-1-20260920-181436",
+   "video_t0": 23.73
+  },
+  "title": "120 km/h drive in heavy fog"
+ },
+ "horde": {
+  "opt": {
+   "bytes": 1068135,
+   "run": "show-louisville-opt-3-20260920-233855",
+   "video_t0": 35.2
+  },
+  "stock": {
+   "bytes": 960376,
+   "run": "show-louisville-stock-3-20260920-234028",
+   "video_t0": 42.34
+  },
+  "title": "Louisville, zombie population maxed"
+ },
+ "load": {
+  "opt": {
+   "bytes": 94864,
+   "run": "sbs-opt120-uncap-1-20260919-230229",
+   "seconds": 9.69,
+   "video_t0": 2.06
+  },
+  "stock": {
+   "bytes": 118610,
+   "run": "sbs-stock120-1-20260919-230045",
+   "seconds": 16.06,
+   "video_t0": 2.16
+  },
+  "title": "Launch to main menu, Continue to world"
+ },
+ "nightdrive": {
+  "opt": {
+   "bytes": 405723,
+   "run": "bl-drive-fix4-20260921-183031",
+   "video_t0": 19.3
+  },
+  "stock": {
+   "bytes": 401752,
+   "run": "bl-drive-stock-20260921-183202",
+   "video_t0": 31.0
+  },
+  "title": "Night drive with headlights"
+ },
+ "overlay": {
+  "opt": {
+   "bytes": 686311,
+   "run": "ov-full-20260922-001746",
+   "video_t0": 21.11
+  },
+  "stock": {
+   "bytes": 1378074,
+   "run": "ov-off-20260922-001641",
+   "video_t0": 24.54
+  },
+  "title": "The whole overlay at its defaults: statistics, game-thread tree, verdict, frame graph, flame graph"
+ },
+ "ovflame": {
+  "opt": {
+   "bytes": 901187,
+   "run": "ov-full-20260922-001746",
+   "video_t0": 21.11
+  },
+  "stock": {
+   "bytes": 1908834,
+   "run": "ov-off-20260922-001641",
+   "video_t0": 24.54
+  },
+  "title": "Flame graph: the last 5 s of game-thread stacks, root at the bottom"
+ },
+ "ovgraph": {
+  "opt": {
+   "bytes": 617523,
+   "run": "ov-full-20260922-001746",
+   "video_t0": 21.11
+  },
+  "stock": {
+   "bytes": 1090427,
+   "run": "ov-off-20260922-001641",
+   "video_t0": 24.54
+  },
+  "title": "Frame-time graph: one bar per presented frame, GPU time in blue, the budget line"
+ },
+ "ovstats": {
+  "opt": {
+   "bytes": 921893,
+   "run": "ov-full-20260922-001746",
+   "video_t0": 21.11
+  },
+  "stock": {
+   "bytes": 1775868,
+   "run": "ov-off-20260922-001641",
+   "video_t0": 24.54
+  },
+  "title": "Frame statistics: fps, frame time, p99 / p99.9 / max, 1 %-low, jitter, spikes, loads"
+ },
+ "ovtree": {
+  "opt": {
+   "bytes": 1312947,
+   "run": "ov-full-20260922-001746",
+   "video_t0": 21.11
+  },
+  "stock": {
+   "bytes": 2607986,
+   "run": "ov-off-20260922-001641",
+   "video_t0": 24.54
+  },
+  "title": "Game-thread tree: phases, sub-phases and hot methods, biggest first"
+ },
+ "ovverdict": {
+  "opt": {
+   "bytes": 620015,
+   "run": "ov-full-20260922-001746",
+   "video_t0": 21.11
+  },
+  "stock": {
+   "bytes": 1186978,
+   "run": "ov-off-20260922-001641",
+   "video_t0": 24.54
+  },
+  "title": "Verdict line: what holds the frame rate below the cap"
+ },
+ "spin": {
+  "opt": {
+   "bytes": 1991505,
+   "run": "show-spin-opt-1-20260920-181314",
+   "video_t0": 17.24
+  },
+  "stock": {
+   "bytes": 2032857,
+   "run": "show-spin-stock-1-20260920-181210",
+   "video_t0": 23.4
+  },
+  "title": "Rosewood, camera spinning"
+ },
+ "storm": {
+  "opt": {
+   "bytes": 1477231,
+   "run": "show-storm120-opt-1-20260920-181831",
+   "video_t0": 16.0
+  },
+  "stock": {
+   "bytes": 1458297,
+   "run": "show-storm120-stock-1-20260920-181712",
+   "video_t0": 22.45
+  },
+  "title": "120 km/h drive in a thunderstorm"
+ },
+ "torch": {
+  "opt": {
+   "bytes": 375411,
+   "run": "bl-torch-fix4-20260921-183357",
+   "video_t0": 20.48
+  },
+  "stock": {
+   "bytes": 364948,
+   "run": "bl-torch-stock-20260921-174650",
+   "video_t0": 31.74
+  },
+  "title": "Night, hand torch, turning in place"
+ }
+}

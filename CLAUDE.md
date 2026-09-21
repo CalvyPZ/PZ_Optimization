@@ -157,6 +157,17 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   Master switch `enabled` (2026-09-20 evening): `enabled=false` folds into `Overrides.enabled()`,
   i.e. the build-mismatch stock path everywhere; tab buttons "Disable all (stock game)" /
   "Enable all (recommended defaults)". `--prop enabled=false` is a stock run without a reinstall.
+  Preview panel (2026-09-21 night): the whole page area right of the controls, fixed while the list scrolls, every
+  element in a fixed slot (description slot = the longest description wrapped; the clips take the height left, spare
+  height widens the bar rows) so nothing shifts between rows; for the setting under the mouse:
+  the stock and the optimized clip of the same route side by side (28 GIFs: 8 route pairs at 512x216, 24 fps, 4 s, plus 6 overlay-off / overlay-on crop pairs for the overlay keys from runs `ov-off` / `ov-full`; Workshop-preview encode, under
+  `src/media/ui/pzopt/compare/`, made by `harness/menu-gifs.py` from the show-*/bl-*/sbs-* recordings with the
+  live fps burned in; decoded to textures by `pzopt.GifTextures`, at most two clips held, freed on close), the
+  description, the value since boot / next launch, and effect bars per resource (`EFFECTS` in the Lua: game
+  thread, render thread, other cores, GPU, VRAM, RAM, disk, load time, chunk arrival, -3..3, x axis labelled lowest / low / mid / high / ultra / max with mid = stock). Verified in game
+  via a queue `cmd` job driving the menus with `ui-drive.py` (`/tmp/pzopt-menu-check.sh`); new
+  `src/media/` ships through build.sh like the Lua. The paths are `media/ui/...` relative to the game dir:
+  `ZomboidFileSystem`'s "work dir" is already `<game>/media`, strip the prefix before `getMediaFile`.
 - Game thread (2026-09-20, `docs/results.md`): new heavy bench route `--flag route=S:450 --flag turn=90
   --route-seconds 25` (south through Rosewood, facing spinning). Adopted: weatherMaskIdleSkip,
   cutawayRadius=6, gridStackInterval=8, lightingRebakeMs=250, rebakeBudget=4/rebakeMaxFrames=3,

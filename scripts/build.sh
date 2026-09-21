@@ -44,6 +44,12 @@ if [[ -d "$SRC/lua" ]]; then
   mkdir -p "$OUT/media/lua"
   cp -r "$SRC/lua/." "$OUT/media/lua/"
 fi
+# Other loose media (src/media/ui/pzopt/compare/*.gif: the Optimizations tab's stock-vs-optimized clips,
+# harness/menu-gifs.py) lands under the game dir's media/ the same way.
+if [[ -d "$SRC/media" ]]; then
+  mkdir -p "$OUT/media"
+  cp -r "$SRC/media/." "$OUT/media/"
+fi
 # Puddle shader variants for Config.puddleEarlyZ (media/shaders/pzopt_puddles_*), derived from the installed game's
 # puddle shaders so a game update is picked up: the entry files with the include renamed, the .h prototype stubs
 # copied, and the two shader units changed in one place each. The vertex unit also writes the depth attribute to
