@@ -18,7 +18,8 @@ import java.util.Properties;
  *                            mismatch does (Overrides.enabled() is false); the other keys are then ignored. The
  *                            "Disable all (stock)" / "Enable all" buttons of the Optimizations tab set it (default true)
  *   parallel    true/false   kill switch: false forces the stock single-threaded pass (default true)
- *   workers     int          recalc pool width; clamped to [1, availableProcessors - 1] (default: min(4, cores - 1))
+ *   workers     int          recalc pool width; clamped to [1, availableProcessors - 1] (default: min(4, cores - 1), 1 on
+ *                            4 cores or fewer: there the three workers took the game thread's core, Dell i5-6300HQ 2026-09-21)
  *   instrument  true/false   record per-chunk timings and frame times to pzopt-*.out (default false)
  *   wake        true/false   wake the streamer thread on enqueue instead of the stock 140 ms polls (default true)
  *   dev         true/false   development assertions, e.g. game-thread-only code reached from a worker (default false)
@@ -29,6 +30,13 @@ import java.util.Properties;
  *   persistentVbo   true/false  sprite ring buffers use persistently mapped buffer storage instead of an orphaning
  *                            glBufferData + glMapBufferRange per 64 KB batch (default true)
  *   treesInChunkTexture true/false  static trees bake into the chunk textures; only translucent/fading trees are
+ *   treeBakeMaxChunksPerSec int  above this many chunk hand-offs per second (pzopt.ChunkRate: walking ~9, 60 km/h ~32,
+ *                            120 km/h ~72) trees are not baked into new chunk textures but drawn per frame, as with
+ *                            treesInChunkTexture=false; textures already baked keep their trees until they re-bake.
+ *                            A texture that lives a second or two while driving costs more to bake its trees into
+ *                            (own texture plus neighbour copies) than drawing them per frame for that long: Dell
+ *                            i5-6300HQ 2026-09-21, 120 km/h 28.6 -> 42.7 fps; walking is the other way round
+ *                            (default 0 = always bake; the low-end profile sets 24)
  *   treeBakeDirect true/false  bake trees through IsoTree.render without a FBORenderTrees batch (the batch drops JUMBO trees)
  *   treeBakePass true/false   baked trees are drawn by the pzopt tree pass (pzopt.TreeBake): into every chunk-level texture
  *                            the sprite overlaps, last in the texture, with a depth that gets nearer with height like the
@@ -187,7 +195,7 @@ public final class Config {
    /** Master switch, read by {@link Overrides#enabled()}; false = stock behaviour everywhere. */
    public static final boolean ENABLED = bool("enabled", true);
    public static final boolean PARALLEL = bool("parallel", true);
-   public static final int WORKERS = clampWorkers(integer("workers", Math.min(4, Runtime.getRuntime().availableProcessors() - 1)));
+   public static final int WORKERS = clampWorkers(integer("workers", defaultWorkers(Runtime.getRuntime().availableProcessors())));
    public static final boolean INSTRUMENT = bool("instrument", false);
    public static final boolean WAKE = bool("wake", true);
    public static final boolean DEV = bool("dev", false);
@@ -218,6 +226,7 @@ public final class Config {
    public static final boolean GPU_SECTIONS = bool("gpuSections", false); // measurement only: GPU time per frame section in the log
    public static final boolean DEV_WEATHER_FX_OFF = bool("devWeatherFxOff", false); // measurement only: skip the weather FX pass
    public static final boolean TREE_BAKE_DIRECT = bool("treeBakeDirect", true);
+   public static final int TREE_BAKE_MAX_CHUNKS_PER_SEC = integer("treeBakeMaxChunksPerSec", 0); // 0 = always bake (pzopt.ChunkRate)
    public static final boolean TREE_BAKE_PASS = bool("treeBakePass", true); // issue #5: pzopt.TreeBake draws the baked trees
    public static final boolean CUTAWAY_FAST = bool("cutawayFast", true);
    public static final int CUTAWAY_RADIUS = integer("cutawayRadius", 6);
@@ -375,6 +384,11 @@ public final class Config {
          return "-Dpzopt." + key;
       }
       return props.getProperty(key) != null ? "pzopt.properties" : null;
+   }
+
+   /** min(4, cores - 1); 1 on 4 cores or fewer, where a pool only competes with the game, lighting and render threads. */
+   static int defaultWorkers(int cores) {
+      return cores <= 4 ? 1 : Math.min(4, cores - 1);
    }
 
    /** At least 1, and never the full processor count: the render thread keeps one core. */

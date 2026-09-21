@@ -2635,6 +2635,7 @@ public final class IsoChunk {
    }
 
    public void loadInMainThread() {
+      pzopt.ChunkRate.loaded(); // pzopt: chunk hand-off rate (treeBakeMaxChunksPerSec)
       IsoCell cell = IsoWorld.instance.currentCell;
       IsoChunk chunkW = cell.getChunk(this.wx - 1, this.wy);
       IsoChunk chunkN = cell.getChunk(this.wx, this.wy - 1);

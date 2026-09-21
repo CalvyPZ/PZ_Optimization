@@ -30,6 +30,9 @@ local SECTIONS = {
         entries = {
             { key = "treesInChunkTexture", label = "Bake trees into chunk textures",
               tip = "Static trees are drawn once into the chunk textures instead of every frame; only fading trees stay per-frame. Off = stock (every tree every frame)." },
+            { key = "treeBakeMaxChunksPerSec", label = "Bake trees only below this chunk rate (chunks/s)",
+              choices = { "0", "12", "24", "48" }, note = { ["0"] = "always bake" },
+              tip = "While chunks stream in faster than this (walking loads about 9 a second, driving at 60 km/h about 32, at 120 km/h about 72) new chunk textures are baked without their trees and the trees are drawn per frame instead: a texture that lives a second or two while driving costs more to bake its trees into than to draw them. Textures already baked keep their trees until they re-bake anyway." },
             { key = "treeBakeDirect", label = "Bake trees one by one",
               tip = "Baked trees go through the plain sprite path. The batched path drops the largest (jumbo) trees near buildings." },
             { key = "treeBakePass", label = "Tree pass: whole crowns, depth by height",
@@ -360,6 +363,13 @@ local function addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
         if pinnedBy ~= "" then return end
         self.control:setSelected(1, perf():getPzoptOptionDefault(entry.key) == "true")
     end
+    -- a profile button sets an explicit value (nil = the build's default)
+    function option.pzoptSet(self, value)
+        if pinnedBy ~= "" then return end
+        if value == nil then return self:pzoptReset() end
+        self.control:setSelected(1, value == "true")
+    end
+    option.pzoptKey = entry.key
     self.gameOptions:add(option)
     return option
 end
@@ -402,6 +412,23 @@ local function addIntOption(self, entry, splitpoint, y, comboWidth)
         if pinnedBy ~= "" then return end
         self.control.selected = 1 -- "Default (...)"
     end
+    function option.pzoptSet(self, value)
+        if pinnedBy ~= "" then return end
+        local index = value ~= nil and indexOf(value) or nil
+        if index == nil then
+            -- a profile value outside the combo's list becomes selectable, like a hand-typed one
+            if value ~= nil and value ~= perf():getPzoptOptionDefault(entry.key) then
+                table.insert(labels, value)
+                table.insert(values, value)
+                self.control:addOption(value)
+                index = #values + 1
+            else
+                index = 1
+            end
+        end
+        self.control.selected = index
+    end
+    option.pzoptKey = entry.key
     self.gameOptions:add(option)
     return option
 end
@@ -423,6 +450,51 @@ local function setAll(self, enable)
     end
 end
 
+-- Profiles: one button sets a named group of controls (the rest go back to the build's default),
+-- master on; Apply / Accept saves them like the other buttons. Values are the option strings.
+local PROFILES = {
+    {
+        button = "Low-end hardware (4 cores or less)",
+        tip = "Turns the master switch on and picks the settings measured on a 4-core CPU with an old GPU "
+           .. "(Core i5-6300HQ / GTX 960M, 2026-09-21): no chunk worker pool (its threads took the game thread's core), "
+           .. "trees baked only while walking (while driving a chunk texture lives seconds, and baking its trees cost "
+           .. "more than drawing them per frame), and on the Display page lighting updates 10/s and the UI redrawn 30 "
+           .. "times a second (the lighting thread and the Lua UI were the next biggest users of the four cores). "
+           .. "Everything else goes back to the build's default. 120 km/h drive 44 -> 68 fps, walking 49 -> 81 "
+           .. "(p99 80 -> 40 ms / 69 -> 30 ms); the launcher's G1 collector JSON is needed on top. See docs/results.md.",
+        values = {
+            workers = "1",
+            loadWorkers = "2",
+            treeBakeMaxChunksPerSec = "24",
+        },
+        -- stock Display-page combos by GameOption name -> combo index (MainOptions.lua lists):
+        -- lightingFPS {5, 10, 15, 20, 25, 30, 45, 60}, UIRenderFPS {120, 60, 30, 25, 20, 15, 10}
+        stock = { lightingFPS = 2, UIRenderFPS = 3 },
+    },
+}
+
+local function applyProfile(self, profile)
+    local master = self.pzoptMaster
+    if master and master.control.enable then
+        master.control:setSelected(1, true)
+        master:invokeOnChangeEvent()
+    end
+    for _, option in ipairs(self.pzoptOptions) do
+        option:pzoptSet(profile.values[option.pzoptKey])
+        option:invokeOnChangeEvent()
+    end
+    for name, index in pairs(profile.stock or {}) do
+        local option = self.gameOptions:get(name)
+        local box = option and option.control
+        if box and box.options and box.options[index] then
+            box.selected = index
+            option:invokeOnChangeEvent()
+        else
+            print("[pzopt] options tab: profile could not set stock option " .. name)
+        end
+    end
+end
+
 local function addAllButtons(self, splitpoint, y)
     local on = self:addButton(splitpoint, y, "Enable all (recommended defaults)")
     on.tooltip = "Turns the master switch on and puts every setting below back to the build's default on this machine. " .. RESTART_NOTE
@@ -432,11 +504,23 @@ local function addAllButtons(self, splitpoint, y)
     off.tooltip = "Turns the master switch off: the game runs its original code everywhere, as if the overrides were not installed. The settings below are kept for when you enable them again. " .. RESTART_NOTE
     off.target = self
     off.onclick = function(target) setAll(target, false) end
+    local profileButtons = {}
+    for _, profile in ipairs(PROFILES) do
+        local b = self:addButton(splitpoint, y, profile.button)
+        b.tooltip = profile.tip .. " " .. RESTART_NOTE
+        b.target = self
+        b.onclick = function(target) applyProfile(target, profile) end
+        table.insert(profileButtons, b)
+    end
     if self.pzoptMaster and not self.pzoptMaster.control.enable then
         on:setEnable(false)
         off:setEnable(false)
         on.tooltip = "Pinned by " .. perf():getPzoptOptionPinnedBy(MASTER.key) .. " for this install."
         off.tooltip = on.tooltip
+        for _, b in ipairs(profileButtons) do
+            b:setEnable(false)
+            b.tooltip = on.tooltip
+        end
     end
 end
 

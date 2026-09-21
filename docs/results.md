@@ -1232,6 +1232,172 @@ Findings:
   helpers restore on exit), the mods stay under `~/Zomboid/mods` disabled, `ModOptions.ini` keeps the
   `ZBBetterFPSB4220Fix` lines.
 
+## 2026-09-21 (11:30–13:30): low-end profile for the Dell — towards 60 fps on a 4-core i5-6300HQ / GTX 960M
+
+Objective set by the maintainer at 11:20: "make the Dell run the game at 60 fps locked". Machine and
+routes as in the morning sections; every run in this section is `--gc g1` (ZGC's allocation stalls
+made same-config runs differ 2x on this box: 4,300–4,700 stalls per ZGC run, 0 under G1) under the
+maintainer's new `scx_cosmos` scheduler, direct launch, no MangoHud, `--no-dashboard`, max zoom
+(2.0 at 1920x1080), 240 cap. Two routes: **drive** = the 120 km/h E:1200 route (72 chunks/s, the
+stress case) and **walk** = `route=S:120 speed=3 turn=90` (3 tiles/s through Rosewood with the
+facing spinning, 9 chunks/s; 40 s: the play case). Runs `dell-lo-*`, `dell-walk-*`, `dell-v6-*`,
+`dell-v7-*`.
+
+### Where the game thread went (JFR, `gametree.py`)
+
+Drive, optimized defaults (63 ms frames with JFR): chunk-texture bakes 35 % (floors 10, the tree
+pass 7.6 — of which 4 is its 5x5-chunk readiness scan — object render info 3.7, minus-floor 3.6,
+puddle geometry 1.7), world update 26 % (chunk hand-off `loadInMainThread` 10 %: half of it the
+neighbour recalcs that stay on the game thread; moving objects 7.5), Lua UI 13 % (render 7.4 +
+update 5.4), lighting apply 5, `ProcessChunkPos` 3. The game thread was blocked only 6 % of the
+window; the rest of its lost time was preemption by the three recalc workers (41 % of a core), the
+lighting thread (34 %) and the GC on four cores.
+
+Walk, optimized defaults (21 ms frames): Lua UI 19 % (render 12.6 + update 6.5), moving objects 14
+(+ player post-update 4), bakes 8.6 (cutaway / lighting re-bakes while the facing spins),
+translucent objects 4.6, lighting apply 5.4, newly-on-screen chunk checks 4, vispoly 2.5,
+`FishSchoolManager.generateSplashes` 1. Nothing key-sized is left there.
+
+### Key A/Bs (G1, cosmos; Steam client still resident on the box until 12:40)
+
+| drive 120 | fps | mean | p99 | p99.9 / max | >33 ms |
+|---|---|---|---|---|---|
+| stock | 29.1 | 34.4 | 135 | 327 / 1721 | 382 |
+| defaults (3 recalc workers) | 21.2 | 47.2 | 148 | 436 / 2052 | 600 |
+| workers=1 | 19.5 | 51.3 | 117 | 603 / 2081 | 629 |
+| workers=1 + treeBakePass=false (old tree bake) | 28.6 | 35.0 | 103 | 257 / 1890 | 426 |
+| **workers=1 + treesInChunkTexture=false (trees per frame)** | **42.7** | **23.4** | **97** | **193 / 236** | **261** |
+| workers=1 + treeBakePass=false + bake/lighting budgets | 33.5 | 29.9 | 94 | 282 / 1448 | 313 |
+
+| walk | fps | mean | p99 | p99.9 / max | >33 ms |
+|---|---|---|---|---|---|
+| stock | 31.5 | 31.7 | 136 | 235 / 2333 | 377 |
+| **defaults** | **47.3** | **21.1** | **67** | 308 / 328 | **140** |
+| workers=1 | 37.6 | 26.6 | 100 | 355 / 1313 | 215 |
+| workers=1 + trees per frame | 32.7 | 30.6 | 117 | 348 / 2068 | 307 |
+| workers=1 + treeBakePass=false + budgets | 37.9 | 26.4 | 101 | 267 / 1831 | 221 |
+
+The tree bake is the swing factor and it swings both ways: at 120 km/h a chunk texture lives a
+second or two and baking its trees (own texture, the tree pass's neighbour copies and its 5x5-chunk
+scan) costs more game-thread time than drawing them per frame for that long (19.5 → 42.7 fps);
+walking, the bake amortises over hundreds of frames (per-frame trees 32.7 vs baked 47.3). Hence
+`treeBakeMaxChunksPerSec` (pzopt.ChunkRate, override-edits entry of this afternoon): above that many
+chunk hand-offs per second new textures are baked without trees. Budgets (`bakeBudget=4
+lightingBudget=4 lightingRebakeMs=1000 lightingRebakeBudget=2 chunkHandoffDivisor=16
+cutawayRadius=3 gridStackInterval=16`), per-frame windows, per-frame translucent tiles and
+`bakeBudget=2` were each within noise of the trees-per-frame line on the drive (matrix `dell-lo-g1-nt-*`,
+27.9–30.3 fps, but that batch ran under growing memory pressure — see below — so it is not
+conclusive).
+
+### The Steam client was eating the box
+
+At 12:32 the repeats of the best drive config and of stock read 22 / 20 fps against 43 / 29 an
+hour earlier, with a 129 s world load: 7.8 GB RAM, the game at 2.2 GB RSS, three Steam
+`steamwebhelper` processes resident since boot (~0.35 cores between them), 2 GB in zram swap,
+`kswapd0` busy, memory PSI `some` 9 %. `steam -shutdown` on the Dell (used memory 4.5 → 1.9 GB,
+swap 2.0 → 0.9 GB). Every number below is with Steam down; the morning's Dell numbers all carry
+that handicap.
+
+### Validation of the worktree build (`low-end-profile`: `workers` defaults to 1 on ≤ 4 cores, `treeBakeMaxChunksPerSec`, the Options tab profile button)
+
+| Dell, G1, cosmos, Steam down | fps | mean | p50 | p99 | p99.9 / max | >33 ms | load |
+|---|---|---|---|---|---|---|---|
+| drive 120 stock (×2) | 43.4 / 44.3 | 23.0 / 22.6 | 18.5 | 79 / 82 | 148 / 256 | 298 / 257 | 70 / 65 s |
+| drive 120 new defaults (workers=1) | 33.5 | 29.9 | 27.4 | 71 | 184 / 222 | 390 | 31 s |
+| **drive 120 + treeBakeMaxChunksPerSec=24 (×2)** | **60.3 / 61.6** | **16.6 / 16.2** | 13.8 | 67 / 57 | 99 / 181 | 119 / 118 | 23 / 25 s |
+| walk stock | 46.1 | 21.7 | 18.1 | 74 | 214 / 279 | 190 | 71 s |
+| walk new defaults | 63.0 | 15.9 | 14.5 | 38 | 151 / 319 | 43 | 68 s |
+| **walk + treeBakeMaxChunksPerSec=24** | **74.7** | **13.4** | 12.0 | 37 | 113 / 303 | 38 | 26 s |
+
+The adaptive mode engaged for 1,640 frames of the drive (86 chunks/s at the peak) and 42 frames of
+the walk (the start burst). Against stock on the same box: drive 43.9 → 61 fps (+39 %, p99 80 →
+62 ms), walk 46.1 → 74.7 (+62 %, p99 74 → 37 ms), world load 70 → 25 s. **Mean frame time is at or
+under 16.7 ms on both routes, i.e. 60 fps on average; it is not locked**: 3 % (drive) / 1.3 % (walk)
+of the frames are over 33 ms, scattered about a second apart (33–50 ms, a few of 100–300 ms).
+
+### Tail attribution and the last two levers
+
+`attribute.py` on a JFR of the adaptive walk (32 slow frames ≥ 33 ms of 3,047): an ordinary
+frame is 12.6 ms, a slow one 66.8, and the extra 54 ms is spread over everything in proportion
+(logic +30: world update +19, Lua VM +9, vehicles +6.5, chunk hand-off +4.5; render +22) with only
+40 % of the slow frames' wall time sampled on the game thread at all. That is the game thread
+**off-CPU**: four cores at 96–100 %, so whenever another thread bursts (the lighting thread at
+50–65 % of a core, a chunk row's recalc, the render thread's uploads, a G1 young pause — 68–100 ms
+each with the plain `--gc g1` flag) the game thread waits for a core. Not a hot spot to trim; the
+lever left is the other threads' work. Two of them are stock Display options at their defaults on
+the Dell: `lightFPS` (the lighting thread's rate, 15) and `uiRenderFPS` (the offscreen UI redraw,
+60).
+
+| adaptive build + | walk fps | mean | p99 | >33 ms | drive fps | mean | p99 | p99.9 / max | >33 ms |
+|---|---|---|---|---|---|---|---|---|---|
+| (nothing; ×3 / ×2) | 74.7 / 74.0 / 66.4 | 13.4–15.1 | 33–40 | 28–48 | 60.3 / 61.6 | 16.6 / 16.2 | 67 / 57 | 99–131 / 154–181 | 119 / 118 |
+| lightFPS=10 | 79.0 | 12.7 | 32 | 26 | 62.4 | 16.0 | **40** | 141 / 187 | **52** |
+| uiRenderFPS=30 | 77.7 | 12.9 | 38 | 47 | | | | | |
+| lightFPS=10 + uiRenderFPS=30 + MaxGCPauseMillis=25 | **81.4** | **12.3** | **30** | **23** | **68.5** | **14.6** | **40** | **80 / 126** | **49** |
+| re-bake budgets (lightingRebakeMs=1000 rebakeBudget=2 …) | 69.6 | 14.4 | 34 | 31 | | | | | |
+| drive: bakeBudget=4 + chunkHandoffDivisor=16 | | | | | 54.5 | 18.3 | 66 | 136 / 189 | 94 |
+| drive: treeBakeMaxChunksPerSec=12 | | | | | 54.6 | 18.3 | 45 | 128 / 186 | 77 |
+
+The lighting rate is the tail lever on the drive (p99 57–67 → 40 ms, slow frames 118 → 52) at no
+cost in mean. G1's pause target is a goal, not a bound: young pauses stayed 68–87 ms with
+`MaxGCPauseMillis=25`; they are the p99.9 now.
+
+### Result and the profile
+
+Against stock on the same box, same GC and scheduler: **120 km/h drive 43.9 → 68.5 fps (mean 22.8 →
+14.6 ms, p99 80 → 40), walking 49 → 81 fps (20.5 → 12.3 ms, p99 69 → 30), world load 70 → 25 s.**
+60 fps on average on both routes at max zoom; not locked — 1.5 % (drive) / 0.8 % (walk) of the
+frames are still over 33 ms, and the p99 is 2x the 16.7 ms budget. A lock on this CPU needs less
+work on the other threads (lighting, recalc, GC pauses) or bakes and Lua UI off the game thread,
+none of which is a key.
+
+The Options > Optimizations tab has a third button, **"Low-end hardware (4 cores or less)"**
+(`PROFILES` in `pzopt_optimizations_options.lua`): master on, `workers=1`, `loadWorkers=2`,
+`treeBakeMaxChunksPerSec=24`, every other pzopt key back to default, and on the Display page
+lighting updates 10/s and UI redraw 30/s (`GameOptions:get("lightingFPS" / "UIRenderFPS")`).
+Apply / Accept saves them as usual; next launch. `workers` also now defaults to 1 on 4 cores or
+fewer (`Config.defaultWorkers`). The G1 launcher JSON is still a manual step
+(`config/launcher/ProjectZomboid64.g1.json`; the stock JSON's ZGC is the 2x run-to-run noise on
+this box).
+
+### 14:45–15:00: Oracle GraalVM 25.3.4.1 on the Dell (same profile set, G1, cosmos)
+
+`jre64` pointed at a copy of GraalVM 25.3.4.1 (`jre64_graal`, Zulu kept as `jre64_zulu`), the
+profile set of the rows above (`treeBakeMaxChunksPerSec=24 lightFPS=10 uiRenderFPS=30
+MaxGCPauseMillis=25`), runs `dell-graal-*`:
+
+| route | Zulu 25.0.1 (HotSpot C2) | GraalVM 25.3.4.1 | load |
+|---|---|---|---|
+| walk (×2 Graal) | 82.4 fps · 12.1 ms · p99 32 | 51.2 / 64.7 · 19.5 / 15.5 · p99 54 / 48 | 25 → 73 s |
+| drive 120 | 69.0 · 14.5 · p99 40 | 39.8 · 25.1 · p99 62 | 23 → 68 s |
+| drive 60 | 93.0 · 10.7 · p99 28 | 68.0 · 14.7 · p99 35 | 28 → 66 s |
+
+25–40 % slower than HotSpot C2 on every route with the game thread busier (87–89 % of a core vs
+84), i.e. more CPU per frame, and the world load three times longer (the boot-time Lua
+precompile, script parsing and cache reads all run on cold Graal-compiled code). The desktop and
+laptop verdicts (2026-09-20: ~15 % behind C2) hold and are worse on four cores. Not adopted;
+`jre64` is Zulu again, the Graal copy stays at `jre64_graal` on the Dell.
+
+### 15:20–15:28: night + thunderstorm + heavy fog at 120 km/h on the Dell, stock vs the low-end profile (with the fog pass)
+
+Branch `low-end-profile` with master merged (fog pass `b67c94f`, `fogPass=true` default).
+`--preset storm-fog --mode drive --flag route=E:1200 --flag kmh=193 --flag time_of_day=1`, both
+runs verified in `pzopt-bench.out`: `night_strength=1.0 weather=storm precipitation=1.0 fog=1.0
+fog_quality=0` (ImprovedFog, so the pass applies: fog buffer 480x270), routes complete. G1 on both;
+stock = `--prop enabled=false` with the Dell's stock Display options, optimized = the profile set
+(`treeBakeMaxChunksPerSec=24 lightFPS=10 uiRenderFPS=30 MaxGCPauseMillis=25`). Runs `dell-nightstorm-*`.
+
+| | fps | mean | p50 | p90 | p99 | p99.9 / max | >33 ms | CPU | GPU | game thread | render thread | load |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| stock | 15.4 | 64.8 | 50.9 | 110 | 202 | 826 / 2153 | 627 | 100 % | 53 % | 70 % | 41 % | 94 s |
+| **profile + fog pass** | **31.4** | **31.8** | **27.1** | **45.8** | **101** | **274 / 1369** | **361** | 100 % | 62 % | 80 % | 24 % | 35 s |
+
+2.0x: 15.4 → 31.4 fps, p99 202 → 101 ms; the render thread drops from 41 % to 24 % of a core
+(the fog pass's one draw call and the rain tiles / puddle cache replacing ~100k per-frame quads),
+which on four cores is CPU the game thread gets back (70 → 80 %). Still far from 60 on this
+scene: the box is at 100 % with the streamer at 46 % (120 km/h) and the lighting thread at
+32–40 %, and the storm's lightning re-bakes land in the tail (max 1.4 s).
+
 ## 2026-09-21 (15:26–15:35): side-by-side video, stock vs optimized, 120 km/h thunderstorm drive (storm parity pass)
 
 `harness/stitch-storm2-sbs.sh` -> `docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.mp4`
