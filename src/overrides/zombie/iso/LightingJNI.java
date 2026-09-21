@@ -968,10 +968,17 @@ public final class LightingJNI {
             IsoChunkMap cm = IsoWorld.instance.currentCell.chunkMap[playerIndex];
             if (cm != null && !cm.ignore) {
                PlayerRenderSettings plrSettings = renderSettings.getPlayerSettings(playerIndex);
+               // pzopt: the pass about to land rewrites every per-square dirty bit; chunks FBORenderCell's lighting budget
+               // still holds must read theirs first or their light stays stale (chunk-sized dark patches in a headlight
+               // beam at 120 km/h, 2026-09-21)
+               zombie.iso.fboRenderChunk.FBORenderCell.pzoptFlushPendingLighting(playerIndex);
                stateBeginUpdate(playerIndex, cm.getWorldXMin(), cm.getWorldYMin(), IsoChunkMap.chunkGridWidth, IsoChunkMap.chunkGridWidth);
 
                try {
                   updatePlayer(playerIndex);
+                  if (playerIndex == 0) {
+                     pzopt.LightDirt.globalLight(IsoWorld.instance.getFrameNo(), plrSettings.getRmod(), plrSettings.getGmod(), plrSettings.getBmod(), plrSettings.getAmbient(), plrSettings.getNight(), GameTime.getInstance().getSkyLightLevel()); // pzopt: a flash or a fast dusk keeps the lighting re-bake spread on (pzopt.LightDirt)
+                  }
                   stateEndFrame(
                      plrSettings.getRmod(),
                      plrSettings.getGmod(),
@@ -1329,7 +1336,8 @@ public final class LightingJNI {
       private int lightsCount;
       private ResultLight[] lights;
       private int lightLevel;
-
+      private int pzoptLightAcc; // pzopt: size of this square's light changes summed since its level was last baked (pzopt.LightDirt)
+      private int pzoptLightAccFrame = -1;
       public JNILighting(int playerIndex, IsoGridSquare square) {
          this.playerIndex = playerIndex;
          this.square = square;
@@ -1564,6 +1572,39 @@ public final class LightingJNI {
          }
       }
 
+      /**
+       * pzopt: pzopt.LightDirt. Sums how far this square's light moved (largest vertex channel, the light info
+       * channels together, the dark multiplier in 1/1000 quartered, a light-level change counted whole) since the
+       * level's texture was last baked; past Config.lightingStrongDelta the level is marked strong for this frame and
+       * FBORenderCell re-bakes it now instead of holding it as sky drift.
+       */
+      private void pzoptLightChanged(int infoDelta, int darkDelta, int levelDelta,
+            int was1, int was2, int was3, int was4, int was5, int was6, int was7, int was8) {
+         IsoChunk chunk = this.square.chunk;
+         int li = this.square.z + 32;
+         if (chunk == null || li < 0 || li >= 64) {
+            return;
+         }
+         int delta = Math.max(infoDelta, Math.max(darkDelta / 4, levelDelta));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[0], was1));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[1], was2));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[2], was3));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[3], was4));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[4], was5));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[5], was6));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[6], was7));
+         delta = Math.max(delta, pzopt.LightDirt.abgrDelta(this.cacheVertLight[7], was8));
+         int frameNo = IsoWorld.instance.getFrameNo();
+         if (this.pzoptLightAccFrame <= chunk.pzoptLightBakeFrame[li]) {
+            this.pzoptLightAcc = 0; // the level baked since this square last accumulated: those changes are on screen
+         }
+         this.pzoptLightAcc += delta;
+         this.pzoptLightAccFrame = frameNo;
+         if (this.pzoptLightAcc >= pzopt.Config.LIGHTING_STRONG_DELTA) {
+            pzopt.LightDirt.markStrong(chunk, li, frameNo);
+         }
+      }
+
       private void updateFBORenderChunk() {
          if (this.square.chunk != null) {
             if (LightingJNI.updateCounter[this.playerIndex] != -1) {
@@ -1659,9 +1700,14 @@ public final class LightingJNI {
                               )
                               && !DebugOptions.instance.fboRenderChunk.nolighting.getValue()) {
                               renderLevels.invalidateLevel(this.square.z, 32L);
+                              this.pzoptLightChanged(0, 0, 0, wasVertLight1, wasVertLight2, wasVertLight3, wasVertLight4, wasVertLight5, wasVertLight6, wasVertLight7, wasVertLight8); // pzopt: LightDirt
                            }
                         } else if (!DebugOptions.instance.fboRenderChunk.nolighting.getValue()) {
                            renderLevels.invalidateLevel(this.square.z, 32L);
+                           this.pzoptLightChanged( // pzopt: LightDirt
+                              Math.abs(isLightInfoR - wasLightInfoR) + Math.abs(isLightInfoG - wasLightInfoG) + Math.abs(isLightInfoB - wasLightInfoB),
+                              Math.abs(isDarkMulti - wasDarkMulti), isLightLevel == wasLightLevel ? 0 : 255,
+                              wasVertLight1, wasVertLight2, wasVertLight3, wasVertLight4, wasVertLight5, wasVertLight6, wasVertLight7, wasVertLight8);
                         }
 
                         if (wasCouldSee != ((this.vis & 4) != 0)) {

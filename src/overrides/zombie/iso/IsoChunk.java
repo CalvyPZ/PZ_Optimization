@@ -150,6 +150,10 @@ public final class IsoChunk {
    // pzopt: frame number of the last cacheLightInfo per square, rows indexed playerIndex * 64 + level + 32
    // (Config.LIGHT_INFO_ONCE_PER_FRAME, used by FBORenderCell)
    public int[][] pzoptLightInfoFrame;
+   // pzopt: per level (index z + 32), the frame a square of the level accumulated a strong light change and the frame the
+   // level's texture was last baked (pzopt.LightDirt: a torch sweep re-bakes now, sky drift and flashes stay held)
+   public final int[] pzoptLightStrongFrame = new int[64];
+   public final int[] pzoptLightBakeFrame = new int[64];
    // pzopt: per 5x5 neighbour slot, a fingerprint of this chunk's baked trees whose sprite overlaps that neighbour's
    // chunk-level texture, so a tree removed or turned per-frame here re-bakes the neighbour that holds a copy of it
    // (Config.TREE_BAKE_PASS, pzopt.TreeBake, issue #5)
@@ -5409,6 +5413,7 @@ public final class IsoChunk {
       loadGridSquare.remove(this);
       this.pzoptOccluderMaskSet = 0L; // pzopt: a reused chunk object starts without stored occluder masks
       this.pzoptTreeExportFp = null; // pzopt: tree export fingerprints belong to the previous chunk
+      pzopt.LightDirt.chunkReused(this); // pzopt: strong-light and bake frame stamps belong to the previous chunk
       this.pzoptFog = null; // pzopt: fog masks belong to the previous chunk
       this.pzoptClearPerFrameLists(); // pzopt: FBORenderCell keeps them across invalidations; a reused chunk starts empty
       pzopt.PuddleCache.chunkReused(this); // pzopt: the cached puddle batches (and their GL buffers) are rebuilt for the new position

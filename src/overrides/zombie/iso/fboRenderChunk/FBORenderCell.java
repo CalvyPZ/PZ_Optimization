@@ -1681,7 +1681,13 @@ public final class FBORenderCell {
                // lighting-only re-bake (flag 32 alone: daylight drifted by 1/255 on some square) of a texture baked
                // less than LIGHTING_REBAKE_MS ago: hold it, the previous texture stays on screen
                boolean pzoptLightingOnly = pzoptRebakeMs > 0 && pzoptRc != null && !renderLevels.isDirty(level, ~32L, zoom);
-               if (pzoptLightingOnly) {
+               // pzopt: a strong change (a torch beam sweeping in, a light switch; pzopt.LightDirt) is neither sky drift
+               // nor a flash: it re-bakes now, as stock does, unless the frame marked enough levels to be a global event
+               boolean pzoptStrong = pzoptLightingOnly && pzopt.LightDirt.rebakeNow(c, level, IsoWorld.instance.getFrameNo());
+               if (pzoptStrong) {
+                  pzoptStrongRebakes++;
+                  pzoptLightingOnly = false;
+               } else if (pzoptLightingOnly) {
                   Long last = this.pzoptLastBakeMs.get(pzoptRc);
                   pzoptLightingOnly = last != null && currentTimeMillis - last < pzoptRebakeMs;
                }
@@ -1707,6 +1713,12 @@ public final class FBORenderCell {
                   boolean pzoptLightingDirt = !renderLevels.isDirty(level, ~32L, zoom);
                   int pzoptMaxFrames = pzoptLightingDirt ? pzopt.Config.LIGHTING_REBAKE_MAX_FRAMES : pzopt.Config.REBAKE_MAX_FRAMES;
                   int pzoptFrameBudget = pzoptLightingDirt ? pzopt.Config.LIGHTING_REBAKE_BUDGET : pzoptRebakeBudget;
+                  if (pzoptStrong || (pzoptLightingDirt && pzopt.LightDirt.rebakeNow(c, level, IsoWorld.instance.getFrameNo()))) {
+                     pzoptFrameBudget = Integer.MAX_VALUE; // pzopt: strong lighting change, never held (pzopt.LightDirt)
+                     if (!pzoptStrong) {
+                        pzoptStrongRebakes++;
+                     }
+                  }
                   if (this.pzoptRebakesThisFrame >= pzoptFrameBudget) {
                      Integer since = this.pzoptRebakeHeldSince.get(pzoptRc);
                      if (since == null) {
@@ -1769,6 +1781,9 @@ public final class FBORenderCell {
          }
 
          if (isDirty && canRender) {
+            if (level == renderLevels.getMinLevel(level)) {
+               pzopt.LightDirt.baked(c, level, frameNo); // pzopt: the accumulated light changes of this level are on screen
+            }
             if (level == renderLevels.getMinLevel(level) && pzoptRebakeMs > 0) {
                this.pzoptLastBakeMs.put(FBORenderChunkManager.instance.renderChunk, currentTimeMillis);
                if (this.pzoptLastBakeMs.size() > 4096) {
@@ -4242,6 +4257,7 @@ public final class FBORenderCell {
    private final java.util.HashSet<FBORenderChunk> pzoptDeferredTextures = new java.util.HashSet<>();
    private static long pzoptDeferredTotal;
    private static long pzoptLightingRebakesHeld;
+   private static long pzoptStrongRebakes; // pzopt: lighting-only re-bakes that skipped the holds (pzopt.LightDirt)
    // pzopt: cutaway savings (Config.CUTAWAY_FAST / CUTAWAY_RADIUS / GRID_STACK_INTERVAL)
    private final java.util.ArrayList<IsoChunk> pzoptNearChunks = new java.util.ArrayList<>();
    private IsoGridSquare pzoptGridStackSquare;
@@ -4289,7 +4305,7 @@ public final class FBORenderCell {
       }
       if (!pzoptTlSets.isEmpty()) {
          final int frames = pzoptTlFrames;
-         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld).append(" flags:");
+         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" strong now=").append(pzoptStrongRebakes).append(" strong marks=").append(pzopt.LightDirt.strongMarks).append(" global light events=").append(pzopt.LightDirt.globalEvents).append(" flushed=").append(pzoptLightingFlushed).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld).append(" flags:");
       for (int b = 0; b < 16; b++) {
          if (pzoptBakeFlags[b] > 0) sb.append(' ').append(PZOPT_FLAG_NAMES[b]).append('=').append(pzoptBakeFlags[b]);
          pzoptBakeFlags[b] = 0;
@@ -4581,6 +4597,45 @@ public final class FBORenderCell {
             return;
          }
       }
+   }
+
+   private static long pzoptLightingFlushed; // pzopt: chunks refreshed by the pre-pass flush
+
+   /**
+    * pzopt: called by LightingJNI.update just before a lighting pass lands. The per-square dirty bits the pending
+    * chunks of the budget still have to read are rewritten by that pass, so the queue is drained here, in the same
+    * frame: the budget spreads the work over the frames between two passes and the remainder lands now instead of
+    * being lost (the engine answers a non-dirty square with the previous pass, so a late read is no cure either).
+    */
+   public static void pzoptFlushPendingLighting(int playerIndex) {
+      FBORenderCell cell = instance;
+      if (cell == null || playerIndex < 0 || playerIndex >= cell.perPlayerData.length || !pzopt.Config.LIGHTING_FLUSH) {
+         return;
+      }
+      java.util.LinkedHashMap<IsoChunk, Long> pending = cell.pzoptLightingPendingLevels;
+      if (pending.isEmpty()) {
+         return;
+      }
+      FBORenderCell.PerPlayerData perPlayerData1 = cell.perPlayerData[playerIndex];
+      int savedPlayer = IsoCamera.frameState.playerIndex;
+      IsoCamera.frameState.playerIndex = playerIndex; // cacheLightInfo reads the player from the frame state
+      try {
+         for (java.util.Map.Entry<IsoChunk, Long> e : pending.entrySet()) {
+            IsoChunk chunk = e.getKey();
+            long mask = e.getValue();
+            if (perPlayerData1.onScreenChunks.contains(chunk)) {
+               for (int z = chunk.minLevel; z <= chunk.maxLevel; z++) {
+                  if ((mask & (1L << (z + 32))) != 0L) {
+                     cell.pzoptCacheChunkLevelLightInfo(playerIndex, chunk, z);
+                  }
+               }
+               pzoptLightingFlushed++;
+            }
+         }
+      } finally {
+         IsoCamera.frameState.playerIndex = savedPlayer;
+      }
+      pending.clear();
    }
 
    private boolean pzoptIsChunkLevelLightingDirty(int playerIndex, IsoChunk chunk, int level) {

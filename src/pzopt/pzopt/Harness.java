@@ -654,7 +654,20 @@ public final class Harness {
             return null;
          }
          vehicleSpawned = true;
-         Log.info("harness: spawned " + script + " facing " + dir + " (engine quality " + v.getEngineQuality() + ", condition 100) and seated the player as driver");
+         // headlights=on|off|auto (default auto: on when the scene forces a night hour, off otherwise so the daytime
+         // drive baselines keep their light state); a moving headlight beam is the drive-route case of the held
+         // lighting re-bakes (pzopt.LightDirt, 2026-09-21)
+         String headlights = HarnessFlags.get("headlights", "auto");
+         float hour = Float.parseFloat(HarnessFlags.get("time_of_day", "-1"));
+         boolean lightsOn = "on".equals(headlights) || ("auto".equals(headlights) && hour >= 0f && (hour < 6f || hour >= 20f));
+         v.setHeadlightsOn(lightsOn);
+         // lightbar=0..3: the emergency lightbar's lights mode (ambulance, police; 0 = off, 1-3 the game's patterns);
+         // its rotating red/blue world lights change every frame
+         int lightbar = Integer.parseInt(HarnessFlags.get("lightbar", "0"));
+         if (lightbar > 0 && v.hasLightbar()) {
+            v.setLightbarLightsMode(lightbar);
+         }
+         Log.info("harness: spawned " + script + " facing " + dir + " (engine quality " + v.getEngineQuality() + ", condition 100, headlights " + (lightsOn ? "on" : "off") + (lightbar > 0 && v.hasLightbar() ? ", lightbar mode " + lightbar : "") + ") and seated the player as driver");
          return v;
       } catch (Exception e) {
          Log.warn("harness: vehicle spawn failed: " + e);

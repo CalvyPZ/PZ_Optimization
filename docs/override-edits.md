@@ -1578,3 +1578,66 @@ them last into the finished texture is the same sequence of draws. Counters: `ap
 fell back= refused=)` in the tree bake line. Why: on the 120 km/h desktop drive 60 % of all bakes
 (`trees=5217` of 8571 per 1800 frames, 2.9 a frame at ~300 µs of GPU each) were these neighbour
 re-bakes, in clear weather and storms alike.
+
+## zombie.iso.LightingJNI (third edit, 2026-09-21 evening, strong light changes)
+
+The "blocky lights" report (maintainer video, 2026-09-21: a hand torch swept in a garage at
+night showed the beam as a patchwork of tile-stepped, stale pieces): the held lighting-only
+re-bakes of FBORenderCell (`lightingRebakeMs`, `lightingRebakeBudget` / `lightingRebakeMaxFrames`)
+were tuned for sky drift and lightning flashes, but a moving light source dirties the few chunk
+levels in its beam every frame and each held level kept showing the beam at a past angle, one
+angle per chunk. Stock re-bakes them every frame.
+
+`JNILighting.updateFBORenderChunk`: in both branches that call `invalidateLevel(z, 32)` the
+square now reports the size of its change to the new `pzoptLightChanged(...)`: the light-info
+channels' differences added together, a quarter of the dark-multiplier move (in 1/1000), a
+light-level change counted as 255, and the largest channel difference of the eight vertex lights.
+The square sums those deltas since its level was last baked (`pzoptLightAcc`, reset when
+`IsoChunk.pzoptLightBakeFrame[level]` is newer than the square's last accumulation) and past
+`Config.lightingStrongDelta` (6) marks the level strong for the frame through
+`pzopt.LightDirt.markStrong`.
+
+`LightingJNI.update`: before `stateEndFrame` for player 0 the global light handed to the engine
+(rmod, gmod, bmod, ambient, night, sky level) goes to `pzopt.LightDirt.globalLight`; a move past
+`Config.lightingGlobalDeltaPct` (2 %) in one frame is a flash or a fast-forwarded dusk and keeps
+the re-bake spread on for `lightingRebakeMaxFrames + 2` frames. (A count of strong levels a frame
+was tried first and rejected: turning moves the vision cone across the whole screen, so a sweep
+marked as many levels as a flash.)
+
+## zombie.iso.IsoChunk (eighth edit, 2026-09-21 evening, strong light stamps)
+
+Two per-level frame arrays (index z + 32): `pzoptLightStrongFrame`, the frame a square of the
+level accumulated a strong light change, and `pzoptLightBakeFrame`, the frame the level's
+texture was last baked. `resetForStore()` calls `pzopt.LightDirt.chunkReused(this)`, which
+fills both with -1.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-21 evening, strong light changes)
+
+In the bake-decision block of `renderChunkLevel` (the `lightingRebakeMs` hold and the
+`rebakeBudget` spread): a level whose lighting-only dirt is strong
+(`pzopt.LightDirt.rebakeNow(chunk, level, frameNo)`: marked strong since its last bake and no
+global light event in progress) skips the `lightingRebakeMs` hold and gets an unlimited frame
+budget in the spread, so it re-bakes this frame like stock; it still counts as a started re-bake
+for the weak ones behind it. Where the texture is (re)baked, `pzopt.LightDirt.baked` stamps the
+level's bake frame. Counters `strong now=`, `strong marks=`, `global light events=` on the
+periodic log line. Verified on the night-torch spinning bench (`bl-torch-*` runs, zoom 1,
+recorded): hard-jump pixels per frame between consecutive recording frames stock 7.7 k, holds
+off 7.9 k, this fix 7.9 k, before 9.9 k (p90 16.7 / 17.5 / 17.9 / 22.3 k).
+
+## zombie.iso.LightingJNI + FBORenderCell (2026-09-21 evening, lighting-budget flush)
+
+The second half of the "blocky lights" report, the 120 km/h night drive: with `lightingBudget`
+(8 chunks a frame) the chunks past the budget are refreshed on a later frame, and if the next
+lighting pass lands first it rewrites every per-square dirty bit, so their squares read "not
+dirty" and keep the light of the previous pass (chunk-sized dark patches inside the headlight
+beam; `--prop lightingBudget=0` was clean). Reading a non-dirty square anyway is no cure: the
+engine answers with the previous pass (tried as a forced read, it produced a checkerboard).
+
+`LightingJNI.update`: before `stateBeginUpdate` for each player it calls
+`FBORenderCell.pzoptFlushPendingLighting(playerIndex)`, which refreshes every chunk level still
+in the budget's pending queue (on-screen chunks only, the player index pinned in
+`IsoCamera.frameState` for `cacheLightInfo`) and clears the queue. The budget therefore spreads
+the refreshes over the frames between two passes (2-4 at 60 fps with the 15-30 Hz lighting
+thread) and whatever is left lands in the frame the pass arrives, never lost. Counter
+`flushed=` on the log line. Verified on the SportsCar night drive (`bl-drive-*` runs, race cars
+have no headlight beam by script).
