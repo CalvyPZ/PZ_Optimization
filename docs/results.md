@@ -1359,3 +1359,21 @@ Apply / Accept saves them as usual; next launch. `workers` also now defaults to 
 fewer (`Config.defaultWorkers`). The G1 launcher JSON is still a manual step
 (`config/launcher/ProjectZomboid64.g1.json`; the stock JSON's ZGC is the 2x run-to-run noise on
 this box).
+
+### 14:45–15:00: Oracle GraalVM 25.3.4.1 on the Dell (same profile set, G1, cosmos)
+
+`jre64` pointed at a copy of GraalVM 25.3.4.1 (`jre64_graal`, Zulu kept as `jre64_zulu`), the
+profile set of the rows above (`treeBakeMaxChunksPerSec=24 lightFPS=10 uiRenderFPS=30
+MaxGCPauseMillis=25`), runs `dell-graal-*`:
+
+| route | Zulu 25.0.1 (HotSpot C2) | GraalVM 25.3.4.1 | load |
+|---|---|---|---|
+| walk (×2 Graal) | 82.4 fps · 12.1 ms · p99 32 | 51.2 / 64.7 · 19.5 / 15.5 · p99 54 / 48 | 25 → 73 s |
+| drive 120 | 69.0 · 14.5 · p99 40 | 39.8 · 25.1 · p99 62 | 23 → 68 s |
+| drive 60 | 93.0 · 10.7 · p99 28 | 68.0 · 14.7 · p99 35 | 28 → 66 s |
+
+25–40 % slower than HotSpot C2 on every route with the game thread busier (87–89 % of a core vs
+84), i.e. more CPU per frame, and the world load three times longer (the boot-time Lua
+precompile, script parsing and cache reads all run on cold Graal-compiled code). The desktop and
+laptop verdicts (2026-09-20: ~15 % behind C2) hold and are worse on four cores. Not adopted;
+`jre64` is Zulu again, the Graal copy stays at `jre64_graal` on the Dell.
