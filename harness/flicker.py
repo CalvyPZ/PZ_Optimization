@@ -17,14 +17,38 @@ import sys
 import numpy as np
 
 
-def read_frames(path, start, end, width):
+def read_frames(path, start, end, width, fps=None):
+    """Grayscale frames of [start, end) at `width`; fps resamples a variable-rate capture to a
+    fixed rate so two recordings compare frame for frame."""
     height = width * 2160 // 5120
+    vf = (f"fps={fps}," if fps else "") + f"scale={width}:{height},format=gray"
     cmd = [
         "ffmpeg", "-v", "error", "-ss", str(start), "-to", str(end), "-i", path,
-        "-vf", f"scale={width}:{height},format=gray", "-f", "rawvideo", "-",
+        "-vf", vf, "-f", "rawvideo", "-",
     ]
     raw = subprocess.run(cmd, check=True, capture_output=True).stdout
     return np.frombuffer(raw, dtype=np.uint8).reshape(-1, height, width)
+
+
+def transients(f, t, K):
+    """Boolean (n, h, w): pixel changed by >= t at frame i and returned within K frames."""
+    n = f.shape[0]
+    # transient at frame i (1 <= i <= n-1-K): |f[i]-f[i-1]| >= t and, for some k in 1..K,
+    # |f[i+k]-f[i-1]| < t/2 while every frame between i and i+k-1 stays away from f[i-1]
+    trans = np.zeros(f.shape, dtype=bool)
+    for i in range(1, n - K):
+        base = f[i - 1]
+        changed = np.abs(f[i] - base) >= t
+        if not changed.any():
+            continue
+        away = changed.copy()
+        hit = np.zeros_like(changed)
+        for k in range(1, K + 1):
+            back = np.abs(f[i + k] - base) < t // 2
+            hit |= away & back
+            away &= ~back & (np.abs(f[i + k] - base) >= t)
+        trans[i] = hit
+    return trans
 
 
 def main():
@@ -48,21 +72,7 @@ def main():
         sys.exit("too few frames")
     t = args.thresh
     K = args.maxk
-    # transient at frame i (1 <= i <= n-1-K): |f[i]-f[i-1]| >= t and, for some k in 1..K,
-    # |f[i+k]-f[i-1]| < t/2 while every frame between i and i+k-1 stays away from f[i-1]
-    trans = np.zeros((n, h, w), dtype=bool)
-    for i in range(1, n - K):
-        base = f[i - 1]
-        changed = np.abs(f[i] - base) >= t
-        if not changed.any():
-            continue
-        away = changed.copy()
-        hit = np.zeros_like(changed)
-        for k in range(1, K + 1):
-            back = np.abs(f[i + k] - base) < t // 2
-            hit |= away & back
-            away &= ~back & (np.abs(f[i + k] - base) >= t)
-        trans[i] = hit
+    trans = transients(f, t, K)
     per_frame = trans.sum(axis=(1, 2))
     change = (np.abs(f[1:] - f[:-1]) >= t).sum(axis=(1, 2))
     step = int(args.fps)

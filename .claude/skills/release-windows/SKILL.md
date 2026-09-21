@@ -109,7 +109,11 @@ for a password or Steam Guard, hand over to the maintainer).
 Launch and drive (announce it first; the game boots to the main menu, no save is loaded). xdotool
 coordinates are screen pixels / 1.25 on this KDE/XWayland desktop (5120x2160); a plain `xdotool click`
 only hovers the game's buttons, use mousedown / sleep 0.15 / mouseup. `/tmp/wsclick.sh X Y SLEEP` did
-exactly that on 2026-09-21; recreate it if gone. Take `spectacle -b -n -f -o` before every click and
+exactly that on 2026-09-21; recreate it if gone. `harness/ui-drive.py workshop --notes "<change notes>"` runs the
+whole table below by itself (screenshot → OCR → TypeSafe judges the screen and picks the control → press; the
+table's coordinates are its fallbacks; it stops with exit 2 on any unconfirmed screen and verifies the upload from
+`workshop_log.txt`); first live use still gets the maintainer watching, `--dry-run` only judges. By hand:
+take `spectacle -b -n -f -o` before every click and
 downscale it (`ffmpeg -vf scale=1280:-1`) to check the expected screen is up and has focus — the
 2026-09-21 retry clicked and typed into the desktop after the game lost focus.
 
