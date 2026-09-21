@@ -57,6 +57,9 @@ checked by the script before the in-game screen has to refuse:
    says `<item id>` in the install command.
 
 Updating after a new release is steps 1-3 again; the game keeps the id and the visibility.
+Hands-off version of step 3 (xdotool click sequence, the Steam connection preflight, log-based
+verification): `.claude/skills/release-windows`, "Steam Workshop deploy". A `result=2` failure in the
+game is a dead Steam session ("Session Replaced" in `connection_log.txt`); restart Steam.
 
 ## Images
 

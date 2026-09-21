@@ -40,6 +40,32 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
 - Commit and push only when asked. Commits end with
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 
+## Releasing (GitHub + Steam Workshop), 2026-09-21
+
+Order, all hands-off except the login: commit + push → `scripts/release.sh --publish --notes "..."`
+(tag `win-<rev>-<commit>`, zip + installers) → note the release in `docs/windows-test.md` (manifest
+line count) → `scripts/workshop.sh --tag win-<rev>-<commit>` (stages item 3805285544 under
+`~/Zomboid/Workshop/PZ_Optimization/`, regenerates `workshop.txt`; copy it to `docs/workshop/workshop.txt`
+and commit "workshop: stage the <commit> release") → upload → verify. Full click sequence, xdotool
+coordinates and pitfalls: `.claude/skills/release-windows` ("Steam Workshop deploy").
+
+- **The upload needs a really connected Steam client.** Before uploading run
+  `tail -3 ~/.local/share/Steam/logs/connection_log.txt`: it must end in `[Logged On` with no
+  `Session Replaced` after it. The client UI looks logged in and launches the game even when the same
+  account logged in elsewhere (laptop) replaced its session; every upload then ends in the game's
+  `failed to update workshop item, result=2` (three times on 2026-09-21) and Steam's
+  `workshop_log.txt` says `Failed to initialize build on server (No Connection)`. Fix: `steam -shutdown`,
+  start Steam again (cached login reconnects), re-check the log, upload.
+- **Verify the upload from the logs, not the in-game text**: `grep 3805285544
+  ~/.local/share/Steam/logs/workshop_log.txt | tail -3` must show `Upload finished ... : OK`, and the
+  public change-notes page `steamcommunity.com/sharedfiles/filedetails/changelog/3805285544` must list
+  the new entry (fetch it; the in-game page prints "finished" after a failure too).
+- Driving the in-game uploader with xdotool is fine but **re-screenshot before every click**: if the
+  game loses focus the clicks and the typed change notes go to whatever is focused. `steamcmd` has no
+  cached login on this machine; never type the maintainer's password. An in-game upload replaces the
+  animated `preview.gif` with `preview.png`; restoring it is the maintainer's steamcmd line
+  (`docs/workshop.md`, Images).
+
 ## Environment facts
 
 | Item | Value |

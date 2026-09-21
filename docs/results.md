@@ -965,3 +965,10 @@ effect.") and logs the same line; `overlay=true`, `overlayLog=true` and harness 
 `--prop overlay=true` runs and `pzopt-overlay.out` are unchanged. Verified with verify runs
 `notice-f9`: on this machine `~/Zomboid/pzopt/options.ini` has `overlay=true`, so F9 toggled the
 overlay as before; with `--prop overlay=false` F9 drew the notice (`notice-desktop.png` in the run dir).
+
+Laptop check (diego-flip over ssh, same commit built and installed there, runs `lp-sampling*` /
+`lp-nosampling*` under its `harness/runs/`): with sampling off (`--mode verify --prop overlay=false`)
+the live thread list (`/proc/<pid>/task/*/comm`) has no `pzopt-overlay-u` thread and no
+`pzopt-overlay.out` is written; the bench (harness implies sampling) fills all four utilization columns
+(cpu 37 %, gpu 19 %, game 89 %, render 24 %), 81 fps mean on the spinning route warm (73 on the first
+boot after the rebuild while the caches regenerated, p99.9 361 → 92 ms).

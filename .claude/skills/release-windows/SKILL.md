@@ -53,3 +53,56 @@ The upload itself is in the game launched through Steam (Workshop > Create/Updat
 the first upload writes `id=` into `workshop.txt`, which goes to `docs/workshop/workshop.txt`.
 Both installers auto-detect a `pzopt-classes/` sibling, so the Workshop instructions are one
 line per OS. Details: `docs/workshop.md`.
+
+## Steam Workshop deploy (hands-off, 2026-09-21)
+
+Preflight, in this order; stop at the first failure:
+
+```bash
+pgrep -fa '[P]rojectZomboid64'; pgrep -fa '[h]arness/run.sh'        # nothing running, no run.sh
+tail -3 ~/.local/share/Steam/logs/connection_log.txt                  # ends in "[Logged On", no "Session Replaced"
+ls ~/Zomboid/Lua/pzopt-harness.txt 2>/dev/null                        # must not exist (a stale flag file arms a run)
+grep -E '^(id|title)=' ~/Zomboid/Workshop/PZ_Optimization/workshop.txt   # id=3805285544, staged by workshop.sh
+```
+
+If the connection log shows `Session Replaced` / `Logged Off`: `steam -shutdown`, wait for `pgrep -x steam`
+to clear, `setsid steam &`, wait ~20 s, re-check (the cached login reconnects on its own; if it asks
+for a password or Steam Guard, hand over to the maintainer).
+
+Launch and drive (announce it first; the game boots to the main menu, no save is loaded). xdotool
+coordinates are screen pixels / 1.25 on this KDE/XWayland desktop (5120x2160); a plain `xdotool click`
+only hovers the game's buttons, use mousedown / sleep 0.15 / mouseup. `/tmp/wsclick.sh X Y SLEEP` did
+exactly that on 2026-09-21; recreate it if gone. Take `spectacle -b -n -f -o` before every click and
+downscale it (`ffmpeg -vf scale=1280:-1`) to check the expected screen is up and has focus — the
+2026-09-21 retry clicked and typed into the desktop after the game lost focus.
+
+| step | screen (1280-wide screenshot) | xdotool |
+|---|---|---|
+| `setsid steam -applaunch 108600 &`, wait for `[P]rojectZomboid64` + ~25 s | main menu | |
+| WORKSHOP | (157, 467) | 502 1494 |
+| Create and update items | (640, 223) | 2048 714 |
+| the `PZ_Optimization` row (only entry; under the overlay graph) | (108, 74) | 346 238 |
+| NEXT (Choose item directory) | (1199, 507) | 3837 1622 |
+| NEXT (Edit item details: title/description/tags/Public from workshop.txt) | (1199, 507) | 3837 1622 |
+| Edit Change Notes (Prepare to publish, Workshop ID 3805285544 shown) | (640, 300) | 2048 960 |
+| click into the text box, `xdotool type --delay 12 "<notes>"`, ACCEPT | (656, 503) | 1600 600 / 2099 1610 |
+| Upload to Steam Workshop now! | (640, 318) | 2048 1018 |
+| native confirm dialog "WARNING: Steam Workshop upload requested!" → Ok | (746, 301) | 2387 963 |
+| CLOSE on the "Publishing item" log (returns to the main menu) | (640, 503) | 2048 1610 |
+| QUIT the game from the main menu | (146, 499) | 467 1597 |
+
+Change notes: one paragraph, "Release <commit> (game revision <rev>). <what changed for users>.
+Everything else is unchanged from the previous upload (...)". The upload is ~6 s.
+
+Verify, never trust the in-game log (it prints "finished" after a failure too):
+
+```bash
+grep 3805285544 ~/.local/share/Steam/logs/workshop_log.txt | tail -3   # "Uploaded new content (ManifestID ...)" + "Upload finished ... : OK"
+```
+and fetch `https://steamcommunity.com/sharedfiles/filedetails/changelog/3805285544`: the new entry
+must be the first one. `failed to update workshop item, result=2` in the game = `Failed to initialize
+build on server (No Connection)` in `workshop_log.txt` = the Steam session is dead (see preflight).
+
+Afterwards the animated `preview.gif` is gone (the in-game uploader sends `preview.png`); restoring it
+is the maintainer's `steamcmd +login <user> +workshop_build_item ~/Zomboid/Workshop/PZ_Optimization/item.vdf +quit`
+(`docs/workshop.md`, Images). `steamcmd` has no cached login here; never type the password.
