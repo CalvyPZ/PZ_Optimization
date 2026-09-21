@@ -621,8 +621,8 @@ heap growth, no hsperfdata writes, for ~1 GB more RSS and a slightly longer boot
 Route as the game-thread pass (`--flag route=S:450 --flag turn=90 --route-seconds 25`, max zoom,
 5120x2160, NVIDIA GL, Steam launcher, no dashboard) but uncapped (`--prop uncappedFps=true`), frame
 source the in-game overlay log (`--no-mangohud`), JFR at 1 ms. Every run used the maintainer's
-Optimizations-tab file (persistentVbo, translucentTilesInChunkTexture on). Full table, GPU
-breakdown and the structural remainder in `docs/plan-400fps.md`.
+Optimizations-tab file (persistentVbo, translucentTilesInChunkTexture on). Full table and GPU
+breakdown in the run directories (`u400-*`).
 
 | run | change | fps mean | p50 | p90 | p99 | p99.9 | game thread | GPU |
 |---|---|---|---|---|---|---|---|---|
@@ -926,7 +926,7 @@ stitched with `harness/stitch-louisville-sbs.sh` ->
 Both sides are game-thread bound (98 % of a core) with the GPU at ~42 %: this scene is the zombie
 update (character update / animation / pathing on the game thread), which no pzopt key touches yet;
 the +34 % fps and halved p99 come from the render-side keys (chunk textures, cutaways, light info).
-`docs/plan-500fps.md` lists the character update as the untouched item; this preset is its benchmark.
+The character update has no pzopt edit; this preset is its benchmark.
 Earlier attempts: at 18 tiles/s (`show-louisville-opt-1`, 33.9 fps) the walk outran chunk handoff and
 the second half of the route was black; without `see_all` (`-2`, 89.6 fps because most of the screen
 was black) the recording was unwatchable. The 5,116-zombie first run also had 21 GC events / 1.2 s in

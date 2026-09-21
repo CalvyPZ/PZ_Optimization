@@ -164,7 +164,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   thread load, verdict line, frame graph; every harness run also writes `pzopt-overlay.out`
   (MangoHud columns + epoch_ms) and `analyze.py` prints it as `overlay:`. Same numbers on
   Windows/Linux without MangoHud or RivaTuner. The stock "Display FPS" graph (K) is debug-only bars.
-- Uncapped 400 fps pass (2026-09-20 evening, `docs/plan-400fps.md`, runs `u400-*`, in-game overlay log
+- Uncapped 400 fps pass (2026-09-20 evening, runs `u400-*`, in-game overlay log
   only, `--no-mangohud`): spinning route 273 → ~500 fps mean, p99 13.2 → 7.7 ms. Stock option
   `uiRenderOffscreen=true` is +40 % uncapped (runs pass `--option uiRenderOffscreen=true`). Adopted
   keys: cutawayInvalidateChanged, cutawayVisitPrefilter, lightInfoOncePerFrame, lightInfoChunkGate,
@@ -241,11 +241,8 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   neighbour textures instead of re-baking them; half the neighbour re-bakes while driving). Storm with lightning
   232 → 390 fps (2.6 ms, p99 8.6), clear 420 → 454 fps; the flashes cost ~0.1 ms mean. Laptop numbers pending
   (it was shut down mid-pass). A reduced-resolution puddle layer and a two-texture flash blend were rejected.
-- Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
-  `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
-  still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread),
-  `docs/plan-untouched-systems-2026-09-21.md` (the 2026-09-21 stock-take of every system without a
-  `pzopt` edit, ranked by cost; next pass = character update/animation, verified on the Louisville preset).
+- Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
+  The game-thread optimization plans were dropped on 2026-09-21 at the maintainer's request.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under
   GLX). `docs/plan-wayland.md`.

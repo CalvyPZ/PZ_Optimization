@@ -14,9 +14,6 @@ classes are described in words.
 | `plan-game-load.md` | the load after "Continue" (LoadTrace, loadtime.py) |
 | `plan-vulkan-renderer.md` | plan to move from OpenGL to Vulkan |
 | `plan-wayland.md` | 2026-09-19 native Wayland vs XWayland A/B: a wash at the cap, XWayland stays default |
-| `plan-400fps.md` | 2026-09-20 evening uncapped pass on the spinning route: 273 → ~500 fps, run table, GPU section breakdown, what locking 400 still needs |
-| `plan-500fps.md` | 2026-09-20 night: where the game thread still spends its frame after the 400 pass, untouched hot code, never-profiled areas (render thread, composite), ordered work list |
-| `plan-untouched-systems-2026-09-21.md` | stock-take of game systems with no `pzopt` edit and what they cost: character update/animation (~21 %, the horde wall), sprite recording, Lua UI, vispoly, weather mask, checkLights, render-thread state runs, tail residuals, composite; recommendation = character pass next |
 | `findings-scene-presets-2026-09-20.md` | the night / torch / thunderstorm presets: night and torch free, storm 83 fps with p99 43 ms and nothing saturated (chunk lighting rebakes ×5); capture rig blind to the player light; next steps |
 | `findings-fog-2026-09-21.md` | heavy fog at no cost: where stock `ImprovedFog` spent 1.5 ms of GPU and a game-thread square walk, the fog pass (one draw call, scaled fog buffer, in-place scene depth, min-depth reduction + depth-aware composite, mipmapped noise, chunk fog masks + segment cache), laptop and desktop run tables, what is left |
 | `findings-blocky-lights-2026-09-21.md` | the maintainer's "blocky lights" video: a moving torch / headlight beam through the held lighting-only re-bakes and the lighting-refresh queue (dirty bits lost past a pass); `pzopt.LightDirt` (strong changes re-bake now, global-light events keep the spread) + the pre-pass queue flush; run table with the consecutive-frame hard-jump metric |

@@ -183,8 +183,7 @@ population at 4x, ~2,000 zombies loaded at the start and ~2,500 by the end
 
 Both sides are bound by the zombie update on the game thread (character update, animation,
 pathing), which no key touches yet; the +34 % and the halved p99 come from the render-side
-keys. This preset is the benchmark for the character-update item in
-[`docs/plan-500fps.md`](docs/plan-500fps.md).
+keys.
 
 ### Boot and load
 
@@ -950,19 +949,12 @@ update and animation the largest part, and everything in the Louisville horde), 
 moves the needle now is structural. Chunk-streamer latency is done (4 to 5 ms median).
 Dates are not promised.
 
-1. **Game thread** (`docs/plan-400fps.md`, `docs/plan-500fps.md`, `docs/plan-resource-use.md`):
-   chunk-texture bake recording on a worker; the draw-command recording overlapped with the
-   next frame's logic (the largest gain and the largest race risk); the view-cone polygon off
-   the game thread; the loot roll and erosion of a chunk before hand-off or time-sliced; a
-   cached world composite on the GPU scrolled by the camera delta; the character update.
-   Gate for each: byte-identical recalc parity where it applies, `harness/compare.py` on the
-   Rosewood route, and a recorded run compared frame by frame with the keys off.
-2. **Vulkan renderer, measured gate first** (`docs/plan-vulkan-renderer.md`): the inventory
+1. **Vulkan renderer, measured gate first** (`docs/plan-vulkan-renderer.md`): the inventory
    is done (LWJGL 3.4.1 without the `vulkan` module, ~1,800 direct GL call sites in 119
    files). Phase 0 is a native-frame profile of the render thread; the port only starts if
    driver plus swap is at least 20 % of the frame on NVIDIA GL (30 % on Zink), otherwise the
    effort goes to GL-level batching behind the same backend seam.
-3. **Rust interop, standalone experiment**: whole passes (translucent list build, occluder
+2. **Rust interop, standalone experiment**: whole passes (translucent list build, occluder
    scan, view-cone polygon, texture decode) through the Foreign Function & Memory API of the
    bundled Java 25, one at a time, each microbenchmarked against the JIT; a pass that does
    not beat Java by a clear margin is written up and dropped.
