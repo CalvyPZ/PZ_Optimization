@@ -127,6 +127,7 @@ downscale it (`ffmpeg -vf scale=1280:-1`) to check the expected screen is up and
 | native confirm dialog "WARNING: Steam Workshop upload requested!" → Ok | (746, 301) | 2387 963 |
 | CLOSE on the "Publishing item" log (returns to the main menu) | (640, 503) | 2048 1610 |
 | QUIT the game from the main menu | (146, 499) | 467 1597 |
+| "Quit to desktop?" → Yes (dialog over the TV, appeared 2026-09-21 22:18) | Yes at (626, 278) | 2006 890 |
 
 Change notes: one paragraph, "Release <commit> (game revision <rev>). <what changed for users>.
 Everything else is unchanged from the previous upload (...)". The upload is ~6 s.
