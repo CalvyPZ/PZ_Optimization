@@ -1641,3 +1641,32 @@ the refreshes over the frames between two passes (2-4 at 60 fps with the 15-30 H
 thread) and whatever is left lands in the frame the pass arrives, never lost. Counter
 `flushed=` on the log line. Verified on the SportsCar night drive (`bl-drive-*` runs, race cars
 have no headlight beam by script).
+
+## zombie.network.NetChecksum (added 2026-09-21, multiplayer Lua checksum)
+
+A user joining a community server was refused with `File doesn't exist on the server:
+media/lua/shared/pzopt/pzopt_keybinding.lua`. When a client connects, `LuaManager.LoadDirBase`
+feeds every file under `media/lua/shared` and `media/lua/client` (game and mods) into
+`NetChecksum.Checksummer.addFile`: an MD5 over all of them that the server compares with its
+own, plus groups of per-file checksums the server walks to name the odd file when the totals
+differ. Stock leaves `SandboxVars.lua` out of the list. The three pzopt Lua files (the
+Optimizations tab, the frame-cap combos, the F9 key binding) are installed into the client's
+`media/lua/{shared,client}/pzopt/` and exist on no server.
+
+One edit, at the top of `Checksummer.addFile`: with `Config.luaChecksumExempt` (default true)
+a path that `pzopt.LuaChecksum.exempt` recognises (`media/lua/<sub>/pzopt/...`, either slash
+style, any case) returns before the file is read, so it enters neither the total nor a group.
+Everything else is byte-identical stock. The exemption is deliberately not tied to `enabled`:
+the files are on disk either way, and a server that has the overrides installed skips them
+too, so both sides agree whichever of them carries the files. Unit test `LuaChecksumTest`.
+
+Verified 2026-09-21 on the MacBook against a stock dedicated server (an APFS clone of the game's
+`Contents/Java` with every pzopt file removed, `zombie.network.GameServer -nosteam -no-worldgen`
+in its own `-cachedir`, `DoLuaChecksum=true`), the client with the overrides installed, started
+with `+connect 127.0.0.1:16261 -nosteam`, its own `-Ddeployment.user.cachedir`, a throw-away
+`media/lua/client/pzopt/pzopt_devjoin.lua` that presses Connect / spawn / character Next on
+`OnFETick`, and a `mode=verify` flag file so `AutoStart` presses click-to-start. Default:
+`client: DoLuaChecksum start` → `end`, `OnGameStart` in the world. `luaChecksumExempt=false`:
+`force-disconnect checksum-File doesn't exist on the server: media/lua/shared/pzopt/pzopt_keybinding.lua`,
+the reported message. A killed client leaves "User is already connected" on the server;
+`kickuser` on its console clears it.

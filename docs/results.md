@@ -1501,3 +1501,40 @@ Weathers: `weather=save` (clear), `fog=heavy` (1.0), `weather=storm` (lightning 
   over 33 ms in all four; GPU at 97–98 % (the wall since the 400 fps pass), storm re-bakes spread by
   `lightingRebakeBudget`. The mod's "fps" figure in its report is Lua ticks per 10 s window (~half the presented
   frames on this uncapped route), not the frame rate.
+
+## 2026-09-21 (21:30–22:20): multiplayer — 120 km/h drive as a client of a stock dedicated server
+
+Does the client-side work hold up in multiplayer? The client (this desktop, overrides installed) joins a
+stock dedicated server running on the same PC (`harness/mp/server.sh`: a hardlinked copy of the game dir
+with every pzopt file removed, its own `-cachedir`, `DoLuaChecksum=true`, `SpeedLimit=150` — the server
+option caps every vehicle at 70 km/h by default — anti-cheat off, spawn point on the route start). The
+server has its own fresh world: the single-player bench save's `map_meta.bin` does not load on a server
+(invalid room metaIDs, then a `BufferUnderflow`), so the scene is the same map with a different
+population and the world's own wrecks; route `E:800` because a wreck blocks the road at ~8820.
+`harness/mp/run.sh <label> [stock]`: `pzopt.Harness` in its multiplayer path (teleport to `start=`,
+`/addvehicle` as admin, seat, turn the physics body once the client has authority, corridor sweep of
+leftover vehicles at start and end), `--no-mangohud`, in-game overlay log. Stock = the per-key stock
+property list (the Let Me Drive! runs' set plus the storm-parity keys off); the two stock runs hit
+nothing, `opt-11` hit two zombies (54 and 42 km/h dips), `opt-12` ended on the previous run's car at the
+route end (the corridor sweep was added after it; `opt-14` ran on the swept road and matches). Same 27 s window from the route start for every run
+(`harness/mp/window.py`, the stock runs' whole route); the single-player `pzo-drive120-*` runs of the
+morning over the same window for reference.
+
+| run | fps | mean / p50 / p99 / p99.9 / max ms | < 240 fps | CPU | GPU busy | game thread | render thread |
+|---|---|---|---|---|---|---|---|
+| `mp-drive120-stock-1` | 208.0 | 4.8 / 2.8 / 18.6 / 21.5 / 25.2 | 32 % | 22 % | 89 % | 69 % | 79 % |
+| `mp-drive120-stock-2` | 208.4 | 4.8 / 2.8 / 18.4 / 20.9 / 22.6 | 32 % | 22 % | 88 % | 68 % | 79 % |
+| `mp-drive120-opt-11` | **523.1** | 1.9 / 1.2 / 13.7 / 20.7 / 26.7 | 6 % | 23 % | 96 % | 57 % | 29 % |
+| `mp-drive120-opt-12` | **501.1** | 2.0 / 1.2 / 13.9 / 19.7 / 23.7 | 7 % | 12 % | 98 % | 37 % | 28 % |
+| `mp-drive120-opt-14` (after the corridor sweep: clean route, no collision) | **502.8** | 2.0 / 1.2 / 14.1 / 19.3 / 26.7 | 7 % | | 98 % | | |
+| `pzo-drive120-stock` (single player) | 205.4 | 4.9 / 3.0 / 15.1 / 19.4 / 49.7 | 36 % | | | | |
+| `pzo-drive120-opt` (single player) | 548.7 | 1.8 / 1.4 / 7.7 / 14.1 / 25.4 | 5 % | | | | |
+
+Multiplayer keeps the gain: 208 → 501–523 fps mean (2.4–2.5x, the single-player ratio is 2.7x), mean
+frame 4.8 → 2.0 ms, and the GPU is the wall again (96–98 % busy) with the render thread at 29 % of a
+core instead of 79 %. The tail is worse than in single player on both sides (stock p99 18.5 vs 15.1 ms,
+optimized 13.8 vs 7.7): the client applies the server's vehicle and zombie updates on the game thread
+and the fresh world has a real population where the bench save is quiet, so a good part of the
+optimized tail here is zombies streaming in beside the road, not the render path. The 1200-tile route
+and the bench-save scene are not reproducible on a server; treat these as "the gain survives
+multiplayer", not as a number to compare to the single-player rows.

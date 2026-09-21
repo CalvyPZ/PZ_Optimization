@@ -133,6 +133,21 @@ Baselines: `baseline/native/` (native build, use these), `baseline/5120x2160/` a
 (still fine for chunk latency). Noise floor = spread between the two stock runs; a change is
 real above twice that.
 
+## Multiplayer runs (harness/mp, 2026-09-21)
+
+`harness/mp/server.sh setup|start|stop|up|cmd` runs a stock dedicated server on this PC (hardlinked copy of
+the game dir without any pzopt file at `/games/.../pzsrv-stock`, cachedir `/tmp/pzsrv-home`, transient user
+unit `pzsrv.service`, stdin from `tail -f /tmp/pzsrv-cmds.txt`). `harness/mp/run.sh <label> [stock]` joins
+it with run.sh (`-Dzomboid.steam=0`, `-Dargs.server.connect=127.0.0.1:16261`) and a throw-away
+`media/lua/client/pzopt/pzopt_devjoin.lua` that clicks through the connect popup and character creation;
+`pzopt.Harness` handles the rest when `GameClient.client` (teleport wait, `/addvehicle`, seating, physics
+authority, corridor sweep of leftover vehicles). Facts that cost time: the SP bench save does not load on a
+server (own fresh world instead, route `E:800`); the server rewrites its ini at start and shutdown, edit it
+stopped, `SpeedLimit` max 150 (default 70 caps every car); `/addvehicle` right at world-ready answers
+"Invalid location" (chunk not loaded), the harness repeats it at 8 s; a killed client stays connected
+(`kickuser`); ufw blocks the ports on diego-flip and the Mac sleeps, hence localhost. Compare runs over the
+same window with `harness/mp/window.py <run>:27 ...`; results in `docs/results.md` (2026-09-21 21:30).
+
 ## Analysis scripts
 
 | Script | Reads | Gives |

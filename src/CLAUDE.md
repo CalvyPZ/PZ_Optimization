@@ -18,7 +18,7 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
   (2026-09-20 evening): core.opengl.VBORenderer (batch buffer size, single-advance quad) and
   iso.IsoPuddles (pack / append / draw pieces for the puddle cache), iso.weather.fx.ParticleRectangle and
   WeatherParticleDrawer (rain tiles: template once, one draw per screen cell), and iso.LightingJNI
-  (harness `see_all` view for the Louisville preset, 2026-09-20 night), and iso.weather.fog.ImprovedFog + ImprovedFogDrawer and core.textures.MultiTextureFBO2 (one-pass fog, the offscreen depth as a texture, 2026-09-21). Inner classes
+  (harness `see_all` view for the Louisville preset, 2026-09-20 night), and iso.weather.fog.ImprovedFog + ImprovedFogDrawer and core.textures.MultiTextureFBO2 (one-pass fog, the offscreen depth as a texture, 2026-09-21), and network.NetChecksum (the pzopt Lua files left out of the multiplayer Lua checksum, 2026-09-21). Inner classes
   are shadowed too.
   **Every edit is described in prose in `docs/override-edits.md` and marked `// pzopt:` in the
   source.** After a game update, `scripts/regen-overrides.sh` decompiles the new jar so the
@@ -60,6 +60,7 @@ Three Java source roots, compiled together by `scripts/build.sh`, plus `src/lua/
 | `TreeBake` | the tree pass of the chunk-texture bake (`treeBakePass`, issue #5): geometry helpers (a tree sprite's rectangle in a chunk texture's space, the neighbour textures' rectangles, `needsCopy`, the depth tilt of one level's depth per level of height) and the pooled `Drawer` that draws the quads on the render thread through VBORenderer's position/colour/uv/depth format under GL_LEQUAL; `FBORenderCell.pzoptBakeTrees` fills it after the top level of every texture, with the neighbours' trees that reach beyond their own texture; `tests/pzopt/TreeBakeTest` |
 | `FogPass` | heavy fog (`ImprovedFog`) in one pass (`fogPass`, `fogScalePct`, 2026-09-21): the render thread draws all fog rectangles of the frame in one draw call into a fog buffer of `fogScalePct` % of the viewport, depth-tested against the scene depth (read in place: the offscreen buffer's depth is a texture since the `MultiTextureFBO2` edit; below 100 % reduced per block to its nearest value), noise sampled through a mipmapped sampler, and composites it once (premultiplied; depth-aware at edges so thin objects keep their fog); the game thread skips the per-square walk that only fed the row iterator and builds the rows from per-chunk fog masks (`fogMaskFrames`). Stock shaded every pixel up to twelve times with one draw call per row segment. Falls back to the stock drawer if a depth copy or shader is refused. `docs/findings-fog-2026-09-21.md` |
 | `GpuSections` | GPU time per named frame section from `GL_TIMESTAMP` queries riding the sprite stream (`gpuSections=true`, measurement only; printed in the periodic FBORenderCell log line) |
+| `LuaChecksum` | which Lua files stay out of the multiplayer Lua checksum (`luaChecksumExempt`, 2026-09-21): the client-only `media/lua/*/pzopt/` files, like stock's `SandboxVars.lua`; a server without them refused the join |
 | `Overrides` / `Guard` / `BuildInfo` / `Log` | install checks, build stamp, logging |
 
 Design notes carried from memory:

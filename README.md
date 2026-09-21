@@ -864,7 +864,7 @@ in as loose files and removed by deleting them; the jar's checksum never changes
 "manual class replacement" method described on the
 [PZ wiki's Java page](https://pzwiki.net/wiki/Java).
 
-Shadowed classes (40 game classes plus one from-scratch shim):
+Shadowed classes (41 game classes plus one from-scratch shim):
 
 | Area | Classes |
 |---|---|
@@ -873,6 +873,7 @@ Shadowed classes (40 game classes plus one from-scratch shim):
 | Weather | `zombie.iso.IsoPuddles`, `zombie.iso.weather.fx.ParticleRectangle`, `zombie.iso.weather.fx.WeatherParticleDrawer`, `zombie.iso.weather.fog.ImprovedFog`, `zombie.iso.weather.fog.ImprovedFogDrawer`, `zombie.core.textures.MultiTextureFBO2` |
 | Boot and load | `zombie.fileSystem.FileSystemImpl`, `zombie.fileSystem.TexturePackDevice`, `zombie.tileDepth.TileDepthTextures`, `zombie.core.textures.TextureIDAssetManager`, `zombie.core.textures.ImageData`, `zombie.MapCollisionData`, `zombie.iso.IsoMetaGrid`, `zombie.gameStates.GameLoadingState`, `zombie.buildingRooms.BuildingRoomsEditor`, `zombie.core.skinnedmodel.advancedanimation.AnimationSet`, `zombie.core.skinnedmodel.model.AnimationAssetManager`, `zombie.core.skinnedmodel.model.Model`, `zombie.scripting.ScriptParser`, `zombie.scripting.objects.Item`, `se.krka.kahlua.luaj.compiler.LuaCompiler` |
 | Window shims | `org.lwjglx.opengl.Display`, `org.lwjglx.input.Mouse` |
+| Multiplayer | `zombie.network.NetChecksum` |
 | From scratch | `zombie.gameStates.TISLogoState` |
 
 The edited sources live under `src/overrides/` with every change marked `// pzopt:` and
@@ -909,7 +910,8 @@ Safety rails:
   server. Joining a community server used to fail with `File doesn't exist on the server:
   media/lua/shared/pzopt/pzopt_keybinding.lua` (the client lists every `media/lua` file to the
   server); since 2026-09-21 the `NetChecksum` override leaves the `pzopt/` Lua files out of that
-  list (`luaChecksumExempt`), as the game does for `SandboxVars.lua`. Several shadowed classes
+  list (`luaChecksumExempt`), as the game does for `SandboxVars.lua`; verified against a stock
+  dedicated server (join succeeds; `luaChecksumExempt=false` reproduces the refusal). Several shadowed classes
   (`IsoChunk`, `WorldStreamer`, `ChunkSaveWorker`, `IsoMetaGrid`) also run on a server, and
   hosting with the overrides installed has not been exercised. Do not install on a dedicated server.
 - **Fog pass (experimental).** With `fogPass` on (the default) power lines can flicker

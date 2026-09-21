@@ -71,6 +71,15 @@ import zombie.vehicles.BaseVehicle;
  * normal CarController input path and completes from observed vehicle
  * displacement, so it never teleports the player or removes them from the
  * vehicle.
+ *
+ * Multiplayer client (GameClient.client, harness/mp/run.sh, 2026-09-21): vehicles belong to the server, so
+ * drive mode leaves any vehicle the character was saved in, applies start= (MP_TELEPORT: waits for the
+ * square to load), asks the server for the vehicle with the admin command "/addvehicle <script> x,y,0" on
+ * the nearest road and waits for it to stream in (MP_VEHICLE, the request is repeated at 8 s because the
+ * first one lands before the server has the chunk), seats the player, and turns the physics body only
+ * once the client holds the vehicle's authority (MP_ALIGN; a rotation set earlier is overwritten by the
+ * next VehicleUpdate). mpCleanup asks the server to remove leftover vehicles in the route corridor at the
+ * start and the end of a run (the harness car included), so runs do not pile cars up at the route end.
  */
 public final class Harness {
    /** True when the flag file asks for a bench run; decided once at class init so the frame hook stays a boolean test. */
@@ -78,7 +87,15 @@ public final class Harness {
          || "play".equals(HarnessFlags.get("mode"));
    /** play: a copy of a real save with the scene flags applied (weather, hour, torch) and the player left alone: no god mode, no ghost, no route, no quit. */
    private static final boolean PLAYING = "play".equals(HarnessFlags.get("mode"));
-   private static final int IDLE = 0, WAIT_WORLD = 1, SETTLE = 2, RUN = 3, LINGER = 5, DONE = 4, PLAY = 6;
+   private static final int IDLE = 0, WAIT_WORLD = 1, SETTLE = 2, RUN = 3, LINGER = 5, DONE = 4, PLAY = 6, MP_VEHICLE = 7, MP_ALIGN = 8, MP_TELEPORT = 9;
+   /** Multiplayer client (drive mode): the road square the server was asked to put the vehicle on, and when. */
+   private static zombie.iso.IsoGridSquare mpRoad;
+   private static zombie.iso.IsoDirections mpDir;
+   private static long mpAskedNs;
+   private static long mpLogSlot = -1;
+   private static long mpSeatedNs;
+   private static int mpStartX, mpStartY;
+   private static boolean mpRepeated;
    private static long lingerUntilEpochMs;
    /** Instant the route starts (unix ms), fixed at world-ready: max(route_start_epoch, world ready + settle). */
    private static long plannedStartEpochMs;
@@ -275,7 +292,7 @@ public final class Harness {
                    return;
                 }
                 String startFlag = HarnessFlags.get("start", "").trim();
-                if (!startFlag.isEmpty() && !driving) {
+                if (!startFlag.isEmpty() && (!driving || zombie.network.GameClient.client)) {
                    // far start (flag start=X,Y): after the scene (population multipliers) so the chunks the jump
                    // loads are generated with them; the settle time covers the reload burst
                    String[] xy = startFlag.split(",");
@@ -286,54 +303,115 @@ public final class Harness {
                 }
                 if (driving) {
                    vehicle = p.getVehicle();
+                   if (vehicle != null && zombie.network.GameClient.client) {
+                      // a multiplayer character persists on the server: after a previous run they are still seated
+                      // at the route end. Leave that vehicle and start over from the start square with a fresh one
+                      Log.info("harness: multiplayer: leaving the vehicle the character was saved in (" + vehicle.getScriptName() + " at " + (int)vehicle.getX() + "," + (int)vehicle.getY() + ")");
+                      vehicle.exit(p);
+                      vehicle = null;
+                   }
                    if (vehicle == null && !"none".equals(HarnessFlags.get("vehicle", DEFAULT_VEHICLE))) {
+                      if (zombie.network.GameClient.client) {
+                         // multiplayer client: vehicles are the server's. First let the start teleport land
+                         // (MP_TELEPORT), then ask the server (admin command) and wait for the vehicle to stream
+                         // in (MP_VEHICLE), seat, turn it once the client owns it (MP_ALIGN), then continue as below
+                         if (!startFlag.isEmpty()) {
+                            String[] xy = startFlag.split(",");
+                            mpStartX = Integer.parseInt(xy[0].trim());
+                            mpStartY = Integer.parseInt(xy[1].trim());
+                         } else {
+                            mpStartX = p.getXi();
+                            mpStartY = p.getYi();
+                         }
+                         state = MP_TELEPORT;
+                         stateSinceNs = nowNs;
+                         return;
+                      }
                       // no fixture with the player behind the wheel: put a fresh vehicle on the player's
                       // square and seat them, the same steps as the debug menu's "spawn vehicle"
                       vehicle = spawnAndEnter(p, HarnessFlags.get("vehicle", DEFAULT_VEHICLE));
                    }
-                   if (vehicle == null || !vehicle.isDriver(p)) {
-                      reject("player is not driving a vehicle");
-                      return;
-                   }
-                   vehicleStartX = vehicle.getX();
-                   vehicleStartY = vehicle.getY();
-                   startX = x = vehicleStartX;
-                   startY = y = vehicleStartY;
-                   Log.info("harness: driving fixture valid, vehicle=" + vehicle.getScriptName() + " at " + (int)vehicleStartX + "," + (int)vehicleStartY);
                 } else {
                    p.ensureNotInVehicle();
                    startX = x = p.getX();
                    startY = y = p.getY();
                 }
-                Log.info("harness: world ready, player at " + (int)x + "," + (int)y + "," + (int)p.getZ() + "; settling " + settle + "s");
-                Log.info("harness: MangoHud is " + (mangoHudLoaded() ? "loaded" : "NOT loaded") + " in this process");
-                Log.info(ModelShaders.summary()); // how many model loads blocked on the render thread during boot + load
-                long scheduled = Long.parseLong(HarnessFlags.get("route_start_epoch", "0")) * 1000L;
-                long nowMs = System.currentTimeMillis();
-                long earliest = nowMs + (long)(settle * 1000);
-                plannedStartEpochMs = Math.max(scheduled, earliest);
-                if (scheduled > 0) {
-                   // slack between the earliest possible route start (now + settle) and the fixed schedule; negative = the
-                   // route starts LATE and the harness --lead needs to grow
-                   Log.info("harness: route scheduled in " + (scheduled - nowMs) / 1000 + "s; lead margin after the settle time " + (scheduled - earliest) / 1000 + "s");
-                } else {
-                   Log.info("harness: route starts in " + settle + "s (no fixed schedule)");
-                }
-                long logSecs = Long.parseLong(HarnessFlags.get("mangohud_secs", "0"));
-                if (logSecs > 0 && HarnessFlags.get("mangohud_end_epoch", "").isEmpty()) {
-                   derivedLogEndEpochMs = plannedStartEpochMs - 3000L + logSecs * 1000L + 1000L;
-                }
-                writeSchedule(nowMs);
-                // zoom flag: "max" (drive mode default) or a level such as 2.5 / 1.0; unset = whatever the save had.
-                // Forced here, at the start of the settle time, so the burst of chunk-texture bakes a zoom change
-                // causes (hundreds of chunk levels come on screen at once: a 280 ms frame) is over before the route.
-                String zoomFlag = HarnessFlags.get("zoom", driving ? "max" : "");
-                if (!zoomFlag.isEmpty() && !forceZoom(p, zoomFlag)) {
-                   reject("could not force zoom " + zoomFlag);
+                if (!worldReady(p, nowNs)) {
                    return;
                 }
-               state = SETTLE;
+            }
+         }
+         case MP_TELEPORT -> {
+            int dx = p.getXi() - mpStartX, dy = p.getYi() - mpStartY;
+            boolean there = dx * dx + dy * dy <= 9 && p.getCurrentSquare() != null; // the square is null until the chunk arrives
+            if ((there || nowNs - stateSinceNs > 8_000_000_000L) && p.getCurrentSquare() != null) {
+               Log.info("harness: multiplayer: player at " + p.getXi() + "," + p.getYi() + (there ? " (start reached)" : " (start NOT reached within 8 s, continuing from here)") + " " + (nowNs - stateSinceNs) / 1_000_000 + " ms after the teleport");
+               mpRequestVehicle(p, HarnessFlags.get("vehicle", DEFAULT_VEHICLE));
+               state = MP_VEHICLE;
                stateSinceNs = nowNs;
+            } else if ((nowNs - stateSinceNs) / 1_000_000_000L >= 2 && (nowNs - stateSinceNs) % 2_000_000_000L < 20_000_000L) {
+               p.teleportTo(mpStartX, mpStartY, 0); // re-issue every ~2 s; the server may have snapped the first one back
+            }
+         }
+         case MP_VEHICLE -> {
+            BaseVehicle v = mpFindVehicle(p);
+            long waited = (nowNs - mpAskedNs) / 1_000_000L;
+            if (v == null && waited / 2000 != mpLogSlot) {
+               // every 2 s: what the client sees, and one repeat of the request at 8 s (the server answers
+               // "Invalid location" while the chunk is still loading around the freshly placed player)
+               mpLogSlot = waited / 2000;
+               StringBuilder sb = new StringBuilder();
+               int n = 0;
+               if (p.getCell() != null) {
+                  for (BaseVehicle o : p.getCell().getVehicles()) {
+                     n++;
+                     if (o != null && mpRoad != null && n <= 6) {
+                        sb.append(' ').append(o.getScriptName()).append('#').append(o.getId()).append('@').append((int)o.getX()).append(',').append((int)o.getY()).append(o.getDriver() != null ? "(driven)" : "");
+                     }
+                  }
+               }
+               Log.info("harness: multiplayer: waiting for the vehicle, " + waited / 1000 + " s, " + n + " vehicles in the cell:" + sb);
+               if (mpLogSlot == 4 && !mpRepeated) {
+                  mpRepeated = true;
+                  zombie.network.GameClient.SendCommandToServer("/addvehicle " + HarnessFlags.get("vehicle", DEFAULT_VEHICLE) + " " + (mpRoad.x + 1) + "," + mpRoad.y + ",0");
+                  Log.info("harness: multiplayer: repeated the /addvehicle request");
+               }
+            }
+            if (v != null) {
+               vehicle = mpSeat(p, v, HarnessFlags.get("vehicle", DEFAULT_VEHICLE));
+               if (vehicle == null) {
+                  reject("could not seat the player in the server's vehicle");
+                  return;
+               }
+               mpSeatedNs = nowNs;
+               state = MP_ALIGN;
+               stateSinceNs = nowNs;
+            } else if (nowNs - mpAskedNs > 40_000_000_000L) {
+               reject("the server did not deliver a " + HarnessFlags.get("vehicle", DEFAULT_VEHICLE) + " within 40 s of /addvehicle");
+               return;
+            }
+         }
+         case MP_ALIGN -> {
+            // the server owns a vehicle until its driver's client is granted authority (Local); a rotation set
+            // before that is overwritten by the next VehicleUpdate. Once local (or after 3 s), teleport the
+            // physics body to the road heading (setWorldTransform) and carry on
+            boolean local = vehicle.isNetPlayerAuthorization(BaseVehicle.Authorization.Local) || vehicle.isNetPlayerAuthorization(BaseVehicle.Authorization.LocalCollide);
+            if (local || nowNs - mpSeatedNs > 3_000_000_000L) {
+               try {
+                  float angle = (float)(mpDir.toAngle() + Math.PI);
+                  while (angle > Math.PI * 2) angle -= (float)(Math.PI * 2);
+                  vehicle.savedRot.setAngleAxis(angle, 0f, 1f, 0f);
+                  zombie.core.physics.Transform t = new zombie.core.physics.Transform();
+                  vehicle.getWorldTransform(t);
+                  t.setRotation(vehicle.savedRot);
+                  vehicle.setWorldTransform(t);
+                  Log.info("harness: multiplayer: vehicle authority " + (local ? "local" : "still remote after 3 s") + " " + (nowNs - mpSeatedNs) / 1_000_000 + " ms after seating; physics body turned to face " + mpDir);
+               } catch (Exception e) {
+                  Log.warn("harness: multiplayer: could not turn the vehicle: " + e);
+               }
+               if (!worldReady(p, nowNs)) {
+                  return;
+               }
             }
          }
          case SETTLE -> {
@@ -565,6 +643,13 @@ public final class Harness {
       return false;
    }
 
+   /** Total tiles of the parsed route (the corridor swept in multiplayer). */
+   private static float routeLength() {
+      float n = 0f;
+      for (float[] leg : legs) n += leg[2];
+      return n;
+   }
+
    private static void parseRoute(String route) {
       legs.clear();
       for (String part : route.split(",")) {
@@ -614,6 +699,120 @@ public final class Harness {
     * "Enter vehicle" action takes (BaseVehicle.enter -> setPassenger + setVehicle). Returns null if
     * the vehicle could not be placed or entered.
     */
+
+   /**
+    * The player stands (or sits) where the route starts: validate the driving fixture, publish the schedule,
+    * force the zoom and enter SETTLE. False = rejected. Called from WAIT_WORLD, or from MP_VEHICLE once a
+    * multiplayer server has delivered the vehicle.
+    */
+   private static boolean worldReady(IsoPlayer p, long nowNs) {
+      if (driving) {
+         if (vehicle == null || !vehicle.isDriver(p)) {
+            reject("player is not driving a vehicle");
+            return false;
+         }
+         vehicleStartX = vehicle.getX();
+         vehicleStartY = vehicle.getY();
+         startX = x = vehicleStartX;
+         startY = y = vehicleStartY;
+         Log.info("harness: driving fixture valid, vehicle=" + vehicle.getScriptName() + " at " + (int)vehicleStartX + "," + (int)vehicleStartY);
+         if (zombie.network.GameClient.client) {
+            mpCleanup(p, false); // earlier runs' cars and the world's wrecks on the loaded part of the road
+         }
+      }
+      Log.info("harness: world ready, player at " + (int)x + "," + (int)y + "," + (int)p.getZ() + "; settling " + settle + "s");
+      Log.info("harness: MangoHud is " + (mangoHudLoaded() ? "loaded" : "NOT loaded") + " in this process");
+      Log.info(ModelShaders.summary()); // how many model loads blocked on the render thread during boot + load
+      long scheduled = Long.parseLong(HarnessFlags.get("route_start_epoch", "0")) * 1000L;
+      long nowMs = System.currentTimeMillis();
+      long earliest = nowMs + (long)(settle * 1000);
+      plannedStartEpochMs = Math.max(scheduled, earliest);
+      if (scheduled > 0) {
+         // slack between the earliest possible route start (now + settle) and the fixed schedule; negative = the
+         // route starts LATE and the harness --lead needs to grow
+         Log.info("harness: route scheduled in " + (scheduled - nowMs) / 1000 + "s; lead margin after the settle time " + (scheduled - earliest) / 1000 + "s");
+      } else {
+         Log.info("harness: route starts in " + settle + "s (no fixed schedule)");
+      }
+      long logSecs = Long.parseLong(HarnessFlags.get("mangohud_secs", "0"));
+      if (logSecs > 0 && HarnessFlags.get("mangohud_end_epoch", "").isEmpty()) {
+         derivedLogEndEpochMs = plannedStartEpochMs - 3000L + logSecs * 1000L + 1000L;
+      }
+      writeSchedule(nowMs);
+      // zoom flag: "max" (drive mode default) or a level such as 2.5 / 1.0; unset = whatever the save had.
+      // Forced here, at the start of the settle time, so the burst of chunk-texture bakes a zoom change
+      // causes (hundreds of chunk levels come on screen at once: a 280 ms frame) is over before the route.
+      String zoomFlag = HarnessFlags.get("zoom", driving ? "max" : "");
+      if (!zoomFlag.isEmpty() && !forceZoom(p, zoomFlag)) {
+         reject("could not force zoom " + zoomFlag);
+         return false;
+      }
+      state = SETTLE;
+      stateSinceNs = nowNs;
+      return true;
+   }
+
+   /** Multiplayer client: teleport to the nearest road and ask the server (admin) for the vehicle on that square. */
+   private static void mpRequestVehicle(IsoPlayer p, String script) {
+      zombie.iso.IsoGridSquare sq = p.getCurrentSquare();
+      zombie.iso.IsoGridSquare road = findRoad(sq, 40);
+      if (road == null) {
+         Log.warn("harness: no road within 40 tiles of " + sq.x + "," + sq.y + "; asking for the vehicle where the player stands");
+         road = sq;
+      }
+      int[] heading = bestHeading(road, HarnessFlags.get("heading", "auto"));
+      if (heading == null) {
+         heading = new int[]{1, 0, 0, 0};
+      }
+      headingX = heading[0];
+      headingY = heading[1];
+      mpDir = headingX > 0 ? zombie.iso.IsoDirections.E : headingX < 0 ? zombie.iso.IsoDirections.W : headingY > 0 ? zombie.iso.IsoDirections.S : zombie.iso.IsoDirections.N;
+      mpRoad = road;
+      mpAskedNs = System.nanoTime();
+      p.teleportTo(road.x, road.y, 0);
+      // "/addvehicle <script> x,y,z": the server places it at x-1,y-0.1 and repairs it (AddVehicleCommand)
+      zombie.network.GameClient.SendCommandToServer("/addvehicle " + script + " " + (road.x + 1) + "," + road.y + ",0");
+      Log.info("harness: multiplayer: asked the server for " + script + " on the road at " + road.x + "," + road.y + " (player " + sq.x + "," + sq.y + "), heading " + mpDir);
+   }
+
+   /** The vehicle the server delivered: the newest driverless one within 4 tiles of the requested square. */
+   private static BaseVehicle mpFindVehicle(IsoPlayer p) {
+      if (mpRoad == null || p.getCell() == null) {
+         return null;
+      }
+      String want = HarnessFlags.get("vehicle", DEFAULT_VEHICLE);
+      BaseVehicle best = null;
+      for (BaseVehicle v : p.getCell().getVehicles()) {
+         if (v == null || v.getDriver() != null || v.getSquare() == null || !want.equals(v.getScriptName())) continue;
+         float dx = v.getX() - mpRoad.x, dy = v.getY() - mpRoad.y;
+         if (dx * dx + dy * dy <= 16f && (best == null || v.getId() > best.getId())) {
+            best = v;
+         }
+      }
+      return best;
+   }
+
+   /** Point the server's vehicle along the road and seat the player (BaseVehicle.enter sends VehicleEnter itself). */
+   private static BaseVehicle mpSeat(IsoPlayer p, BaseVehicle v, String script) {
+      try {
+         p.getInventory().AddItem(v.createVehicleKey());
+         if (!v.enter(0, p)) {
+            Log.warn("harness: could not seat the player in the server's " + v.getScriptName());
+            return null;
+         }
+         vehicleSpawned = true;
+         String headlights = HarnessFlags.get("headlights", "auto");
+         float hour = Float.parseFloat(HarnessFlags.get("time_of_day", "-1"));
+         boolean lightsOn = "on".equals(headlights) || ("auto".equals(headlights) && hour >= 0f && (hour < 6f || hour >= 20f));
+         v.setHeadlightsOn(lightsOn);
+         Log.info("harness: multiplayer: the server delivered " + v.getScriptName() + " (id " + v.getId() + ") " + ((System.nanoTime() - mpAskedNs) / 1_000_000) + " ms after the request; player seated as driver");
+         return v;
+      } catch (Exception e) {
+         Log.warn("harness: multiplayer vehicle setup failed: " + e);
+         return null;
+      }
+   }
+
    private static BaseVehicle spawnAndEnter(IsoPlayer p, String script) {
       try {
          zombie.iso.IsoGridSquare sq = p.getCurrentSquare();
@@ -971,7 +1170,49 @@ public final class Harness {
          vehicle.setRegulatorSpeed(0f);
          vehicle.getController().clientControls.forceBrake = System.currentTimeMillis(); // updateControls brakes for 1 s
       }
+      if (driving && zombie.network.GameClient.client) {
+         mpCleanup(p, true);
+      }
       quitWhenLogsAreDone();
+   }
+
+   /**
+    * Multiplayer client: the server keeps every vehicle a run leaves behind, so the next run finds the previous
+    * car parked at the route end (and the world's own wrecks on the road). Ask the server (admin, the same
+    * "vehicle remove" client command ISVehicleMechanics uses) to delete every vehicle standing in the route
+    * corridor that this client currently has loaded; at the end of a run the harness's own car too, after
+    * leaving it. Only what is loaded client-side can be named, so the sweep runs at the start and the end.
+    */
+   private static void mpCleanup(IsoPlayer p, boolean end) {
+      if (p == null || p.getCell() == null) {
+         return;
+      }
+      try {
+         float ax = headingX != 0 ? 1f : 0f, ay = headingY != 0 ? 1f : 0f; // along / across the heading
+         float len = Math.max(50f, routeLength() + 60f);
+         int removed = 0;
+         BaseVehicle own = vehicle;
+         if (end && own != null && own.getDriver() == p) {
+            own.exit(p);
+         }
+         for (BaseVehicle v : new ArrayList<>(p.getCell().getVehicles())) {
+            if (v == null) continue;
+            boolean mine = v == own;
+            float along = (v.getX() - startX) * ax * Math.signum(headingX + headingY) + (v.getY() - startY) * ay * Math.signum(headingX + headingY);
+            float across = (v.getX() - startX) * ay + (v.getY() - startY) * ax;
+            boolean onRoute = along >= -20f && along <= len && Math.abs(across) <= 4f;
+            if (!(mine && end) && !onRoute) continue;
+            if (mine && !end) continue;
+            if (!mine && v.getDriver() != null) continue;
+            se.krka.kahlua.vm.KahluaTable args = zombie.Lua.LuaManager.platform.newTable();
+            args.rawset("vehicle", (double)v.getId());
+            zombie.Lua.LuaManager.GlobalObject.sendClientCommand(p, "vehicle", "remove", args);
+            removed++;
+         }
+         Log.info("harness: multiplayer: asked the server to remove " + removed + " vehicle(s) in the route corridor" + (end ? " (the harness car included)" : "") + " at route " + (end ? "end" : "start"));
+      } catch (Exception e) {
+         Log.warn("harness: multiplayer cleanup failed: " + e);
+      }
    }
 
    /**

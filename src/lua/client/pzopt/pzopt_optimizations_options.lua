@@ -152,6 +152,13 @@ local SECTIONS = {
         },
     },
     {
+        title = "Multiplayer",
+        entries = {
+            { key = "luaChecksumExempt", label = "Leave the pzopt Lua files out of the server file check",
+              tip = "When joining a server the game lists every Lua file under media/lua to the server; the three pzopt files (this tab, the frame cap combo, the key binding) only exist on clients and a server without them refused the join with \"File doesn't exist on the server\". They are skipped like the game skips SandboxVars.lua. Applies on the next launch." },
+        },
+    },
+    {
         title = "Performance overlay (F9, or the \"Toggle performance overlay\" key binding)",
         entries = {
             { key = "overlaySampling", label = "Sample frame times and utilization (needed for F9)",
