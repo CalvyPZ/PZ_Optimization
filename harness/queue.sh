@@ -12,6 +12,7 @@
 #   harness/queue.sh submit mp       [--goal ...] [--against ...] [--wait] -- <label> [stock]   # desktop only
 #   harness/queue.sh submit workshop [--wait] --notes "<change notes>" -- --tag win-<rev>-<commit> | --zip <zip>   # desktop only
 #   harness/queue.sh submit cmd      [--install ...] [--wait] --label <name> -- <command>          # desktop only
+#   harness/queue.sh submit media    [--out <file>]... [--wait] --label <name> -- <encode / stitch command>   # desktop only
 #   harness/queue.sh list                      # every job (machine, status, verdict) and the workers
 #   harness/queue.sh machines                  # connection state of every machine, queue depth, bound sessions
 #   harness/queue.sh bind <machine> | unbind   # this session's affinity (submit binds on first use, default desktop)
@@ -23,7 +24,14 @@
 # Session affinity: the session id is $PZQ_SESSION, else $CLAUDE_CODE_SESSION_ID (every Claude Code tool
 # shell has it), else user+parent pid. The first submit (or `bind`) records sessions/<sid>/machine and every
 # later submit of that session goes to the same machine; `--machine` for another one is refused unless
-# `--rebind`. mp, workshop and cmd jobs always run on the desktop (the stock server and the Steam upload are here).
+# `--rebind`. mp, workshop, cmd and media jobs always run on the desktop (the stock server, the Steam upload,
+# the recordings and NVENC are here).
+#
+# Media jobs (encode-av1-hdr.sh, the stitch scripts, ffmpeg): same desktop FIFO as the runs, so an encode
+# can never overlap a benchmark run; they yield to every other pending desktop job (runs first, encodes fill
+# the gaps) and, like runs, wait for any game, run.sh or ffmpeg / gpu-screen-recorder started outside the
+# queue. The result probes every output (--out, or the video / image paths in the command) with ffprobe and
+# flags a video that is not AV1 10-bit PQ/BT.2020 (the publishing rule).
 #
 # Machines (harness/queue/machines.conf): one worker unit per machine (pzq-<m>) runs that machine's jobs
 # FIFO. Remote jobs: rsync harness/ (+ build/classes with --install opt) to the machine's checkout, a
@@ -60,6 +68,7 @@ WS_DIR="$ZOMBOID_DIR/Workshop/PZ_Optimization"
 # tool shell whose command text merely mentions them (a peer's `grep harness/run.sh` must not block the queue)
 GAME_PATTERN='^([^ ]*/)?ProjectZomboid64( |$)'
 BUSY_PATTERN='^(([^ ]*/)?(bash|sh|zsh) )?([^ ]*/)?harness/(mp/run|run|showcase-record)\.sh( |$)|^([^ ]*/)?python3? ([^ ]*/)?harness/ui-drive\.py workshop'
+ENCODE_PATTERN='^([^ ]*/)?(ffmpeg|gpu-screen-recorder|av1an|x265|SvtAv1EncApp)( |$)'   # an encode outside the queue skews a run, a run skews an encode's time
 MONITOR_PERIOD=${PZQ_MONITOR_PERIOD:-5}
 
 die() { echo "queue: $*" >&2; exit 2; }
@@ -88,12 +97,15 @@ next_id() {
   flock -u 8; printf '%04d' "$n"
 }
 
-next_pending() { # [machine]
-  local d
+next_pending() { # [machine]: the oldest pending job there; media jobs only when nothing else is pending
+  local d media=""
   for d in "$JOBS"/*/; do d=${d%/}
     [[ -f "$d/job" && "$(status_of "$d")" == pending ]] || continue
-    [[ -z "${1:-}" || "$(jget "$d" machine)" == "$1" ]] && { echo "$d"; return 0; }
+    [[ -z "${1:-}" || "$(jget "$d" machine)" == "$1" ]] || continue
+    if [[ "$(jget "$d" kind)" == media ]]; then [[ -n "$media" ]] || media="$d"; continue; fi
+    echo "$d"; return 0
   done
+  [[ -n "$media" ]] && { echo "$media"; return 0; }
   return 1
 }
 
@@ -204,8 +216,8 @@ sanitize() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'; }
 
 submit() {
   local kind="${1:-}"; shift || true
-  [[ "$kind" =~ ^(run|mp|workshop|cmd)$ ]] || die "submit run|mp|workshop|cmd [options] -- <arguments>"
-  local install=keep wait=0 start=1 notes="" label="" goal="" against=() parity_against="" cap="" machine="" rebind=0
+  [[ "$kind" =~ ^(run|mp|workshop|cmd|media)$ ]] || die "submit run|mp|workshop|cmd|media [options] -- <arguments>"
+  local install=keep wait=0 start=1 notes="" label="" goal="" against=() parity_against="" cap="" machine="" rebind=0 outs=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --machine) machine="$2"; shift 2 ;;
@@ -219,6 +231,7 @@ submit() {
       --no-start) start=0; shift ;;
       --notes) notes="$2"; shift 2 ;;
       --label) label="$2"; shift 2 ;;
+      --out) outs+=("$2"); shift 2 ;;
       --) shift; break ;;
       *) die "unknown submit option $1 (the job's own arguments go after --)" ;;
     esac
@@ -227,7 +240,7 @@ submit() {
   sid=$(session_id); bound=$(session_machine "$sid")
   # affinity: mp / workshop / cmd are desktop-only; otherwise the session's machine, bound on first use
   if [[ "$kind" != run ]]; then
-    [[ -z "$machine" || "$machine" == desktop ]] || die "$kind jobs run on the desktop only (stock server, Steam upload, local commands)"
+    [[ -z "$machine" || "$machine" == desktop ]] || die "$kind jobs run on the desktop only (stock server, Steam upload, recordings and NVENC, local commands)"
     machine=desktop
   else
     if [[ -n "$machine" ]]; then
@@ -260,6 +273,13 @@ submit() {
     cmd)
       [[ -n "$label" ]] || die "cmd needs --label <name>"
       [[ ${#argv[@]} -gt 0 ]] || die "cmd needs the command after --" ;;
+    media)
+      [[ -n "$label" ]] || die "media needs --label <name>"
+      [[ ${#argv[@]} -gt 0 ]] || die "media needs the encode / stitch command after -- (harness/encode-av1-hdr.sh in out [width], harness/stitch-*.sh, ffmpeg ...)"
+      [[ "$install" == keep ]] || die "--install does not apply to a media job"
+      if [[ ${#outs[@]} -eq 0 ]]; then   # outputs named in the command itself (existing inputs are skipped at result time by mtime)
+        for a in "${argv[@]}"; do [[ "$a" =~ \.(mp4|mkv|webm|mov|gif|jpg|jpeg|png|svg)$ ]] && outs+=("$a"); done
+      fi ;;
   esac
   case "$install" in
     opt|stock|keep) ;;
@@ -276,7 +296,7 @@ submit() {
     echo "id=$id"; echo "kind=$kind"; echo "label=$label"; echo "machine=$machine"; echo "session=$sid"
     echo "cwd=$REPO"; echo "submitter=${PZQ_SESSION:-$USER pid $PPID}"; echo "submitted=$(ts)"
     echo "install=$install"; echo "notes=$notes"; echo "goal=$goal"; echo "against=${against[*]:-}"
-    echo "parity_against=$parity_against"; echo "cap=$cap"; echo "args=${argv[*]}"
+    echo "parity_against=$parity_against"; echo "cap=$cap"; echo "outs=${outs[*]:-}"; echo "args=${argv[*]}"
   } > "$dir/job"
   set_status "$dir" pending
   echo "job $id queued on $machine: $kind $label"
@@ -410,14 +430,17 @@ blocked_note() { # <job> <reason>: the blocked file, one log line per change
   fi
 }
 
-wait_until_free() { # nothing else uses this computer; 1 when the worker was asked to stop meanwhile
-  local d="$1" reason
+foreign_encode() { pgrep -f "$ENCODE_PATTERN" >/dev/null; }
+
+wait_until_free() { # <job> [media]: nothing else uses this computer; 1 when the worker was asked to stop meanwhile
+  local d="$1" kind="${2:-}" reason
   while :; do
     [[ -f "$Q/stop" ]] && return 1
     reason=""
     if game_running; then reason="the game is running outside the queue (pid $(pgrep -f "$GAME_PATTERN" | head -1))"
     elif foreign_run; then reason="a run outside the queue is going: $(pgrep -fa "$BUSY_PATTERN" | head -1 | cut -c1-120)"
-    elif session_locked; then reason="the desktop session is locked"; fi
+    elif foreign_encode; then reason="an encode outside the queue is going: $(pgrep -fa "$ENCODE_PATTERN" | head -1 | cut -c1-120)"
+    elif [[ "$kind" != media ]] && session_locked; then reason="the desktop session is locked"; fi
     if [[ -z "$reason" ]]; then rm -f "$d/blocked"; return 0; fi
     blocked_note "$d" "$reason"; sleep 20
   done
@@ -711,6 +734,31 @@ result_cmd() {
   echo "--- output tail"; grep -v '^\[queue' "$d/output.log" | tail -30
 }
 
+result_media() { # <job> <rc> <cwd> <since>: ffprobe every output written by the job; the publishing rule is AV1 10-bit PQ/BT.2020
+  local d="$1" rc="$2" cwd="$3" since="$4" o f probe codec pix trc prim w h dur size ok
+  echo "--- outputs"
+  for o in $(jget "$d" outs); do
+    f="$o"; [[ "$f" = /* ]] || f="$cwd/$o"
+    if [[ ! -f "$f" ]]; then echo "output=$o missing"; continue; fi
+    if [[ ! "$f" -nt "$d/started" ]]; then echo "input=$o (older than the job; not written by it)"; continue; fi
+    size=$(stat -c %s "$f")
+    case "$f" in
+      *.mp4|*.mkv|*.webm|*.mov)
+        probe=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,width,height,color_primaries,color_transfer,color_space:format=duration -of default=nw=1 "$f" 2>/dev/null | tr '\n' ' ')
+        codec=$(sed -n 's/.*codec_name=\([^ ]*\).*/\1/p' <<<"$probe"); pix=$(sed -n 's/.*pix_fmt=\([^ ]*\).*/\1/p' <<<"$probe")
+        trc=$(sed -n 's/.*color_transfer=\([^ ]*\).*/\1/p' <<<"$probe"); prim=$(sed -n 's/.*color_primaries=\([^ ]*\).*/\1/p' <<<"$probe")
+        w=$(sed -n 's/.*width=\([^ ]*\).*/\1/p' <<<"$probe"); h=$(sed -n 's/.*height=\([^ ]*\).*/\1/p' <<<"$probe"); dur=$(sed -n 's/.*duration=\([^ ]*\).*/\1/p' <<<"$probe")
+        if [[ "$codec" == av1 && "$pix" == yuv420p10le && "$trc" == smpte2084 && "$prim" == bt2020 ]]; then ok=yes; else ok=no; fi
+        echo "output=$o ${w}x${h} ${dur%.*} s $((size / 1048576)) MB codec=$codec pix_fmt=$pix transfer=$trc primaries=$prim hdr_av1_ok=$ok"
+        [[ "$ok" == yes ]] || echo "  WARNING: not AV1 10-bit PQ/BT.2020; every video published under docs/media/ must be (harness/encode-av1-hdr.sh)" ;;
+      *)
+        probe=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,nb_frames -of default=nw=1 "$f" 2>/dev/null | tr '\n' ' ')
+        echo "output=$o $((size / 1024)) KB $probe" ;;
+    esac
+  done
+  echo "--- output tail"; grep -v '^\[queue' "$d/output.log" | tail -25
+}
+
 # --- the worker ------------------------------------------------------------------------------------------
 
 run_job() {
@@ -721,7 +769,7 @@ run_job() {
   say "job $(job_id "$d") start on $m: $kind $label (from $cwd)"
   echo "[$(ts)] job $(job_id "$d") $kind $label on $m, session $(jget "$d" session)" >> "$d/output.log"
   if is_local "$m"; then
-    if ! wait_until_free "$d"; then set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
+    if ! wait_until_free "$d" "$kind"; then set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
     rc=0
     if [[ "$kind" == workshop ]] && ! ensure_steam "$d"; then rc=1; fi
     if (( rc == 0 )) && ! apply_install "$d" "$install" "$cwd"; then rc=1; fi
@@ -730,10 +778,11 @@ run_job() {
         run) launch "$d" "$cwd" harness/run.sh "${argv[@]}"; rc=$? ;;
         mp) launch "$d" "$cwd" harness/mp/run.sh "${argv[@]}"; rc=$? ;;
         cmd) launch "$d" "$cwd" "${argv[@]}"; rc=$? ;;
+        media) launch "$d" "$cwd" "${argv[@]}"; rc=$? ;;
         workshop) workshop_job "$d" "$cwd" "$notes" "${argv[@]}"; rc=$? ;;
       esac
     fi
-    [[ "$kind" != workshop ]] && run=$(newest_run_dir "$cwd" "$label" "$since")
+    [[ "$kind" =~ ^(run|mp|cmd)$ ]] && run=$(newest_run_dir "$cwd" "$label" "$since")
   else
     if ! wait_until_connected "$d" "$m"; then set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
     remote_job "$d" "$m" "$cwd" "$label" "$install" "${argv[@]}"; rc=$?
@@ -747,6 +796,7 @@ run_job() {
       mp) result_mp "$d" "$rc" "$cwd" "$run" ;;
       workshop) result_workshop "$d" "$rc" "$cwd" ;;
       cmd) result_cmd "$d" "$rc" "$cwd" "$run" ;;
+      media) result_media "$d" "$rc" "$cwd" "$since" ;;
     esac
     [[ -f "$Q/left-stock" ]] && echo "note: the game is stock now (--install stock); reinstalled from $(cat "$Q/left-stock") when the desktop queue drains"
   } > "$d/result.txt" 2>&1

@@ -1,6 +1,6 @@
 ---
 name: run-queue
-description: Schedule any game run (bench, drive, preset, verify, multiplayer, Workshop upload, showcase recording) through harness/queue.sh on the desktop or one of the laptops (flip, dell, mac) and read its result file. Use whenever a run has to happen - instead of launching run.sh, mp/run.sh, ui-drive.py or an ssh wrapper by hand - and when asked what the queue, a machine or a session is doing.
+description: Schedule any game run (bench, drive, preset, verify, multiplayer, Workshop upload, showcase recording) or media encode / stitch through harness/queue.sh on the desktop or one of the laptops (flip, dell, mac) and read its result file. Use whenever a run has to happen - instead of launching run.sh, mp/run.sh, ui-drive.py or an ssh wrapper by hand - and for every ffmpeg / encode-av1-hdr.sh / stitch-*.sh job (they must never overlap a run); also when asked what the queue, a machine or a session is doing.
 ---
 
 # The run queue
@@ -8,7 +8,9 @@ description: Schedule any game run (bench, drive, preset, verify, multiplayer, W
 One queue for every session and every computer. You submit; a worker runs your job when the
 machine is free; the result lands in a file; you get an event when it ends or when your machine
 disconnects. Never launch `harness/run.sh`, `harness/mp/run.sh`, `harness/showcase-record.sh`,
-`harness/ui-drive.py workshop` or an ssh wrapper yourself while the queue exists.
+`harness/ui-drive.py workshop`, an ssh wrapper, or an encode (`ffmpeg`, `harness/encode-av1-hdr.sh`,
+`harness/stitch-*.sh`) yourself while the queue exists: an encode running beside a benchmark corrupts
+its readings and the benchmark stretches the encode.
 
 ## 1. Where am I, what is going on
 
@@ -49,11 +51,20 @@ harness/queue.sh submit run --install stock -- --label <name>-stock ...      # o
 harness/queue.sh submit mp -- <label> [stock]                                   # 120 km/h drive against the stock dedicated server
 harness/queue.sh submit workshop --notes "Release <commit> (game revision <rev>). ..." -- --tag win-<rev>-<commit>
 harness/queue.sh submit cmd --label <name> -- harness/showcase-record.sh storm120 opt
+
+# media: every encode, re-encode, stitch or GIF render (desktop only; shares the FIFO with the runs, so it
+# can never overlap one; runs go first, encodes fill the gaps; waits for any ffmpeg / run started outside the queue)
+harness/queue.sh submit media --label <name> -- harness/encode-av1-hdr.sh <in.mp4> docs/media/<name>.mp4 [width]
+harness/queue.sh submit media --label <name> -- harness/stitch-storm-sbs.sh
+harness/queue.sh submit media --label <name> --out docs/media/<name>.mp4 --out docs/media/<name>.jpg -- python3 harness/stitch-showcase.py
+harness/queue.sh submit media --label <name> -- ffmpeg -y -i <in> ... docs/media/<out>.gif
 ```
+`--out` names the files to probe when the command does not list them; otherwise every video / image path
+in the command that the job wrote is probed.
 
 Options before `--`: `--machine`, `--rebind`, `--install opt|stock|keep|<repo>`, `--goal "..."`,
 `--against <run|baseline.json>` (repeatable), `--parity-against <recorded run>`, `--cap N`, `--wait`,
-`--notes` (workshop), `--label` (cmd). `submit` prints the job id, its dir, the `result.txt` path and how
+`--notes` (workshop), `--label` (cmd, media), `--out <file>` (media, repeatable). `submit` prints the job id, its dir, the `result.txt` path and how
 many jobs are ahead on that machine; it starts the worker and the connection monitor when they are not
 running. A disconnected laptop still accepts the job; it waits (`blocked: <m> disconnected`) and runs
 when the machine is back.
@@ -96,7 +107,10 @@ do not answer the goal (read the judge block); `invalid (no run)` means run.sh n
 (read `log`). `exit=70` = the connection to the laptop was lost mid-run. For `mp`: the mp summary,
 `window.py <run>:27` and the same verdict. For `workshop`: the `workshop_log.txt` tail (`Upload
 finished ... : OK`), the change-notes page's newest entry, the Jev-judged UI steps; a failure has
-`failure.png`. Afterwards `analyze-run` as usual (compare.py, dashboard).
+`failure.png`. For `media`: an `output=` line per file with size, duration, `codec= pix_fmt= transfer=
+primaries= hdr_av1_ok=yes|no`; a `WARNING` under any video that is not AV1 10-bit PQ/BT.2020 — never publish
+that file under `docs/media/`, re-encode it with `harness/encode-av1-hdr.sh` (queued) first. Afterwards
+`analyze-run` as usual (compare.py, dashboard).
 
 ## 5. Events: a machine dropped or came back
 
@@ -124,6 +138,9 @@ edit it when a laptop's address or path changes. Details: `harness/CLAUDE.md` "R
 
 - Run `harness/run.sh` (or an ssh wrapper to a laptop) directly while the queue exists, or launch behind a
   running job. The old preflight (`pgrep`, peer messages) is for the queue's own worker now.
+- Start an `ffmpeg` / stitch / GIF encode outside the queue: a benchmark may be running or about to start
+  on this desktop, and both would read wrong. Only short probes (`ffprobe`, a single frame extraction) are
+  fine inline.
 - Submit a run for another session's machine, or rebind without being asked.
 - `stop --now` a queue with other sessions' jobs running.
 - Poll `list` in a loop; use `--wait`, `watch --exit-on any` or `Monitor`.

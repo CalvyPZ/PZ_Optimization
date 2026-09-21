@@ -112,7 +112,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 
 | Skill | Use when |
 |---|---|
-| `run-queue` | scheduling any run (bench / drive / preset / mp / Workshop upload / showcase) on the desktop or a laptop through `harness/queue.sh`, reading its result, reacting to machine events |
+| `run-queue` | scheduling any run (bench / drive / preset / mp / Workshop upload / showcase) on the desktop or a laptop, and every media encode / stitch (never beside a run), through `harness/queue.sh`; reading its result, reacting to machine events |
 | `bench-run` | the run.sh arguments of a measurement run (bench / drive / parity / verify); launch them through `run-queue` |
 | `showcase-drive` | recording the stock-vs-optimized drive videos and the quad stitch |
 | `build-install` | compiling the overrides and installing them into the game dir |

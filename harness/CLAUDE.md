@@ -112,6 +112,7 @@ harness/queue.sh submit run      [--machine desktop|flip|dell|mac] [--install op
 harness/queue.sh submit mp       [--goal ...] [--against ...] [--wait] -- <label> [stock]   # desktop only
 harness/queue.sh submit workshop [--wait] --notes "<change notes>" -- --tag win-<rev>-<commit>   # desktop only
 harness/queue.sh submit cmd      [--install ...] [--wait] --label <name> -- <showcase-record.sh ...>   # desktop only
+harness/queue.sh submit media    [--out <file>]... [--wait] --label <name> -- <encode-av1-hdr.sh | stitch-*.sh | ffmpeg ...>   # desktop only
 harness/queue.sh list | machines | bind <machine> | unbind | watch [--exit-on disconnect|job|any] | events [N]
 harness/queue.sh status | wait | result | log [-f] | cancel <id|label>
 harness/queue.sh start [machine...] | stop [--now]   # monitor + workers (transient user units pzq-monitor, pzq-<m>)
@@ -161,6 +162,13 @@ from the same checkout once the desktop queue drains; `--prop enabled=false` nee
   page's newest entry; `~/Zomboid/.../workshop.txt` copied to `docs/workshop/workshop.txt` (uncommitted). A
   failure keeps `failure.png` and quits the game so the queue goes on.
 - `cmd`: exit code, output tail, the run dir if the command produced one under the label.
+- `media` (every encode / re-encode / stitch / GIF render, 2026-09-21 night): shares the desktop FIFO with
+  the runs, so an encode never overlaps a benchmark on this machine; it yields to every other pending
+  desktop job (runs first, encodes fill the gaps) and both kinds wait for a game, run.sh or
+  `ffmpeg` / `gpu-screen-recorder` started outside the queue. The result probes every output (`--out`, else
+  the video / image paths in the command that the job wrote) with ffprobe: `output=<file> WxH s MB codec=
+  pix_fmt= transfer= primaries= hdr_av1_ok=yes|no`, with a WARNING under a video that is not AV1 10-bit
+  PQ/BT.2020 (the publishing rule).
 
 `cancel` drops a pending job or SIGTERMs a running one's process group (run.sh's EXIT trap restores
 `latestSave.ini`; a remote job's ssh is cut). Logs: `$PZQ_DIR/worker-<m>.log`, `monitor.log`;
