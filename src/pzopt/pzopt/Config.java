@@ -300,6 +300,14 @@ public final class Config {
    public static final boolean OVERLAY_SAMPLING = bool("overlaySampling", false); // measure at all (ring, GL timer queries, sampler thread); off by default since 2026-09-21
    public static final boolean OVERLAY = bool("overlay", false);
    public static final boolean OVERLAY_LOG = bool("overlayLog", false);
+   // The overlay's elements, each a dropdown on the Optimizations tab: "off" or the element's own options.
+   public static final String OVERLAY_STATS = string("overlayStats", "full"); // off | fps (the fps line) | tails (+ p99 / jitter lines) | full (+ utilization)
+   public static final String OVERLAY_TREE = string("overlayTree", "5"); // the game-thread tree: off | 0 (phases only) | 3 | 5 | 8 sub-phases per phase
+   public static final String OVERLAY_VERDICT = string("overlayVerdict", "detailed"); // off | short ("GPU bound") | detailed (+ the two biggest game-thread sub-phases)
+   public static final String OVERLAY_GRAPH = string("overlayGraph", "240"); // the frame-time graph: off | 240 | 480 | 960 frames (2 px each)
+   public static final String OVERLAY_FLAME = string("overlayFlame", "right"); // the game-thread flame graph: off | right (900 px column) | right-wide (1400) | below (under the frame graph)
+   public static final int OVERLAY_FLAME_DEPTH = integer("overlayFlameDepth", 24); // rows of the flame graph (frames from GameWindow.frameStep up)
+   public static final int GAME_THREAD_PROFILE_HZ = integer("gameThreadProfileHz", 100); // game-thread stack samples per second (10..1000); sampling runs when the tree, the flame graph, the detailed verdict or the frame log wants it
    public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent
    public static final String OVERLAY_FONT = string("overlayFont", "CodeMedium");
    public static final String OVERLAY_CORNER = string("overlayCorner", "tl");

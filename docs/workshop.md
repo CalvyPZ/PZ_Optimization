@@ -82,7 +82,9 @@ from `harness/mods-table.py`, scaled to 1920 wide as JPG), `11` the "New! Low-en
 (`docs/media/dell-lowend-comparison.png` from `harness/lowend-table.py`; the image carries the whole
 section's text and the date, the description holds only the `[img]`, see the release-windows skill),
 `12` the "New! macOS support" table (`docs/media/mac-comparison.png` from `harness/mac-table.py`: the
-M1 Pro 120 km/h drive, two-run means, the Terminal install line in the footer; 2026-09-21).
+M1 Pro 120 km/h drive, two-run means, the Terminal install line in the footer; 2026-09-21), `13` the "New! Better
+profiling" card (`docs/media/profiler-card.png` from `harness/profiler-card.py`: the whole F9 overlay cropped from a
+recorded run, `docs/media/profiler-overlay-full.png`, with the caption lines; 2026-09-22).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes

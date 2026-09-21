@@ -8,6 +8,9 @@ https://github.com/xD3I/PZ_Optimization
 [url=https://github.com/xD3I/PZ_Optimization#readme][img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.gif[/img][/url]
 [i]Uncapped at 5120x2160 with the overrides on; the strip at the bottom is the in-game overlay (F9), live. The video is on the repository page.[/i]
 
+[h1]New! Better profiling[/h1]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/13-profiler.jpg[/img]
+
 [h1]New! macOS support[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/12-macos.jpg[/img]
 

@@ -8,6 +8,7 @@ samples from the first --skip-seconds (default 20) are dropped: they cover the
 initial world load, which is not what the benchmark measures.
 """
 import json
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -123,6 +124,13 @@ def summarize(run, skip_seconds=20):
         m = mangohud_summary(ov, run / "mangohud.name", bench)
         if m:
             out["overlay"] = m
+    # the overlay's game-thread stack profile (pzopt.GameThreadProfile): what the game thread
+    # spent the route on, by phase / sub-phase / hot method, and what it waited on
+    gt = run / "pzopt-gamethread.out"
+    if gt.exists():
+        g = gamethread_summary(gt, bench)
+        if g:
+            out["gamethread"] = g
     sysmon = run / "sysmon.csv"
     if sysmon.exists() and bench.exists():
         sm = sysmon_summary(sysmon, bench)
@@ -225,6 +233,65 @@ def mangohud_summary(mh, name_file, bench):
     if util:
         out["util"] = util
     return out
+
+
+def gamethread_summary(path, bench):
+    """Shares of the game thread's stack samples over the route window, from the per-second rows
+    of pzopt-gamethread.out (epoch_ms, samples, key=count...; keys p: phase, s: sub-phase,
+    l: hot method, w: wait state + method). Without a route window every row counts."""
+    a = b = None
+    if bench.exists():
+        kv = dict(l.split("=", 1) for l in bench.read_text().splitlines() if "=" in l)
+        if "route_start_epoch_ms" in kv and "route_end_epoch_ms" in kv:
+            a, b = int(kv["route_start_epoch_ms"]), int(kv["route_end_epoch_ms"])
+    hz = None
+    totals = {}
+    samples = seconds = 0
+    for line in path.read_text(errors="replace").splitlines():
+        if line.startswith("#"):
+            m = re.search(r"(\d+) Hz", line)
+            hz = int(m.group(1)) if m else None
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        try:
+            epoch, n = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        # a row covers the second ending at epoch: inside the window if that second overlaps it
+        if a is not None and (epoch < a or epoch - 1000 > b):
+            continue
+        samples += n
+        seconds += 1
+        for kv in parts[2:]:
+            k, _, v = kv.rpartition("=")
+            if k and v.isdigit():
+                totals[k] = totals.get(k, 0) + int(v)
+    if samples == 0:
+        return None
+
+    def family(prefix, n):
+        rows = sorted(((v, k[len(prefix):]) for k, v in totals.items() if k.startswith(prefix)), reverse=True)
+        return [{"name": name, "share": v / samples} for v, name in rows[:n]]
+    # the tree: phases, their sub-phases, the hottest methods under each, waits attached where they happened
+    tree = []
+    for p in family("p:", 8):
+        phase = p["name"]
+        subs = []
+        for s_ in family(f"s:{phase}/", 12):
+            sub = s_["name"]
+            subs.append({
+                "name": sub, "share": s_["share"],
+                "wait_share": sum(v for k, v in totals.items() if k.startswith(f"w:{phase}/{sub}/")) / samples,
+                "hot": family(f"l:{phase}/{sub}/", 3),
+            })
+        tree.append({"name": phase, "share": p["share"], "wait_share": sum(v for k, v in totals.items() if k.startswith(f"w:{phase}/")) / samples, "sub": subs})
+    return {
+        "samples": samples, "seconds": seconds, "hz": hz, "windowed": a is not None,
+        "tree": tree, "hot": family("l:", 12),
+        "wait_share": sum(v for k, v in totals.items() if k.startswith("w:")) / samples,
+    }
 
 
 def sysmon_summary(path, bench):
@@ -398,6 +465,23 @@ def print_summary(s):
             return f"{k} {d['mean']:.0f}{unit} (p10 {d['p10']:.0f}, p90 {d['p90']:.0f})" if d else None
         parts = [x for x in (f("cpu_pct", "%"), f("cpu_busiest_core_pct", "%"), f("game_cpu_pct", "% of a core"), f("gpu_pct", "%"), f("gpu_sm_mhz", "MHz"), f("gpu_w", "W"), f("bat_w", "W battery")) if x]
         print(f"machine (sysmon, {sm[next(iter(sm))]['n']} samples in the route window): " + "; ".join(parts))
+    g = s.get("gamethread")
+    if g:
+        # the tree, biggest first at every level; waits in brackets where they happened; the hottest methods as a hint
+        print(f"game thread ({g['samples']} stack samples over {g['seconds']} s{' in the route window' if g['windowed'] else ''}, {g['hz'] or '?'} Hz), most time first; waiting {g['wait_share'] * 100:.0f}% of it")
+        for p in g["tree"]:
+            if p["share"] < 0.01:
+                continue
+            w = f"  [waiting {p['wait_share'] * 100:.0f}%]" if p["wait_share"] >= 0.005 else ""
+            print(f"  {p['share'] * 100:3.0f}%  {p['name']}{w}")
+            for sub in p["sub"]:
+                if sub["share"] < 0.01:
+                    continue
+                w = f"  [waiting {sub['wait_share'] * 100:.0f}%]" if sub["wait_share"] >= 0.005 else ""
+                hot = "  ".join(f"{h['name'].split('/')[-1]} {h['share'] * 100:.0f}%" for h in sub["hot"] if h["share"] >= 0.01)
+                print(f"      {sub['share'] * 100:3.0f}%    {sub['name']}{w}" + (f"    {hot}" if hot else ""))
+        hot = "  ".join(f"{h['name'].split('/')[-1]} {h['share'] * 100:.0f}%" for h in g["hot"][:8] if h["share"] >= 0.01)
+        print(f"  hottest methods: {hot}")
     t = s.get("threads")
     if t and t["threads"]:
         cores = int(t.get("cores", 0))

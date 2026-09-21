@@ -53,7 +53,8 @@ public final class FrameCap {
 
    // --- main-loop queries -------------------------------------------------------------
 
-   private static boolean inGame() {
+   /** Main thread: loading or playing a save (the loading screen counts), as opposed to the menus. */
+   static boolean inGame() {
       return GameWindow.isIngameState() || GameWindow.states.current instanceof GameLoadingState;
    }
 

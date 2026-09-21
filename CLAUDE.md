@@ -171,6 +171,15 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   thread load, verdict line, frame graph; every harness run also writes `pzopt-overlay.out`
   (MangoHud columns + epoch_ms) and `analyze.py` prints it as `overlay:`. Same numbers on
   Windows/Linux without MangoHud or RivaTuner. The stock "Display FPS" graph (K) is debug-only bars.
+  Since 2026-09-21 night the overlay also says *what* the game thread does (`pzopt.GameThreadProfile`; every overlay element is a
+  tab dropdown, off + its options: `overlayStats`, `overlayTree`, `overlayVerdict`, `overlayGraph`, `overlayFlame`, plus
+  `gameThreadProfileHz`): its stack sampled at 100 Hz off-thread and folded into phases,
+  sub-phases, hot methods and waits (a colour-coded tree in the overlay, biggest first, bars per row; the "game thread bound" verdict names the two biggest);
+  `pzopt-gamethread.out` per run, `analyze.py` prints it as `game thread:`; the folded stacks go to `pzopt-stacks.out` and
+  `harness/flamegraph.py <run>` renders the route as an SVG flame graph (the overlay draws the last 5 s live, `overlayFlame=right` by default;
+  the frame graph has ms / frames axes). First reading on the uncapped spinning
+  route (runs `gtprof-*`): 21 % of the game thread is the frame hand-off wait (`SpriteRenderer.pushFrameDown`, i.e.
+  the GPU is the wall there), then chunk bakes 8 %, lighting JNI 7 %, player 6 %, zombies 4 %.
 - Uncapped 400 fps pass (2026-09-20 evening, runs `u400-*`, in-game overlay log
   only, `--no-mangohud`): spinning route 273 → ~500 fps mean, p99 13.2 → 7.7 ms. Stock option
   `uiRenderOffscreen=true` is +40 % uncapped (runs pass `--option uiRenderOffscreen=true`). Adopted

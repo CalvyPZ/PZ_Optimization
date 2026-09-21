@@ -82,7 +82,8 @@ public final class Overlay {
    private static final long REFRESH_NS = 250_000_000L;
    private static final long UTIL_NS = 500_000_000L;
    private static final int RING = 8192;
-   private static final int GRAPH_BARS = 240;
+   /** Frames in the frame-time graph (2 px each), from {@code overlayGraph}; 0 = no graph. */
+   private static final int GRAPH_BARS = graphBars();
    private static final int QUERIES = 8;
    private static final String BIND = "Toggle performance overlay";
 
@@ -136,6 +137,67 @@ public final class Overlay {
    private static float[] fpsColor = WHITE;
    private static float[] verdictColor = WHITE;
    private static String verdict = "";
+   /** The game-thread tree (pzopt.GameThreadProfile), refreshed with the stats; drawn under the text lines. */
+   private static String profileHeader = "";
+   private static java.util.List<GameThreadProfile.Row> profileRows = java.util.List.of();
+   private static final int PROFILE_SUBS = treeSubs(); // sub-phases shown per phase; -1 = no tree
+   private static final int PROFILE_HOT = 2;  // hot methods hinted per sub-phase
+   private static final int STATS_LINES = statsLines(); // of the four stats lines, how many show (fps / tails / full)
+
+   private static int graphBars() {
+      String v = Config.OVERLAY_GRAPH.trim().toLowerCase(java.util.Locale.ROOT);
+      if (v.equals("off")) {
+         return 0;
+      }
+      try {
+         return Math.max(60, Math.min(RING - 64, Integer.parseInt(v)));
+      } catch (NumberFormatException e) {
+         return 240;
+      }
+   }
+
+   private static int treeSubs() {
+      String v = Config.OVERLAY_TREE.trim().toLowerCase(java.util.Locale.ROOT);
+      if (v.equals("off")) {
+         return -1;
+      }
+      try {
+         return Math.max(0, Math.min(20, Integer.parseInt(v)));
+      } catch (NumberFormatException e) {
+         return 5;
+      }
+   }
+
+   private static int statsLines() {
+      switch (Config.OVERLAY_STATS.trim().toLowerCase(java.util.Locale.ROOT)) {
+         case "off": return 0;
+         case "fps": return 1;
+         case "tails": return 3;
+         default: return 4;
+      }
+   }
+   /** The flame graph boxes of the window (pzopt.GameThreadProfile.flame), laid out in fractions of the panel width at refresh. */
+   private static java.util.List<FlameBox> flameBoxes = java.util.List.of();
+   private static int flameDepth; // rows of boxes (root row included)
+   private static String flameTitle = "";
+   private static final java.util.HashMap<String, Integer> labelWidths = new java.util.HashMap<>();
+
+   static final class FlameBox {
+      final float x0, x1; // fractions of the graph width
+      final int depth;    // 0 = root row (drawn at the bottom)
+      final String name;
+      final float[] color;
+      final float shade;  // per-name brightness, so neighbours of one phase stay apart
+
+      FlameBox(float x0, float x1, int depth, String name, float[] color, float shade) {
+         this.x0 = x0;
+         this.x1 = x1;
+         this.depth = depth;
+         this.name = name;
+         this.color = color;
+         this.shade = shade;
+      }
+   }
    private static float budgetMs = 1000f / 240f;
 
    // --- log ---
@@ -309,6 +371,11 @@ public final class Overlay {
       visible = on;
    }
 
+   /** Whether the frame log is being written (harness runs, {@code overlayLog}): the game-thread profile samples for it too. */
+   static boolean logging() {
+      return LOG;
+   }
+
    /** From {@code Display.imguiEndFrame()} every game-thread frame: toggle key, stats refresh, draw. */
    public static void draw() {
       if (!ACTIVE) {
@@ -318,6 +385,7 @@ public final class Overlay {
       if (toggled()) {
          if (SAMPLING) {
             visible = !visible;
+            steadyLeftW = 0;
             Log.info("overlay: " + (visible ? "shown" : "hidden"));
          } else {
             noticeUntilNs = now + NOTICE_NS;
@@ -338,6 +406,7 @@ public final class Overlay {
       if (gameThreadId < 0) {
          gameThreadId = Thread.currentThread().threadId();
          startUtilSampler();
+         GameThreadProfile.start(gameThreadId); // what the game thread does, for the verdict and the log
       }
       if (!visible || fontFailed) {
          return;
@@ -476,7 +545,7 @@ public final class Overlay {
          prev = ms;
       }
       if (count == 0) {
-         lines = new String[] {"performance overlay: waiting for frames"};
+         lines = STATS_LINES == 0 ? new String[0] : new String[] {"performance overlay: waiting for frames"};
          fpsText = "";
          verdict = "";
          return;
@@ -502,15 +571,34 @@ public final class Overlay {
       String gpu = gpuState < 0 ? "n/a" : String.format(java.util.Locale.ROOT, "%.0f %%", gpuLoad);
       fpsText = String.format(java.util.Locale.ROOT, "%3.0f fps", fps);
       fpsColor = fpsColor(fps, cap);
-      lines = new String[] {
+      String[] all = {
             String.format(java.util.Locale.ROOT, "   %5.2f ms   cap %s", mean, cap > 0 ? cap + " fps" : "none"),
             String.format(java.util.Locale.ROOT, "p50 %.2f   p99 %.2f   p99.9 %.2f   max %.1f ms   (%d frames / %d s)", p50, p99, p999, max, count, (int)(WINDOW_NS / 1_000_000_000L)),
             String.format(java.util.Locale.ROOT, "1%%-low %.0f fps   jitter %.2f ms   spikes >2x median %d", p99 > 0 ? 1000f / p99 : 0f, count > 1 ? jitter / (count - 1) : 0f, spikes),
             String.format(java.util.Locale.ROOT, "GPU %s   game thread %.0f %%   render thread %.0f %%   process %.0f %% of %d cores   machine %.0f %%   heap %.1f/%.1f GB",
                   gpu, gameLoad, renderLoad, processLoad, cores, systemLoad, heapUsed, heapMax),
       };
+      lines = Arrays.copyOf(all, STATS_LINES);
+      if (STATS_LINES == 0) {
+         fpsText = "";
+      }
+      // what the game thread is doing (stack samples): a tree of phases and sub-phases, biggest first
+      // the game-thread tree and the flame graph only once a save is loading or playing: in the menus
+      // the stacks are just menu UI, and the flame column would sit over the menu / Workshop screens
+      boolean world = inGame();
+      profileHeader = PROFILE_SUBS < 0 || !world ? "" : GameThreadProfile.header();
+      profileRows = PROFILE_SUBS < 0 || !world ? java.util.List.of() : GameThreadProfile.tree(PROFILE_SUBS, PROFILE_HOT);
+      if (world) {
+         layoutFlame();
+      } else {
+         flameBoxes = java.util.List.of();
+         flameTitle = "";
+      }
       // verdict against the objective: at the cap, or what is saturated, or nothing is
-      if (cap > 0 && fps >= cap * 0.98f) {
+      String verdictMode = Config.OVERLAY_VERDICT.trim().toLowerCase(java.util.Locale.ROOT);
+      if (verdictMode.equals("off")) {
+         verdict = "";
+      } else if (cap > 0 && fps >= cap * 0.98f) {
          verdict = "at the cap";
          verdictColor = GREEN;
       } else {
@@ -518,6 +606,12 @@ public final class Overlay {
          if (top >= 90f) {
             String who = top == gameLoad ? "game thread" : top == renderLoad ? "render thread" : "GPU";
             verdict = (cap > 0 ? "below cap: " : "") + who + " bound";
+            if (top == gameLoad && verdictMode.equals("detailed") && world) {
+               String detail = GameThreadProfile.verdictDetail(); // the two biggest sub-phases, e.g. "chunk bakes 21 %, zombies 9 %"
+               if (!detail.isEmpty()) {
+                  verdict += ": " + detail;
+               }
+            }
             verdictColor = AMBER;
          } else {
             verdict = (cap > 0 ? "below cap, " : "") + "nothing saturated: waits or sync";
@@ -620,6 +714,138 @@ public final class Overlay {
       }
    }
 
+   private static boolean inGame() {
+      try {
+         return FrameCap.inGame();
+      } catch (Throwable t) {
+         return true; // state machine not up yet or a missing class: do not hide anything
+      }
+   }
+
+   /**
+    * Lays the window's flame graph out as boxes in fractions of the width: root at the bottom (row 0),
+    * callees above their caller, biggest first from the left, coloured by the phase they belong to
+    * (update green, render blue, lighting amber, pzopt frames magenta, the rest grey) with a per-name
+    * shade. Nodes narrower than 1/1000 of the width are dropped; at most {@code overlayFlameDepth} rows.
+    */
+   private static void layoutFlame() {
+      if ("off".equalsIgnoreCase(Config.OVERLAY_FLAME.trim())) {
+         flameBoxes = java.util.List.of();
+         flameTitle = "";
+         return;
+      }
+      GameThreadProfile.Node root = GameThreadProfile.flame();
+      if (root == null) {
+         flameBoxes = java.util.List.of();
+         flameTitle = "";
+         return;
+      }
+      java.util.ArrayList<FlameBox> boxes = new java.util.ArrayList<>(1024);
+      int maxDepth = Math.max(4, Config.OVERLAY_FLAME_DEPTH);
+      int[] deepest = {0};
+      placeFlame(root, 0f, 1f, 0, root.count, GameThreadProfile.C_OTHER_PUBLIC, boxes, maxDepth, deepest);
+      flameBoxes = boxes;
+      flameDepth = maxDepth; // the configured rows, whatever the deepest stack of this window: a steady panel
+      flameTitle = "flame graph, last " + GameThreadProfile.WINDOW_SECONDS + " s (" + root.count + " stacks): root at the bottom, width = share, biggest first";
+   }
+
+   private static void placeFlame(GameThreadProfile.Node n, float x0, float x1, int depth, int total, float[] color, java.util.List<FlameBox> out, int maxDepth, int[] deepest) {
+      if (x1 - x0 < 0.001f || depth >= maxDepth) {
+         return;
+      }
+      float[] c = color;
+      switch (n.name) {
+         case "GameWindow.logic": c = GameThreadProfile.phaseColor("update"); break;
+         case "GameWindow.renderInternal": c = GameThreadProfile.phaseColor("render"); break;
+         case "LightingThread.update": c = GameThreadProfile.phaseColor("lighting"); break;
+         default:
+            if (n.name.startsWith("pzopt.")) {
+               c = GameThreadProfile.C_PZOPT;
+            }
+      }
+      int hh = n.name.hashCode();
+      float shade = 0.72f + 0.28f * ((hh & 0xff) / 255f);
+      out.add(new FlameBox(x0, x1, depth, n.name, c, shade));
+      deepest[0] = Math.max(deepest[0], depth);
+      float x = x0;
+      float span = x1 - x0;
+      for (GameThreadProfile.Node k : n.sortedKids()) {
+         float w = span * k.count / Math.max(1, n.count);
+         placeFlame(k, x, x + w, depth + 1, total, c, out, maxDepth, deepest);
+         x += w;
+      }
+   }
+
+   /** The widest left column drawn since the overlay was shown (see render). */
+   private static int steadyLeftW;
+
+   /** The stats lines with every number at its widest, so the width does not follow the live digits. */
+   private static int statsTemplateWidth(TextManager tm, UIFont font, int fpsW) {
+      if (STATS_LINES == 0) {
+         return 0;
+      }
+      String[] t = {
+            "   88.88 ms   cap 8888 fps",
+            "p50 88.88   p99 88.88   p99.9 888.88   max 8888.8 ms   (88888 frames / 8 s)",
+            "1%-low 8888 fps   jitter 88.88 ms   spikes >2x median 8888",
+            "GPU 888 %   game thread 888 %   render thread 888 %   process 888 % of 88 cores   machine 888 %   heap 88.8/88.8 GB",
+      };
+      int w = 0;
+      for (int i = 0; i < Math.min(STATS_LINES, t.length); i++) {
+         w = Math.max(w, (i == 0 ? fpsW : 0) + labelWidth(tm, font, t[i]));
+      }
+      return w;
+   }
+
+   /** Rows the tree reserves: the three in-game phases, each with its sub-phases, whatever the window shows. */
+   private static int treeRowsReserved() {
+      return 3 * (1 + Math.max(0, PROFILE_SUBS));
+   }
+
+   /** The fixed width of a tree row: bar, a 26-character name, share, a wait share and a 44-character hint. */
+   private static int treeRowWidth(TextManager tm, UIFont font, int indent, int barW, int pctW, int pad) {
+      return indent * 2 + barW + pad + labelWidth(tm, font, "translucent floor objects x") + indent + pctW
+            + labelWidth(tm, font, "  waiting 88 %") + indent + labelWidth(tm, font, "VisibilityPolygon2$Drawer.calculateVisibilityPolygonNew 88 %");
+   }
+
+   /** {@code text} cut with an ellipsis so it measures at most {@code maxW}; empty when even a few characters do not fit. */
+   private static String fit(TextManager tm, UIFont font, String text, int maxW) {
+      if (maxW <= 0) {
+         return "";
+      }
+      if (tm.MeasureStringX(font, text) <= maxW) {
+         return text;
+      }
+      int lo = 0, hi = text.length();
+      while (lo < hi) {
+         int mid = (lo + hi + 1) / 2;
+         if (tm.MeasureStringX(font, text.substring(0, mid) + "\u2026") <= maxW) {
+            lo = mid;
+         } else {
+            hi = mid - 1;
+         }
+      }
+      return lo < 4 ? "" : text.substring(0, lo) + "\u2026";
+   }
+
+   /** A section divider across the panel: a gap, a faint 1 px line, a gap; returns the y below it. */
+   private static int divider(SpriteRenderer sr, int x, int ty, int w, int pad) {
+      sr.renderi(null, x + pad, ty + pad, w - pad * 2, 1, 1f, 1f, 1f, 0.3f, null);
+      return ty + pad * 2 + 1;
+   }
+
+   private static int labelWidth(TextManager tm, UIFont font, String text) {
+      Integer w = labelWidths.get(text);
+      if (w == null) {
+         if (labelWidths.size() > 4096) {
+            labelWidths.clear();
+         }
+         w = tm.MeasureStringX(font, text);
+         labelWidths.put(text, w);
+      }
+      return w;
+   }
+
    private static void render() {
       TextManager tm = TextManager.instance;
       UIFont font = font();
@@ -633,9 +859,102 @@ public final class Overlay {
          textW = Math.max(textW, (i == 0 ? fpsW : 0) + tm.MeasureStringX(font, lines[i]));
       }
       textW = Math.max(textW, tm.MeasureStringX(font, verdict));
-      int w = Math.max(textW, graphW) + pad * 2;
-      int rows = lines.length + (verdict.isEmpty() ? 0 : 1);
-      int h = rows * lineH + graphH + pad * 3;
+      // the game-thread tree: header, then one row per phase / sub-phase with a bar, the name, the share, the hint
+      String header = profileHeader;
+      java.util.List<GameThreadProfile.Row> tree = profileRows;
+      int indent = tm.MeasureStringX(font, "    ");
+      int pctW = tm.MeasureStringX(font, "100 %  ");
+      int barW = Math.min(graphW, 140);
+      String[] treeName = new String[tree.size()];
+      String[] treePct = new String[tree.size()];
+      String[] treeWait = new String[tree.size()];
+      String[] treeHint = new String[tree.size()];
+      int[] treeX = new int[tree.size()]; // x of the name relative to the panel's text start
+      if (!header.isEmpty()) {
+         textW = Math.max(textW, tm.MeasureStringX(font, header));
+      }
+      // a tree row never grows past this: the hint is cut to fit, so the panel width does not follow the names
+      int treeRowMax = treeRowWidth(tm, font, indent, barW, pctW, pad);
+      for (int i = 0; i < tree.size(); i++) {
+         GameThreadProfile.Row r = tree.get(i);
+         treeName[i] = r.name;
+         treePct[i] = String.format(java.util.Locale.ROOT, "%.0f %%", r.pct);
+         treeWait[i] = r.waitPct >= 0.5f ? String.format(java.util.Locale.ROOT, "  waiting %.0f %%", r.waitPct) : "";
+         treeX[i] = indent * (r.depth + 1) + barW + pad;
+         int used = treeX[i] + tm.MeasureStringX(font, r.name) + indent + pctW + tm.MeasureStringX(font, treeWait[i]);
+         treeHint[i] = r.hint.isEmpty() ? "" : fit(tm, font, r.hint, treeRowMax - used - indent);
+      }
+      if (PROFILE_SUBS >= 0) {
+         textW = Math.max(textW, treeRowMax);
+      }
+      // the frame graph gets a y-axis column (ms ticks) and an x-axis row; the flame graph the panel's width
+      String[] yTicks = new String[4]; // 0, 1x, 2x, 3x the cap budget; the unit on the top one
+      for (int i = 0; i < 4; i++) {
+         yTicks[i] = i == 0 ? "0" : String.format(java.util.Locale.ROOT, i == 3 ? "%.1f ms" : "%.1f", budgetMs * i);
+      }
+      int axisW = tm.MeasureStringX(font, yTicks[3]) + pad;
+      int hd = head;
+      int bars = Math.min(GRAPH_BARS, Math.min(hd, RING - 64));
+      float spanMs = 0f;
+      for (int i = 0; i < bars; i++) {
+         spanMs += frameMs[(hd - bars + i) & (RING - 1)];
+      }
+      // the x-axis label under the graph and the legend on a line of its own (it is long; it wraps to two lines when
+      // the graph is narrow), both measured against fixed templates so the panel does not breathe with the numbers
+      String xLabel = String.format(java.util.Locale.ROOT, "last %d frames (%.2f s), oldest to newest", bars, spanMs / 1000f);
+      String legend1 = String.format(java.util.Locale.ROOT, "bars: frame ms, green under 1.1x the %.2f ms budget, amber under 2x, red above; blue: GPU ms; line: the budget", budgetMs);
+      String legend2 = "";
+      boolean graphOn = GRAPH_BARS > 0;
+      int legendW = graphOn ? tm.MeasureStringX(font, legend1) : 0;
+      int graphBlockW = axisW + graphW;
+      if (graphOn && legendW > Math.max(graphBlockW, textW)) {
+         int cut = legend1.indexOf("; blue");
+         legend2 = legend1.substring(cut + 2);
+         legend1 = legend1.substring(0, cut);
+         legendW = Math.max(tm.MeasureStringX(font, legend1), tm.MeasureStringX(font, legend2));
+      }
+      if (graphOn) {
+         textW = Math.max(textW, Math.max(graphBlockW, Math.max(axisW + tm.MeasureStringX(font, "last 9999 frames (99.99 s), oldest to newest"), legendW)));
+      }
+      java.util.List<FlameBox> flame = flameBoxes;
+      String fTitle = flameTitle;
+      int flameRows = flame.isEmpty() ? 0 : flameDepth;
+      int flameRowH = lineH;
+      // the flame graph sits in a column to the right of everything (overlayFlame=right / right-wide, 900 / 1400 px)
+      // or under the frame graph across the panel (below)
+      String flamePos = Config.OVERLAY_FLAME.trim().toLowerCase(java.util.Locale.ROOT);
+      boolean flameRight = flameRows > 0 && !flamePos.equals("below");
+      int flameH = flameRows > 0 ? lineH + flameRows * flameRowH : 0; // title + rows
+      int flameColW = 0;
+      if (flameRight) {
+         flameColW = Math.max(flamePos.equals("right-wide") ? 1400 : 900, tm.MeasureStringX(font, fTitle));
+      } else if (flameRows > 0) {
+         textW = Math.max(textW, tm.MeasureStringX(font, fTitle));
+      }
+      // the stats lines vary by a digit or two between refreshes: measure them against widest-digit templates,
+      // and keep the widest left column seen while the overlay is visible (reset when it is toggled) so
+      // nothing shifts frame to frame
+      textW = Math.max(textW, statsTemplateWidth(tm, font, fpsW));
+      int leftW = Math.max(textW, graphOn ? graphW : 0) + pad * 2;
+      if (leftW < steadyLeftW) {
+         leftW = steadyLeftW;
+      } else {
+         steadyLeftW = leftW;
+      }
+      // sections separated by dividers: frame stats | game-thread tree | verdict | frame graph | flame graph (below)
+      int div = pad * 2 + 1; // a divider: a gap, the 1 px line, a gap
+      int treeRowsReserved = header.isEmpty() ? 0 : 1 + treeRowsReserved(); // fixed once a save is loaded
+      int leftH = pad + lines.length * lineH
+            + (header.isEmpty() ? 0 : div + treeRowsReserved * lineH)
+            + (verdict.isEmpty() ? 0 : div + lineH)
+            + (graphOn ? div + lineH / 2 + graphH + 2 + lineH * (legend2.isEmpty() ? 2 : 3) : 0)
+            + (flameRows > 0 && !flameRight ? div + flameH : 0)
+            + pad;
+      if (leftH <= pad * 2 && flameRows == 0) {
+         return; // every element off: nothing to draw
+      }
+      int w = leftW + (flameRight ? div + flameColW + pad : 0);
+      int h = flameRight ? Math.max(leftH, pad + flameH + pad) : leftH;
       int screenW = Core.getInstance().getScreenWidth();
       int screenH = Core.getInstance().getScreenHeight();
       String corner = Config.OVERLAY_CORNER;
@@ -653,16 +972,57 @@ public final class Overlay {
          tm.DrawString(font, tx, ty, lines[i], 1.0, 1.0, 1.0, 1.0);
          ty += lineH;
       }
+      if (!header.isEmpty()) {
+         ty = divider(sr, x, ty, leftW, pad);
+         tm.DrawString(font, x + pad, ty, header, 1.0, 1.0, 1.0, 1.0);
+         ty += lineH;
+      }
+      for (int i = 0; i < tree.size(); i++) {
+         GameThreadProfile.Row r = tree.get(i);
+         float[] c = r.color;
+         int bx = x + pad + indent * (r.depth + 1);
+         // the bar: the row's share of the window on a 100 % = barW scale, its wait share in red at the left end
+         int bw = Math.max(1, Math.round(barW * r.pct / 100f));
+         sr.renderi(null, bx, ty + 2, bw, lineH - 4, c[0], c[1], c[2], r.depth == 0 ? 0.55f : 0.4f, null);
+         if (r.waitPct >= 0.5f) {
+            int ww = Math.max(1, Math.round(barW * r.waitPct / 100f));
+            sr.renderi(null, bx, ty + 2, ww, lineH - 4, GameThreadProfile.C_WAIT[0], GameThreadProfile.C_WAIT[1], GameThreadProfile.C_WAIT[2], 0.6f, null);
+         }
+         int tx = x + pad + treeX[i];
+         tm.DrawString(font, tx, ty, treeName[i], c[0], c[1], c[2], 1.0);
+         tx += tm.MeasureStringX(font, treeName[i]) + indent;
+         tm.DrawString(font, tx, ty, treePct[i], 1.0, 1.0, 1.0, 1.0);
+         tx += pctW;
+         if (!treeWait[i].isEmpty()) {
+            tm.DrawString(font, tx, ty, treeWait[i], GameThreadProfile.C_WAIT[0], GameThreadProfile.C_WAIT[1], GameThreadProfile.C_WAIT[2], 1.0);
+            tx += tm.MeasureStringX(font, treeWait[i]) + indent;
+         }
+         if (!treeHint[i].isEmpty()) {
+            tm.DrawString(font, tx, ty, treeHint[i], 0.7, 0.7, 0.7, 1.0);
+         }
+         ty += lineH;
+      }
       if (!verdict.isEmpty()) {
+         ty = divider(sr, x, ty, leftW, pad);
          tm.DrawString(font, x + pad, ty, verdict, verdictColor[0], verdictColor[1], verdictColor[2], 1.0);
          ty += lineH;
       }
-      // frame-time bars: newest on the right, budget line at one third, 3x budget at the top
-      int gx = x + pad;
-      int gy = ty + pad;
+      // frame-time bars: newest on the right, budget line at one third, 3x budget at the top;
+      // y axis = ms (ticks at 0, 1x, 2x, 3x the cap budget), x axis = the last frames in order
+      if (graphOn) {
+      ty = divider(sr, x, ty, leftW, pad);
+      int gx = x + pad + axisW;
+      int gy = ty + lineH / 2; // room for the top tick label, which sits half a line above the graph
       float scale = graphH / (3f * budgetMs);
-      int hd = head;
-      int bars = Math.min(GRAPH_BARS, Math.min(hd, RING - 64));
+      for (int i = 0; i < 4; i++) {
+         int tickY = gy + graphH - (int)(budgetMs * i * scale);
+         sr.renderi(null, gx - 4, tickY, 4, 1, 1f, 1f, 1f, 0.7f, null);
+         if (i > 0) {
+            sr.renderi(null, gx, tickY, graphW, 1, 1f, 1f, 1f, i == 1 ? 0.7f : 0.2f, null);
+         }
+         int labelY = Math.max(gy - lineH / 2, Math.min(gy + graphH - lineH / 2, tickY - lineH / 2));
+         tm.DrawString(font, gx - 6 - tm.MeasureStringX(font, yTicks[i]), labelY, yTicks[i], 0.8, 0.8, 0.8, 1.0);
+      }
       for (int i = 0; i < bars; i++) {
          int slot = (hd - bars + i) & (RING - 1);
          float ms = frameMs[slot];
@@ -677,7 +1037,48 @@ public final class Overlay {
             sr.renderi(null, gx + i * 2, gy + graphH - gh, 1, gh, 0.4f, 0.6f, 1f, 0.9f, null);
          }
       }
-      int budgetY = gy + graphH - (int)(budgetMs * scale);
-      sr.renderi(null, gx, budgetY, graphW, 1, 1f, 1f, 1f, 0.7f, null);
+      sr.renderi(null, gx, gy + graphH, graphW, 1, 1f, 1f, 1f, 0.5f, null); // x axis
+      tm.DrawString(font, gx, gy + graphH + 2, xLabel, 0.8, 0.8, 0.8, 1.0);
+      ty = gy + graphH + 2 + lineH;
+      tm.DrawString(font, x + pad, ty, legend1, 0.7, 0.7, 0.7, 1.0);
+      ty += lineH;
+      if (!legend2.isEmpty()) {
+         tm.DrawString(font, x + pad, ty, legend2, 0.7, 0.7, 0.7, 1.0);
+         ty += lineH;
+      }
+      }
+      // flame graph: rows of boxes, root at the bottom, each box the share of its stack frame;
+      // in its own column on the right (a vertical divider between), or under the frame graph
+      if (flameRows > 0) {
+         int fx, fw;
+         if (flameRight) {
+            int vx = x + leftW + pad; // the vertical divider
+            sr.renderi(null, vx, y + pad, 1, h - pad * 2, 1f, 1f, 1f, 0.3f, null);
+            fx = vx + 1 + pad;
+            fw = flameColW;
+            ty = y + pad;
+         } else {
+            ty = divider(sr, x, ty, leftW, pad);
+            fx = x + pad;
+            fw = leftW - pad * 2;
+         }
+         tm.DrawString(font, fx, ty, fTitle, 1.0, 1.0, 1.0, 1.0);
+         ty += lineH;
+         int bottom = ty + flameRows * flameRowH;
+         sr.renderi(null, fx, ty, fw, flameRows * flameRowH, 0f, 0f, 0f, 0.6f, null); // darker backing: the boxes read against the world
+         for (FlameBox b : flame) {
+            int bx = fx + Math.round(b.x0 * fw);
+            int bw = Math.round(b.x1 * fw) - Math.round(b.x0 * fw);
+            if (bw < 3) {
+               continue; // one quad per box every frame: the overlay's own cost shows up as "overlay" in the tree
+            }
+            int by = bottom - (b.depth + 1) * flameRowH;
+            float[] c = b.color;
+            sr.renderi(null, bx, by + 1, bw - 1, flameRowH - 2, c[0] * b.shade, c[1] * b.shade, c[2] * b.shade, 0.9f, null);
+            if (bw > 12 && bw >= labelWidth(tm, font, b.name) + 6) {
+               tm.DrawString(font, bx + 3, by, b.name, 0.05, 0.05, 0.05, 1.0);
+            }
+         }
+      }
    }
 }
