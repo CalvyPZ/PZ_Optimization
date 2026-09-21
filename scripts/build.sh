@@ -44,6 +44,31 @@ if [[ -d "$SRC/lua" ]]; then
   mkdir -p "$OUT/media/lua"
   cp -r "$SRC/lua/." "$OUT/media/lua/"
 fi
+# Puddle shader variants for Config.puddleEarlyZ (media/shaders/pzopt_puddles_*), derived from the installed game's
+# puddle shaders so a game update is picked up: the entry files with the include renamed, the .h prototype stubs
+# copied, and the two shader units changed in one place each. The vertex unit also writes the depth attribute to
+# gl_Position.z; the fragment unit loses its gl_FragDepth writes. Any assignment to gl_FragDepth in a fragment
+# program, even in a function never called, makes the depth shader-written and switches the early depth test off.
+sh="$(dirname "$JAR")/media/shaders"
+if [[ -f "$sh/puddles_common.frag.glsl" && -f "$sh/puddles_common.vert.glsl" ]]; then
+  osh="$OUT/media/shaders"
+  mkdir -p "$osh"
+  for q in hq mq lq; do
+    sed 's/#include "puddles_common\.vert"/#include "pzopt_puddles_common.vert"/' "$sh/puddles_$q.vert" > "$osh/pzopt_puddles_$q.vert"
+    sed 's/#include "puddles_common\.frag"/#include "pzopt_puddles_common.frag"/' "$sh/puddles_$q.frag" > "$osh/pzopt_puddles_$q.frag"
+    grep -q pzopt_puddles_common "$osh/pzopt_puddles_$q.vert" && grep -q pzopt_puddles_common "$osh/pzopt_puddles_$q.frag" \
+      || { echo "puddles_$q shader entry has no puddles_common include; puddleEarlyZ shaders not generated" >&2; exit 1; }
+  done
+  cp "$sh/puddles_common.vert.h" "$osh/pzopt_puddles_common.vert.h"
+  cp "$sh/puddles_common.frag.h" "$osh/pzopt_puddles_common.frag.h"
+  sed 's/^\(\s*\)vDepth = aFragDepth;/\1vDepth = aFragDepth;\n\1gl_Position.z = (aFragDepth * 2.0 - 1.0) * gl_Position.w; \/\/ pzopt: depth from the vertex (puddleEarlyZ, drawn with GL_DEPTH_CLAMP)/' \
+    "$sh/puddles_common.vert.glsl" > "$osh/pzopt_puddles_common.vert.glsl"
+  grep -v 'gl_FragDepth = vDepth;' "$sh/puddles_common.frag.glsl" > "$osh/pzopt_puddles_common.frag.glsl"
+  grep -q 'gl_Position.z = (aFragDepth' "$osh/pzopt_puddles_common.vert.glsl" && ! grep -q 'gl_FragDepth' "$osh/pzopt_puddles_common.frag.glsl" \
+    || { echo "puddles_common shader units changed shape; puddleEarlyZ shaders not generated" >&2; exit 1; }
+else
+  echo "puddle shaders not found next to the jar; the puddleEarlyZ shaders are not generated" >&2
+fi
 
 # Extract the stock copies of the overridden classes for comparison.
 patterns=()

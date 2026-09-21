@@ -140,6 +140,17 @@ public final class IsoPuddles {
       }
    }
 
+   // pzopt: with Config.puddleEarlyZ the media/shaders/pzopt_puddles_*.vert|frag copies are used: same colour math,
+   // depth from the vertex instead of a gl_FragDepth write, so occluded wet ground is rejected before shading
+   private static String pzoptShaderName(String stock) {
+      return pzopt.Overrides.enabled() && pzopt.Config.PUDDLE_EARLY_Z ? "pzopt_" + stock : stock;
+   }
+
+   private static void pzoptLogShader(Shader effect) { // pzopt: which puddle program is live and whether it compiled
+      pzopt.Log.info("puddles: shader " + effect.getName() + " id=" + effect.getID()
+         + " compiled=" + (effect.getProgram() != null && effect.getProgram().isCompiled()));
+   }
+
    public void applyPuddlesQuality() {
       leakingPuddlesInTheRoom = Core.getInstance().getPerfPuddles() == 0;
       if (Core.getInstance().getPerfPuddles() == 3) {
@@ -148,25 +159,28 @@ public final class IsoPuddles {
          isShaderEnable = true;
          if (PerformanceSettings.puddlesQuality == 2) {
             RenderThread.invokeOnRenderContext(() -> {
-               this.effect = new PuddlesShader("puddles_lq");
+               this.effect = new PuddlesShader(pzoptShaderName("puddles_lq")); // pzopt: puddleEarlyZ variant
                this.effect.Start();
                this.effect.End();
+               pzoptLogShader(this.effect); // pzopt
             });
          }
 
          if (PerformanceSettings.puddlesQuality == 1) {
             RenderThread.invokeOnRenderContext(() -> {
-               this.effect = new PuddlesShader("puddles_mq");
+               this.effect = new PuddlesShader(pzoptShaderName("puddles_mq")); // pzopt: puddleEarlyZ variant
                this.effect.Start();
                this.effect.End();
+               pzoptLogShader(this.effect); // pzopt
             });
          }
 
          if (PerformanceSettings.puddlesQuality == 0) {
             RenderThread.invokeOnRenderContext(() -> {
-               this.effect = new PuddlesShader("puddles_hq");
+               this.effect = new PuddlesShader(pzoptShaderName("puddles_hq")); // pzopt: puddleEarlyZ variant
                this.effect.Start();
                this.effect.End();
+               pzoptLogShader(this.effect); // pzopt
             });
          }
       }
@@ -292,6 +306,15 @@ public final class IsoPuddles {
       return first;
    }
 
+   public void pzoptTruncate(int numSquares, int z) { // pzopt: drop squares packed after index numSquares (puddleVbo scratch use)
+      IsoPuddles.RenderData threadData = this.pzoptThreadData();
+      int drop = threadData.numSquares - numSquares;
+      if (drop > 0) {
+         threadData.numSquares = numSquares;
+         threadData.squaresPerLevel[z + 32] -= drop;
+      }
+   }
+
    public void pzoptDraw(int z, int firstSquare, int numSquares) { // pzopt: the tail of render()
       SpriteRenderer.instance.drawPuddles(IsoCamera.frameState.playerIndex, z, firstSquare, numSquares);
    }
@@ -362,11 +385,18 @@ public final class IsoPuddles {
 
       GL11.glEnable(2929);
       GL11.glDepthFunc(515);
+      boolean pzoptClamp = pzopt.Overrides.enabled() && pzopt.Config.PUDDLE_EARLY_Z; // pzopt: puddleEarlyZ, see PuddleVbo.Gl.draw
+      if (pzoptClamp) {
+         GL11.glEnable(0x864F); // GL_DEPTH_CLAMP: negative chunk-relative depths are clamped per fragment, not clipped
+      }
       int start = 0;
       int length = vertexCursor;
       int startIndex = 0;
       int endIndex = indexCursor;
       GL12.glDrawRangeElements(4, 0, 0 + length, endIndex - 0, 5123, 0L);
+      if (pzoptClamp) {
+         GL11.glDisable(0x864F);
+      }
       GL20.glDisableVertexAttribArray(4);
       GL20.glDisableVertexAttribArray(5);
       GL20.glDisableVertexAttribArray(6);

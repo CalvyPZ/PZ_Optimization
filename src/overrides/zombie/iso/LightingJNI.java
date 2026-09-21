@@ -1637,6 +1637,9 @@ public final class LightingJNI {
                         int isVertLight6 = this.cacheVertLight[5];
                         int isVertLight7 = this.cacheVertLight[6];
                         int isVertLight8 = this.cacheVertLight[7];
+                        if (isVertLight1 != wasVertLight1 || isVertLight2 != wasVertLight2 || isVertLight3 != wasVertLight3 || isVertLight4 != wasVertLight4) {
+                           pzopt.PuddleCache.lightsChanged(this.square.chunk, this.square.z); // pzopt: puddleVbo re-uploads this level's puddle batch (the lower four vertex lights are the puddle colours)
+                        }
                         FBORenderLevels renderLevels = this.square.chunk.getRenderLevels(this.playerIndex);
                         if (isDarkMulti == wasDarkMulti
                            && isDarkMultiTarget == wasDarkMultiTarget

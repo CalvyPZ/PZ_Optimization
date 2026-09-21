@@ -6,7 +6,7 @@ compatdata prefix). Override with `PZ_DIR` / `ZOMBOID`.
 
 | Script | Does |
 |---|---|
-| `build.sh` | `javac --release <game JRE>` of `src/overrides`, `src/shims`, `src/pzopt` against `projectzomboid.jar` into `build/classes/` plus `build-info.properties` (game build compiled against). `OVERRIDES=(...)` lists the shadowed game classes. |
+| `build.sh` | `javac --release <game JRE>` of `src/overrides`, `src/shims`, `src/pzopt` against `projectzomboid.jar` into `build/classes/` plus `build-info.properties` (game build compiled against). `OVERRIDES=(...)` lists the shadowed game classes. Copies `src/lua/` under `build/classes/media/lua/` and generates the `puddleEarlyZ` shader variants (`media/shaders/pzopt_puddles_*`) from the installed game's puddle shaders (2026-09-21). |
 | `pzopt.sh install\|uninstall\|reinstall\|status\|check` | copies `build/classes/` over the game dir. The launcher JSON puts `.` ahead of the jar, so loose `.class` files shadow it; the jar is never written. `pzopt-installed.txt` records what was written so uninstall is exact even after a game update. |
 | `accept.sh [--prop k=v]` | build + install + parity gate against the stock capture; fails if recalc output differs. |
 | `release.sh [--publish] [--notes ...]` | build + test + `build/pzopt-<rev>-classes.zip` (flat `build/classes/` plus a `pzopt-files.txt` manifest, Python zipfile); `--publish` = `gh release create win-<rev>-<commit>` with the zip plus the repo-root `install.sh` / `install.ps1` from a pushed clean HEAD. Skill `release-windows`. |

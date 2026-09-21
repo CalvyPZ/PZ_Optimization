@@ -41,7 +41,7 @@ import zombie.iso.fboRenderChunk.ObjectRenderLayer;
  */
 public final class PuddleCache {
    /** Floats per square in IsoPuddles.RenderData: 4 vertices x (4 dir flags, x, y, colour, depth). */
-   private static final int FLOATS = 32;
+   static final int FLOATS = 32;
    private static final int LEVELS = 64;
 
    public static final class Batch {
@@ -57,6 +57,11 @@ public final class PuddleCache {
       int builtFrame;
       int expiryFrame;
       boolean invalid = true;
+      // puddleVbo: the batch's GL buffer (render thread only), whether a square's light changed since the last
+      // upload (LightingJNI, game thread) and whether the data changed since the last upload
+      int vbo;
+      boolean lightsDirty;
+      boolean dirty;
    }
 
    /** Per-chunk slot: [playerIndex][z + 32]. Lives in IsoChunk.pzoptPuddles. */
@@ -71,6 +76,32 @@ public final class PuddleCache {
          for (Batch[] perPlayer : this.batches) {
             if (perPlayer != null && perPlayer[idx] != null) {
                perPlayer[idx].invalid = true;
+            }
+         }
+      }
+
+      /** Every batch of every player: a reused chunk object. */
+      public void invalidateAll() {
+         for (Batch[] perPlayer : this.batches) {
+            if (perPlayer != null) {
+               for (Batch b : perPlayer) {
+                  if (b != null) {
+                     b.invalid = true;
+                  }
+               }
+            }
+         }
+      }
+
+      /** puddleVbo: a square of this level changed its vertex lights (called by LightingJNI on the game thread). */
+      public void lightsChanged(int level) {
+         int idx = level + 32;
+         if (idx < 0 || idx >= LEVELS) {
+            return;
+         }
+         for (Batch[] perPlayer : this.batches) {
+            if (perPlayer != null && perPlayer[idx] != null) {
+               perPlayer[idx].lightsDirty = true;
             }
          }
       }
@@ -98,6 +129,9 @@ public final class PuddleCache {
    private static int rebuiltInvalid;
    private static int rebuiltFlags;
    private static int rebuiltExpired;
+   private static int lightPatches;
+   private static int lightUploads;
+   private static int depthUploads;
    private static final ArrayList<IsoGridSquare> scratch = new ArrayList<>();
 
    public static boolean enabled() {
@@ -112,6 +146,22 @@ public final class PuddleCache {
       }
    }
 
+   /** puddleVbo: LightingJNI saw a square of this chunk level change its light info or vertex lights. */
+   public static void lightsChanged(IsoChunk chunk, int level) {
+      Slot s = chunk.pzoptPuddles;
+      if (s != null) {
+         s.lightsChanged(level);
+      }
+   }
+
+   /** A chunk object is being reused for another position: its batches belong to the previous chunk. */
+   public static void chunkReused(IsoChunk chunk) {
+      Slot s = chunk.pzoptPuddles;
+      if (s != null) {
+         s.invalidateAll();
+      }
+   }
+
    /**
     * The cached replacement for the body of FBORenderCell.renderPuddles: same guards, same per-z draw.
     */
@@ -119,6 +169,10 @@ public final class PuddleCache {
       IsoPuddles puddles = IsoPuddles.getInstance();
       if (playerIndex == 0) {
          frame++;
+      }
+      if (PuddleVbo.enabled()) {
+         renderVbo(puddles, playerIndex, onScreenChunks, maxZ);
+         return;
       }
       PlayerCamera camera = IsoCamera.cameras[playerIndex];
       float jx = camera.fixJigglyModelsX * camera.zoom;
@@ -184,6 +238,144 @@ public final class PuddleCache {
             puddles.pzoptDraw(z, first, count);
          }
       }
+   }
+
+   /**
+    * puddleVbo: same batch bookkeeping as {@link #render}, but nothing is copied per frame. A batch is packed with
+    * the stock code when it is (re)built, its jiggle normalised to zero, and uploaded to its own GL buffer; later
+    * frames only re-upload it when its lights changed (LightingJNI hook), the camera crossed a chunk edge (one depth
+    * constant for every vertex) or it was rebuilt. The current jiggle goes to the render thread with the frame.
+    */
+   private static void renderVbo(IsoPuddles puddles, int playerIndex, ArrayList<IsoChunk> onScreenChunks, int maxZ) {
+      PlayerCamera camera = IsoCamera.cameras[playerIndex];
+      float jx = camera.fixJigglyModelsX * camera.zoom;
+      float jy = camera.fixJigglyModelsY * camera.zoom;
+      int camChunkX = PZMath.fastfloor(PZMath.fastfloor(IsoCamera.frameState.camCharacterX) / 8.0F);
+      int camChunkY = PZMath.fastfloor(PZMath.fastfloor(IsoCamera.frameState.camCharacterY) / 8.0F);
+      boolean noLighting = DebugOptions.instance.fboRenderChunk.nolighting.getValue();
+      int interval = Math.max(1, Config.PUDDLE_CACHE_FRAMES);
+
+      for (int z = 0; z <= maxZ; z++) {
+         if (!puddles.pzoptCanRender(z)) {
+            continue;
+         }
+         PuddleVbo.Frame f = PuddleVbo.begin(playerIndex, z, jx, jy);
+
+         for (int i = 0; i < onScreenChunks.size(); i++) {
+            IsoChunk chunk = onScreenChunks.get(i);
+            if (z < chunk.minLevel || z > chunk.maxLevel) {
+               continue;
+            }
+            FBORenderLevels renderLevels = chunk.getRenderLevels(playerIndex);
+            if (!renderLevels.isOnScreen(z)) {
+               continue;
+            }
+            java.util.List<IsoGridSquare> squares = renderLevels.getCachedSquares_Puddles(z);
+            if (squares.isEmpty()) {
+               continue;
+            }
+            ChunkLevelData levelData = chunk.getCutawayDataForLevel(z);
+            long mask = flagMask(levelData, playerIndex);
+            Slot slot = chunk.pzoptPuddles;
+            if (slot == null) {
+               slot = chunk.pzoptPuddles = new Slot();
+            }
+            Batch b = slot.get(playerIndex, z);
+            if (b == null) {
+               continue;
+            }
+
+            boolean rebuild;
+            if (b.invalid || b.listSize != squares.size()) {
+               rebuild = true;
+               rebuiltInvalid++;
+            } else if (b.flagMask != mask) {
+               rebuild = true;
+               rebuiltFlags++;
+            } else if (frame >= b.expiryFrame) {
+               rebuild = true;
+               rebuiltExpired++;
+            } else {
+               rebuild = false;
+            }
+
+            if (rebuild) {
+               int before = puddles.pzoptNumSquares();
+               build(puddles, b, chunk, z, playerIndex, squares, levelData, mask, jx, jy, camChunkX, camChunkY, interval);
+               puddles.pzoptTruncate(before, z); // the RenderData was only scratch space
+               // normalise the packed jiggle to zero; the frame's jiggle is a translation on the render thread
+               float[] data = b.data;
+               for (int v = 0; v < b.count * FLOATS; v += 8) {
+                  data[v + 4] -= jx;
+                  data[v + 5] -= jy;
+               }
+               b.jx = 0.0F;
+               b.jy = 0.0F;
+               b.lightsDirty = false;
+               b.dirty = true;
+            } else {
+               if (b.lightsDirty) {
+                  b.lightsDirty = false;
+                  if (patchLights(b, playerIndex, noLighting)) {
+                     b.dirty = true;
+                     lightUploads++;
+                  }
+                  lightPatches++;
+               }
+               if (camChunkX != b.camChunkX || camChunkY != b.camChunkY) {
+                  float now = IsoDepthHelper.getChunkDepthData(camChunkX, camChunkY, chunk.wx, chunk.wy, z).depthStart;
+                  float then = IsoDepthHelper.getChunkDepthData(b.camChunkX, b.camChunkY, chunk.wx, chunk.wy, z).depthStart;
+                  float ddepth = now - then;
+                  b.camChunkX = camChunkX;
+                  b.camChunkY = camChunkY;
+                  if (ddepth != 0.0F) {
+                     float[] data = b.data;
+                     for (int v = 0; v < b.count * FLOATS; v += 8) {
+                        data[v + 7] += ddepth;
+                     }
+                     b.dirty = true;
+                     depthUploads++;
+                  }
+               }
+            }
+            if (b.count > 0) {
+               PuddleVbo.add(f, b, b.dirty);
+               b.dirty = false;
+               reused++;
+            }
+         }
+
+         PuddleVbo.submit(f);
+      }
+   }
+
+   /** Re-reads the four vertex lights of every square; true when any colour changed. */
+   private static boolean patchLights(Batch b, int playerIndex, boolean noLighting) {
+      float[] data = b.data;
+      boolean changed = false;
+      int o = 0;
+      for (int s = 0; s < b.count; s++) {
+         IsoGridSquare sq = b.squares[s];
+         // vertex order of IsoPuddlesGeometry.updateLighting: light verts 0, 3, 2, 1
+         int c0;
+         int c1;
+         int c2;
+         int c3;
+         if (noLighting) {
+            c0 = c1 = c2 = c3 = -1;
+         } else {
+            c0 = sq.getVertLight(0, playerIndex);
+            c1 = sq.getVertLight(3, playerIndex);
+            c2 = sq.getVertLight(2, playerIndex);
+            c3 = sq.getVertLight(1, playerIndex);
+         }
+         if (Float.floatToRawIntBits(data[o + 6]) != c0) { data[o + 6] = Float.intBitsToFloat(c0); changed = true; }
+         if (Float.floatToRawIntBits(data[o + 14]) != c1) { data[o + 14] = Float.intBitsToFloat(c1); changed = true; }
+         if (Float.floatToRawIntBits(data[o + 22]) != c2) { data[o + 22] = Float.intBitsToFloat(c2); changed = true; }
+         if (Float.floatToRawIntBits(data[o + 30]) != c3) { data[o + 30] = Float.intBitsToFloat(c3); changed = true; }
+         o += FLOATS;
+      }
+      return changed;
    }
 
    private static long flagMask(ChunkLevelData levelData, int playerIndex) {
@@ -302,7 +494,11 @@ public final class PuddleCache {
    }
 
    public static String stats() {
-      return "puddle cache: frames=" + frame + " batches built=" + built + " reused=" + reused
+      String s = "puddle cache: frames=" + frame + " batches built=" + built + " reused=" + reused
          + " rebuilt (bake=" + rebuiltInvalid + " cutaway=" + rebuiltFlags + " expired=" + rebuiltExpired + ")";
+      if (PuddleVbo.enabled()) {
+         s += " light patches=" + lightPatches + " uploads (light=" + lightUploads + " depth=" + depthUploads + ") | " + PuddleVbo.stats();
+      }
+      return s;
    }
 }

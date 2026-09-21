@@ -5410,6 +5410,7 @@ public final class IsoChunk {
       this.pzoptTreeExportFp = null; // pzopt: tree export fingerprints belong to the previous chunk
       this.pzoptFog = null; // pzopt: fog masks belong to the previous chunk
       this.pzoptClearPerFrameLists(); // pzopt: FBORenderCell keeps them across invalidations; a reused chunk starts empty
+      pzopt.PuddleCache.chunkReused(this); // pzopt: the cached puddle batches (and their GL buffers) are rebuilt for the new position
       this.randomId = 0;
       this.revision = 0L;
       this.nextSplatIndex = 0;

@@ -231,6 +231,16 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   on the game thread (`fogMaskFrames`, 20). Now 389 fps / 2.6 ms (clear 447 / 2.2), laptop 98 → 223 (clear 259).
   A/Bs: `--prop fogPass=false`, `fogScalePct=50|100`, `fogDepthCopy=true`, `devFogNoDraw`, `devFogFlat`; GPU
   sub-sections `fog.blit/rects/composite` with `gpuSections=true`. Screenshot rig: bench `--flag fog=heavy --shot-at 8`.
+- Storm parity pass (2026-09-21 afternoon, `docs/findings-storm-parity-2026-09-21.md`, branch
+  `worktree-lightning-zero-cost`): the 120 km/h storm drive on the desktop was GPU-bound at 232 fps / 4.3 ms vs
+  ~450 clear; the puddle "GPU cost" was the render thread streaming every wet square through the ring buffer each
+  frame. Adopted (all default on): `puddleVbo` (per-chunk-level GL buffers, uploads only on light / camera-chunk
+  / rebuild changes, jiggle as a matrix translation), `puddleEarlyZ` (build.sh-generated `pzopt_puddles_*`
+  shaders: depth from the vertex, drawn with GL_DEPTH_CLAMP), `rainSplashesFast` (geometric skipping instead of
+  one game-RNG call per idle square per frame), `treeAppend` (a new chunk's trees drawn into the finished
+  neighbour textures instead of re-baking them; half the neighbour re-bakes while driving). Storm with lightning
+  232 → 390 fps (2.6 ms, p99 8.6), clear 420 → 454 fps; the flashes cost ~0.1 ms mean. Laptop numbers pending
+  (it was shut down mid-pass). A reduced-resolution puddle layer and a two-texture flash blend were rejected.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
   still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).

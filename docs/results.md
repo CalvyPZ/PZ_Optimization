@@ -1231,3 +1231,18 @@ Findings:
 - Cleanup: class files and launcher JSON diff-identical after each run (the `tempopatch` and `multicpu`
   helpers restore on exit), the mods stay under `~/Zomboid/mods` disabled, `ModOptions.ini` keeps the
   `ZBBetterFPSB4220Fix` lines.
+
+## 2026-09-21 (15:26–15:35): side-by-side video, stock vs optimized, 120 km/h thunderstorm drive (storm parity pass)
+
+`harness/stitch-storm2-sbs.sh` -> `docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.mp4`
+(3840x810, 42 s, AV1 10-bit PQ / BT.2020, both panes aligned at the car's motion onset from
+`harness/showcase-times.py`, each run's in-game overlay inset at full resolution). Direct launcher,
+`--flag weather=storm`, `--no-mangohud --no-dashboard`, `--prop overlay=true overlayFont=Large`,
+master 5645dc1 merged (fog pass included). Findings: `docs/findings-storm-parity-2026-09-21.md`.
+
+| run | build | cap | fps mean | p50 / p99 / p99.9 / max ms | >33 ms | GPU / game / render |
+|---|---|---|---|---|---|---|
+| `sbs2-storm120-stock-1` | every pzopt render key off (the `sbs-storm120-stock` set + fogPass, treeBakePass, treeAppend, puddleVbo, puddleEarlyZ, rainSplashesFast off) | 300 (framecap.ini; moot at 70 fps) | 70.2 | 13.3 / 67 / 84 / 92 | 46 | 85 % / 85 % / 83 % |
+| `sbs2-storm120-opt-1` | defaults (2026-09-21 storm pass: puddleVbo, puddleEarlyZ, rainSplashesFast, treeAppend on top of the 09-20 storm work and the fog pass) | none | 392.1 | 2.0 / 9.9 / 14.4 / 21.3 | 0 | 98 % / 68 % / 45 % |
+
+Same route, same build for both panes (props only). The 2026-09-20 pair was 71.5 vs 268.7 fps.

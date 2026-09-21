@@ -92,7 +92,7 @@ results card at the end the whole-route numbers below.
 | 120 km/h highway drive, fps / p99 | 156 fps / 16.5 ms | 512 fps / 5.8 ms | +228 % / -65 % |
 | Rosewood, spinning view, fps / p99 | 140 fps / 27.9 ms | 447 fps / 8.4 ms | +220 % / -70 % |
 | 120 km/h drive, heavy fog, fps / p99 | 111 fps / 18.9 ms | 256 fps / 8.4 ms | +131 % / -56 % |
-| 120 km/h drive, thunderstorm, fps / p99 | 76 fps / 63.0 ms | 284 fps / 8.4 ms | +272 % / -87 % |
+| 120 km/h drive, thunderstorm, fps / p99 | 70 fps / 67 ms | 392 fps / 9.9 ms | +460 % / -85 % |
 
 Boot and load are the mean of four launches each; fps = presented frames per second over
 the whole route, p99 = the frame time 99 % of frames stay under. Ryzen 7 9800X3D, RTX 4090,
@@ -131,18 +131,24 @@ in [`docs/findings-fog-2026-09-21.md`](docs/findings-fog-2026-09-21.md).
 
 ### Thunderstorm at 120 km/h
 
-The same drive in a thunderstorm without the fog (runs `sbs-storm120-stock-1` /
-`sbs-storm120-opt-1`, 2026-09-20). The optimized side has the puddle cache, the rain tiles
-and the lightning re-bake spread ([Weather](#3-weather-puddles-rain-lightning-fog)).
+The same drive in a thunderstorm without the fog, a lightning strike every 6 s (runs
+`sbs2-storm120-stock-1` / `sbs2-storm120-opt-1`, 2026-09-21). The optimized side has the
+puddle cache in GPU buffers, the early-depth puddle shaders, the rain tiles, the lightning
+re-bake spread and the tree copies ([Weather](#3-weather-puddles-rain-lightning-fog)). A
+thunderstorm with lightning now runs at 85 % of the clear-weather frame rate on this machine
+(392 vs 454–465 fps); before this pass it was 232 vs 420. Video (AV1 HDR):
+`docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.mp4`, script
+`harness/stitch-storm2-sbs.sh`, findings in
+[`docs/findings-storm-parity-2026-09-21.md`](docs/findings-storm-parity-2026-09-21.md).
 
-![120 km/h through a thunderstorm, stock vs optimized](docs/media/drive-120kmh-storm-stock-vs-optimized.jpg)
+![120 km/h through a thunderstorm, stock vs optimized](docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.jpg)
 
 | Metric | Stock | Optimized |
 |---|---|---|
-| fps, mean | 71 | 269 |
-| Frame time, p50 / p99 / p99.9 / max | 13.1 / 67 / 87 / 103 ms | 3.3 / 8.8 / 12.7 / 19.9 ms |
-| Frames over 33 ms | 42 | 0 |
-| GPU / game thread / render thread busy | 96 / 83 / 84 % | 98 / 61 / 97 % |
+| fps, mean | 70 | 392 |
+| Frame time, p50 / p99 / p99.9 / max | 13.3 / 67 / 84 / 92 ms | 2.0 / 9.9 / 14.4 / 21 ms |
+| Frames over 33 ms | 46 | 0 |
+| GPU / game thread / render thread busy | 85 / 85 / 83 % | 98 / 68 / 45 % |
 
 ### Rosewood spin, uncapped
 
@@ -523,6 +529,7 @@ Full list with comments: [`src/pzopt/pzopt/Config.java`](src/pzopt/pzopt/Config.
 | **Chunk textures** | | |
 | `treesInChunkTexture` | `true` | static trees bake into the chunk texture |
 | `treeBakePass` / `treeBakeDirect` | `true` / `true` | baked trees drawn by their own pass into every texture the crown reaches, with a height-tilted depth (issue #5); the plain sprite path instead of stock's broken tree batch |
+| `treeAppend` | `true` | a newly loaded chunk's trees are drawn into the finished neighbour textures they reach instead of re-baking those textures (half the re-bakes while driving) |
 | `windowsInChunkTexture` | `true` | windows and glass doors bake |
 | `translucentTilesInChunkTexture` | `true` | `Translucent`-flagged tiles (fences, railings, decorations) bake |
 | `curtainDepthNudgePct` | `5` | baked curtains drawn in front of the glass they cover, in % of a tile (issue #4) |
@@ -545,6 +552,9 @@ Full list with comments: [`src/pzopt/pzopt/Config.java`](src/pzopt/pzopt/Config.
 | `textureBufferMb` | `50` | texture upload buffer size |
 | **Weather** | | |
 | `puddleCache` / `puddleCacheFrames` | `true` / `60` | packed puddle vertices reused per chunk level; backstop rebuild interval |
+| `puddleVbo` | `true` | each chunk level's puddle batch in its own GPU buffer, re-sent only on a light change, a camera chunk edge or a re-bake; the camera jiggle as a matrix translation |
+| `puddleEarlyZ` | `true` | generated puddle shaders with the depth from the vertex (no `gl_FragDepth` write): occluded wet ground is rejected before the shader runs |
+| `rainSplashesFast` | `true` | splash starts by geometric skipping with a local generator instead of one game-RNG call per idle square per frame |
 | `rainTiles` | `true` | rain and snow particles packed once per cell and drawn once per screen cell |
 | `weatherMaskIdleSkip` | `true` | skip the per-frame weather-mask view scan when it cannot add a mask |
 | `weatherFxScalePct` | `100` | weather mask and particle buffers at this share of the screen size (a wash at 50) |
@@ -622,7 +632,9 @@ decorations). Per-frame draws fall from about 3,000 to about 100. Baked trees ar
 their own pass (`treeBakePass`) into every chunk texture their crown reaches, with a depth
 that rises with the crown, so JUMBO trees are neither clipped to one chunk nor cut by
 upper-floor walls behind them; stock's own chunk-texture tree batch is broken (dark crown
-behind the house) and stays unused.
+behind the house) and stays unused. When a newly loaded chunk's trees reach into a
+neighbour's finished texture, they are drawn on top of it (`treeAppend`) instead of re-baking
+the whole texture: while driving, 60 % of all bakes were these neighbour re-bakes.
 
 **Bake and re-bake budgets** (`bakeBudget`, `rebakeBudget`, `rebakeMaxFrames`,
 `lightingBudget`, `lightingRebakeMs`). When a new chunk row comes into view stock bakes
@@ -663,9 +675,24 @@ spin, 273 → 501 fps uncapped.
 
 ### 3. Weather: puddles, rain, lightning, fog
 
-**Puddle cache** (`puddleCache`). Stock re-packs every wet square's puddle vertices every
-frame (4.5 ms a frame in a storm); the packed vertices are kept per chunk level and only the
-lights, jiggle and depth are patched per frame.
+**Puddle cache** (`puddleCache`, `puddleVbo`). Stock re-packs every wet square's puddle
+vertices every frame (4.5 ms a frame in a storm) and the render thread streams them through
+a 64 KB ring buffer in seven map / draw cycles per level, which is what starved the GPU
+(1.3 ms of "puddle" GPU time a frame at 5120x2160). The packed vertices are kept per chunk
+level in their own GPU buffer, re-sent only when a square's light changed, the camera crossed
+a chunk edge or the level was re-baked; the camera's sub-pixel jiggle is a matrix translation.
+Nothing is copied per frame on either thread. Storm drive 232 → 325 fps on its own.
+
+**Early-depth puddle shaders** (`puddleEarlyZ`). The stock puddle shaders write
+`gl_FragDepth`, which switches the GPU's early depth test off, so every wet-ground pixel
+hidden behind a wall, roof or object still ran the ~200-op HQ shader. The build generates
+copies of the game's puddle shaders (`media/shaders/pzopt_puddles_*`) that take the depth
+from the vertex instead; same colour math, same picture. 357 → 390 fps.
+
+**Rain splashes** (`rainSplashesFast`). Stock asks the game's random generator once per
+idle square of every on-screen chunk level every frame to start a splash; the starts are now
+drawn by geometric skipping with a local generator, one draw per splash, same chance and
+timing. 2.6 % of a laptop storm frame.
 
 **Rain tiles** (`rainTiles`). The rain particle path walked ~100k quads a frame at
 5120x2160 on the game thread, twice; a particle cell is now packed once and drawn once per
@@ -675,7 +702,9 @@ screen cell. Storm spin 111 → 188 fps on the desktop, 84 → 106 on a laptop.
 lightning strike flash-dirtied all chunk textures and stock re-baked them in one frame: five
 50–90 ms stalls per strike, seen as the rain "vanishing" every 6 s. Lighting-only re-bakes
 now start 8 per frame and hold at most 30 frames (storm drive p99.9 57 → 12.5 ms, a faint
-chunk checkerboard for ~90 ms while a flash ramps).
+chunk checkerboard for ~90 ms while a flash ramps). With the puddle and tree changes above the
+flashes are ~0.1 ms of the mean frame and ~1 ms of the p99 (storm without lightning 419 fps,
+with 392).
 
 **Heavy fog in one pass** (`fogPass`, `fogScalePct`, `fogMaskFrames`, experimental).
 Stock `ImprovedFog` draws heavy fog as one screen-wide rectangle per tile row per level, each

@@ -42,7 +42,7 @@ public final class TreeBake {
    private static final int STRIDE = 12;
    private static final ArrayList<Drawer> pool = new ArrayList<>();
 
-   public static long treesDrawn, copiesDrawn, quadsDrawn, passes, neighboursInvalidated;
+   public static long treesDrawn, copiesDrawn, quadsDrawn, passes, neighboursInvalidated, appendsQueued, appendsDrawn, appendsFellBack, appendsRefused;
 
    /** Screen rectangle of a tree sprite in the logical space of a chunk texture. */
    public static final class Rect {
@@ -170,6 +170,12 @@ public final class TreeBake {
       private Texture[] textures = new Texture[32];
       private float[] v = new float[32 * STRIDE];
       private int count;
+      private Texture expect; // treeAppend: draw only into the framebuffer whose colour attachment is this texture
+
+      /** treeAppend: the quads go into an existing texture; the render thread refuses to draw anywhere else. */
+      public void expectTexture(Texture texture) {
+         this.expect = texture;
+      }
 
       /**
        * Adds one textured quad: texture rectangle {@code x0..x1, y0..y1} in texture space, the texture's atlas
@@ -205,6 +211,14 @@ public final class TreeBake {
       public void render() {
          if (this.count == 0) {
             return;
+         }
+         if (this.expect != null) {
+            int bound = org.lwjgl.opengl.GL30.glGetFramebufferAttachmentParameteri(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER,
+               org.lwjgl.opengl.GL30.GL_COLOR_ATTACHMENT0, org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+            if (this.expect.getTextureId() == null || bound != this.expect.getTextureId().getID()) {
+               appendsRefused++;
+               return;
+            }
          }
          VBORenderer vbor = VBORenderer.getInstance();
          // the chunk bake's projection (Core.StartFrameFlipY: texture pixels, y down) is current; depth as the
@@ -251,6 +265,7 @@ public final class TreeBake {
       public void postRender() {
          java.util.Arrays.fill(this.textures, 0, this.count, null);
          this.count = 0;
+         this.expect = null;
          synchronized (pool) {
             if (pool.size() < 64) {
                pool.add(this);
@@ -260,6 +275,7 @@ public final class TreeBake {
    }
 
    public static String stats() {
-      return "tree bake: passes=" + passes + " trees=" + treesDrawn + " copies=" + copiesDrawn + " quads=" + quadsDrawn + " neighbours re-baked=" + neighboursInvalidated;
+      return "tree bake: passes=" + passes + " trees=" + treesDrawn + " copies=" + copiesDrawn + " quads=" + quadsDrawn + " neighbours re-baked=" + neighboursInvalidated
+         + " appends=" + appendsDrawn + " (queued=" + appendsQueued + " fell back=" + appendsFellBack + " refused=" + appendsRefused + ")";
    }
 }

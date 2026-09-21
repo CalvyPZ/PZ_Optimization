@@ -1394,6 +1394,7 @@ public final class FBORenderCell {
       SpriteRenderer.instance.endProfile(tilesProbe);
       FBORenderCorpses.getInstance().update();
       FBORenderItems.getInstance().update();
+      this.pzoptFlushTreeAppends(playerIndex, Core.getInstance().getZoom(playerIndex)); // pzopt: treeAppend, before the textures are composited
       pzopt.GpuSections.begin("composite"); /* pzopt: GPU section: chunk textures into the combined FBO and onto the screen */
       FBORenderChunkManager.instance.endFrame();
       pzopt.GpuSections.end("composite");
@@ -1415,7 +1416,7 @@ public final class FBORenderCell {
          AbstractPerformanceProfileProbe var29 = puddles.profile();
 
          try {
-            this.renderPuddles(playerIndex);
+            pzopt.GpuSections.begin("puddles"); /* pzopt: GPU section */ this.renderPuddles(playerIndex); pzopt.GpuSections.end("puddles");
          } catch (Throwable var27) {
             if (var29 != null) {
                try {
@@ -1488,7 +1489,7 @@ public final class FBORenderCell {
          var34 = puddles.profile();
 
          try {
-            this.renderPuddlesTranslucentFloorsOnly(playerIndex, z);
+            pzopt.GpuSections.begin("puddles"); /* pzopt: GPU section */ this.renderPuddlesTranslucentFloorsOnly(playerIndex, z); pzopt.GpuSections.end("puddles");
          } catch (Throwable var24) {
             if (var34 != null) {
                try {
@@ -1509,7 +1510,7 @@ public final class FBORenderCell {
             this.renderWaterShore(playerIndex);
          }
 
-         this.renderRainSplashes(playerIndex, z);
+         pzopt.GpuSections.begin("splashes"); /* pzopt: GPU section */ this.renderRainSplashes(playerIndex, z); pzopt.GpuSections.end("splashes");
          SpriteRenderer.instance.beginProfile(shadowsProbe);
          FBORenderShadows.getInstance().renderMain(z);
          SpriteRenderer.instance.endProfile(shadowsProbe);
@@ -2969,9 +2970,17 @@ public final class FBORenderCell {
       }
       for (int slot = 0; slot < 25; slot++) {
          if (newFp[slot] != exportFp[slot]) {
+            int before = exportFp[slot];
             exportFp[slot] = newFp[slot];
             IsoChunk e = slotChunk[slot];
             if (e != null && e != c && minLevel >= e.minLevel && minLevel <= e.maxLevel) {
+               // pzopt: treeAppend. A first export (no copy of this chunk's trees in that texture yet, the usual case:
+               // a newly loaded chunk next to baked ones while driving) only adds quads on top of a finished texture,
+               // so they are drawn into it after the bakes of this frame instead of re-baking the whole texture.
+               if (before == 0 && pzopt.Overrides.enabled() && pzopt.Config.TREE_APPEND
+                     && this.pzoptQueueTreeAppend(c, e, minLevel, topLevel, playerIndex, zoom, aiming, camX, camY, tileScale)) {
+                  continue;
+               }
                pzoptInvalidateTreeHolder(e, minLevel, playerIndex, zoom);
             }
          }
@@ -2980,6 +2989,133 @@ public final class FBORenderCell {
          SpriteRenderer.instance.drawGeneric(drawer);
       }
    }
+
+   // pzopt: treeAppend. The neighbour textures that get this frame's newly exported trees drawn on top, flushed
+   // before FBORenderChunkManager.endFrame composites them (each entry: the texture, its chunk, the quads).
+   private final java.util.ArrayList<Object[]> pzoptTreeAppends = new java.util.ArrayList<>();
+
+   /**
+    * pzopt: treeAppend. Lists the trees of chunk {@code c} that reach into neighbour {@code e}'s finished texture
+    * as quads in that texture's space, to be drawn into it later this frame. False when the texture must be
+    * re-baked instead (none, dirty, off screen): the caller invalidates it as before.
+    */
+   private boolean pzoptQueueTreeAppend(IsoChunk c, IsoChunk e, int minLevel, int topLevel, int playerIndex, float zoom,
+                                        boolean aiming, int camX, int camY, int tileScale) {
+      FBORenderLevels levelsE = e.getRenderLevels(playerIndex);
+      FBORenderChunk rcE = levelsE.getFBOForLevel(minLevel, zoom);
+      if (rcE == null) {
+         return true; // no texture: its first bake pulls the trees itself (the invalidation would do nothing either)
+      }
+      if (levelsE.isDirty(minLevel, zoom) || !levelsE.isOnScreen(minLevel) || rcE.tex == null || rcE.getMinLevel() != minLevel) {
+         return false;
+      }
+      float scaleE = rcE.highRes ? 2.0F : 1.0F;
+      float goX = rcE.w / 2.0F; // FBORenderChunkManager.beginRenderChunkLevel's xoff / yoff for this texture
+      float yoff = (rcE.getTopLevel() - rcE.getMinLevel() + 1) * FBORenderChunk.PIXELS_PER_LEVEL
+         + rcE.getMinLevel() * FBORenderChunk.PIXELS_PER_LEVEL + FBORenderLevels.extraHeightForJumboTrees(rcE.getMinLevel(), rcE.getTopLevel());
+      pzopt.TreeBake.Rect sprite = this.pzoptTreeAppendSprite;
+      pzopt.TreeBake.Rect ownE = this.pzoptTreeAppendOwn;
+      pzopt.TreeBake.Rect otherC = this.pzoptTreeAppendOther;
+      pzopt.TreeBake.ownTextureRect(goX, rcE.w / scaleE, rcE.h / scaleE, ownE);
+      if (!pzoptChunkTextureRect(c, e, minLevel, zoom, goX, yoff, otherC)) {
+         return true;
+      }
+      pzopt.TreeBake.Drawer drawer = null;
+      int z0 = Math.max(minLevel, c.minLevel);
+      int z1 = Math.min(rcE.getTopLevel(), c.maxLevel); // the levels that texture holds, as its own bake walks them
+      for (int z = z0; z <= z1; z++) {
+         IsoGridSquare[] squares = c.squares[c.squaresIndexOfLevel(z)];
+         ChunkLevelData levelData = c.getCutawayDataForLevel(z);
+         for (int i = 0; i < squares.length; i++) {
+            IsoGridSquare square = squares[i];
+            if (square == null || !square.has(IsoObjectType.tree)) {
+               continue;
+            }
+            IsoTree tree = square.getTree();
+            if (tree == null || !this.pzoptTreeBakes(tree, aiming) || tree.getRenderInfo(playerIndex).layer != ObjectRenderLayer.MinusFloor) {
+               continue;
+            }
+            if (!levelData.shouldRenderSquare(playerIndex, square) || FBORenderOcclusion.getInstance().isOccluded(square.x, square.y, square.z)
+                  || FBORenderCutaways.getInstance().isForceRenderSquare(playerIndex, square)) {
+               continue;
+            }
+            // the same tree in the neighbour texture's space; drawn only where it reaches beyond its own texture
+            if (!this.pzoptTreeRect(tree, e.wx, e.wy, goX, yoff, sprite) || !pzopt.TreeBake.needsCopy(sprite, ownE, otherC)) {
+               continue;
+            }
+            if (square.getLightInfo(playerIndex) == null) {
+               continue;
+            }
+            float base = IsoDepthHelper.getSquareDepthData(camX, camY, square.x + 0.99F, square.y + 0.99F, z).depthStart;
+            base -= IsoDepthHelper.getChunkDepthData(PZMath.fastfloor(camX / 8.0F), PZMath.fastfloor(camY / 8.0F), e.wx, e.wy, z).depthStart;
+            if (base < 0.0F) {
+               continue;
+            }
+            ColorInfo light = this.sanitizeLightInfo(playerIndex, square);
+            boolean unlit = tree.getSprite().getProperties().has(IsoFlagType.unlit);
+            float cr = unlit ? 1.0F : light.r;
+            float cg = unlit ? 1.0F : light.g;
+            float cb = unlit ? 1.0F : light.b;
+            if (drawer == null) {
+               drawer = pzopt.TreeBake.alloc();
+            }
+            IsoDirections dir = tree.getForwardIsoDirection();
+            this.pzoptAddTreeTexture(drawer, tree.getSprite().getTextureForCurrentFrame(dir, tree), sprite.x0, sprite.y0, sprite.ground, base, cr, cg, cb, tileScale);
+            if (tree.attachedAnimSprite != null) {
+               for (int k = 0; k < tree.attachedAnimSprite.size(); k++) {
+                  IsoSpriteInstance inst = tree.attachedAnimSprite.get(k);
+                  this.pzoptAddTreeTexture(drawer, inst.parentSprite.getTextureForCurrentFrame(dir, tree), sprite.x0, sprite.y0, sprite.ground, base, cr, cg, cb, tileScale);
+               }
+            }
+         }
+      }
+      if (drawer == null) {
+         return true; // nothing reaches that texture after all
+      }
+      drawer.expectTexture(rcE.tex);
+      this.pzoptTreeAppends.add(new Object[] {rcE, e, drawer});
+      pzopt.TreeBake.appendsQueued++;
+      return true;
+   }
+
+   /**
+    * pzopt: treeAppend. Draws the queued tree quads into their neighbour textures, each inside the same
+    * begin / end sequence a bake uses (FlipY frame, FBORenderChunkStart without a clear, FBORenderChunkEnd)
+    * so the render thread binds the texture with its depth and regenerates its mipmaps. A texture that is not
+    * among this frame's composited ones is re-baked the old way instead.
+    */
+   private void pzoptFlushTreeAppends(int playerIndex, float zoom) {
+      if (this.pzoptTreeAppends.isEmpty()) {
+         return;
+      }
+      for (int i = 0; i < this.pzoptTreeAppends.size(); i++) {
+         Object[] entry = this.pzoptTreeAppends.get(i);
+         FBORenderChunk rcE = (FBORenderChunk)entry[0];
+         IsoChunk e = (IsoChunk)entry[1];
+         pzopt.TreeBake.Drawer drawer = (pzopt.TreeBake.Drawer)entry[2];
+         FBORenderLevels levelsE = e.getRenderLevels(playerIndex);
+         if (!FBORenderChunkManager.instance.toRenderThisFrame.contains(rcE) || levelsE.getFBOForLevel(rcE.getMinLevel(), zoom) != rcE
+               || levelsE.isDirty(rcE.getMinLevel(), zoom)) {
+            drawer.postRender(); // back to the pool
+            pzoptInvalidateTreeHolder(e, rcE.getMinLevel(), playerIndex, zoom);
+            pzopt.TreeBake.appendsFellBack++;
+            continue;
+         }
+         SpriteRenderer.instance.glDoEndFrame();
+         SpriteRenderer.instance.glDoStartFrameFlipY(rcE.w, rcE.h, rcE.highRes ? 1.0F : 0.0F, playerIndex);
+         rcE.beginMainThread(false);
+         SpriteRenderer.instance.drawGeneric(drawer);
+         rcE.endMainThread();
+         SpriteRenderer.instance.glDoEndFrame();
+         SpriteRenderer.instance.glDoStartFrame(Core.getInstance().getScreenWidth(), Core.getInstance().getScreenHeight(), Core.getInstance().getCurrentPlayerZoom(), playerIndex);
+         pzopt.TreeBake.appendsDrawn++;
+      }
+      this.pzoptTreeAppends.clear();
+   }
+
+   private final pzopt.TreeBake.Rect pzoptTreeAppendSprite = new pzopt.TreeBake.Rect();
+   private final pzopt.TreeBake.Rect pzoptTreeAppendOwn = new pzopt.TreeBake.Rect();
+   private final pzopt.TreeBake.Rect pzoptTreeAppendOther = new pzopt.TreeBake.Rect();
 
    /** One texture of a tree (main sprite or foliage overlay) placed like IsoSprite.performRenderFrame would. */
    private void pzoptAddTreeTexture(pzopt.TreeBake.Drawer drawer, Texture texture, float sx, float sy, float ground, float base,
@@ -4143,6 +4279,7 @@ public final class FBORenderCell {
          .append(" light info skipped=").append(pzoptLightInfoSkipped).append(" levels gated=").append(pzoptLightInfoLevelsGated);
       sb.append(pzopt.GpuSections.summary()); // pzopt: GPU sections (Config.GPU_SECTIONS)
       if (pzopt.PuddleCache.enabled()) { sb.append(" | ").append(pzopt.PuddleCache.stats()); } // pzopt
+      if (pzopt.RainSplashes.enabled()) { sb.append(" | ").append(pzopt.RainSplashes.stats()); } // pzopt
       if (pzopt.RainTiles.enabled()) { sb.append(" | ").append(pzopt.RainTiles.stats()); } // pzopt
       if (pzopt.FogPass.enabled()) { sb.append(" | ").append(pzopt.FogPass.stats()); } // pzopt: one-pass fog
       if (pzoptTreePassActive()) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
@@ -5548,6 +5685,11 @@ public final class FBORenderCell {
          IsoChunk chunk = perPlayerData1.onScreenChunks.get(i);
          if (z >= chunk.minLevel && z <= chunk.maxLevel && chunk.getRenderLevels(playerIndex).isOnScreen(z)) {
             IsoChunkLevel levelData = chunk.getLevelData(z);
+            if (pzopt.RainSplashes.enabled()) { // pzopt: same update without one Rand.NextBool per idle square per frame
+               pzopt.RainSplashes.update(levelData);
+               pzopt.RainSplashes.render(levelData, playerIndex);
+               continue;
+            }
             levelData.updateRainSplashes();
             levelData.renderRainSplashes(playerIndex);
          }
