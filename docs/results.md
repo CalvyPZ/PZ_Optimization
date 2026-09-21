@@ -1453,3 +1453,51 @@ side 2 %), so p99 differences under ~4 ms are inside the noise here. Notes:
 - One stock run had a single 236 ms frame (stock-2 max); nothing like it on the optimized side.
 - The Steam URL handler (`open steam://rungameid/108600`) from an ssh session does nothing
   visible; launching the `.app` with `open` or the JRE directly both work from ssh.
+
+## 2026-09-21 (16:38–16:58): "Let Me Drive! – Anti-Stutter Car Controls" (Workshop 3805307651) on the 120 km/h drive, four weathers
+
+Mod id `LetMeDrive` 0.2.3 by "under" (fetched with `steamcmd +login anonymous +workshop_download_item 108600
+3805307651`, copied to `~/Zomboid/mods/LetMeDrive`, enabled with `--mod LetMeDrive`, its "Debug tools" tick box
+pre-set in `~/Zomboid/Lua/ModOptions.ini` so its report lines land in console.txt). Lua only: on load it replaces
+`Events.X.Add` for OnTick / OnRenderTick / OnPlayerMove / OnPlayerUpdate / OnZombieUpdate / OnZombieCreate /
+OnLoadedMapZones / LoadGridsquare / LoadChunk, so any mod registered after it goes through its gate: LoadGridsquare
+handlers are queued per square and drained under a per-frame budget (`minFps` 60, `maxBudgetMs` 4), the per-frame
+events are timed and, above `shedKmh`, "heavy" ones run every other tick. Controls off by default (zoom cap, speed
+limit, shedder, its FPS limiter); on by default: the gate and a `collectgarbage("collect")` block. Nothing for the
+Java side of chunk streaming, which its page says outright.
+
+Runs `lmd-<seg>-<side>` (helper `/tmp/lmd-run.sh`): the `pzo-*-stock` set-up (our build with every runtime and
+boot key off, harness route driver present, uncapped, in-game overlay log + MangoHud, `--no-dashboard`,
+`uiRenderOffscreen=true` from options.ini), **direct launcher on every run (no Steam)**. `stock` = that set,
+`mod` = that set + `--mod LetMeDrive`, `opt` = build defaults (storm parity pass included). E:1200 at 122 km/h
+(`kmh=193`, 60 s), one run per cell; every route completed in 38.6–39.3 s at zoom 2.5 (the first `storm-opt`
+attempt clipped a roadside object at 1179 tiles — the known high-fps steering wander — and was re-run).
+Weathers: `weather=save` (clear), `fog=heavy` (1.0), `weather=storm` (lightning every 6 s), both.
+
+| run | fps | mean / p99 / p99.9 / max ms | >33 ms | stdev / jitter | 1 % low | < 240 fps | CPU | GPU busy | game thread | render thread |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `lmd-clear-stock` | 160.4 | 6.2 / 15.5 / 19.1 / 28.0 | 0 | 4.6 / 1.1 | 65 | 45 % | 31 % | 88 % | 71 % | 80 % |
+| `lmd-clear-mod` | 153.6 | 6.5 / 15.9 / 23.0 / 40.5 | 1 | 4.7 / 1.3 | 63 | 48 % | 31 % | 86 % | 72 % | 79 % |
+| `lmd-clear-opt` | **505.8** | 2.0 / 7.4 / 10.2 / 19.8 | 0 | 1.4 / 0.9 | 134 | 6 % | 29 % | 97 % | 59 % | 47 % |
+| `lmd-fog-stock` | 114.3 | 8.8 / 17.7 / 24.1 / 38.3 | 1 | 4.9 / 1.7 | 57 | 70 % | 29 % | 92 % | 72 % | 77 % |
+| `lmd-fog-mod` | 110.7 | 9.0 / 18.2 / 27.4 / 43.6 | 3 | 4.9 / 1.8 | 55 | 72 % | 29 % | 90 % | 75 % | 74 % |
+| `lmd-fog-opt` | **400.4** | 2.5 / 7.9 / 11.2 / 18.8 | 0 | 1.4 / 1.1 | 127 | 9 % | 27 % | 98 % | 57 % | 46 % |
+| `lmd-storm-stock` | 73.6 | 13.6 / 60.6 / 83.1 / 95.5 | 45 | 7.4 / 3.1 | 17 | 100 % | 30 % | 83 % | 89 % | 78 % |
+| `lmd-storm-mod` | 68.9 | 14.5 / 60.2 / 87.4 / 99.3 | 48 | 7.8 / 3.0 | 17 | 100 % | 30 % | 83 % | 92 % | 79 % |
+| `lmd-storm-opt` | **411.4** | 2.4 / 8.6 / 13.3 / 19.5 | 0 | 1.6 / 1.1 | 117 | 9 % | 28 % | 97 % | 75 % | 48 % |
+| `lmd-stormfog-stock` | 66.2 | 15.1 / 66.0 / 86.1 / 101.0 | 44 | 7.8 / 3.5 | 15 | 100 % | 30 % | 81 % | 89 % | 77 % |
+| `lmd-stormfog-mod` | 63.1 | 15.8 / 63.7 / 95.0 / 106.2 | 52 | 8.4 / 3.7 | 16 | 100 % | 29 % | 81 % | 93 % | 77 % |
+| `lmd-stormfog-opt` | **357.0** | 2.8 / 9.2 / 14.0 / 22.5 | 0 | 1.7 / 1.2 | 109 | 12 % | 27 % | 98 % | 67 % | 46 % |
+
+- The mod is 4–5 % slower than stock in every weather (160 → 154, 114 → 111, 74 → 69, 66 → 63 fps), p99 within
+  noise, p99.9 / max a few ms worse, and never better on any tail metric. Its console reports explain why: on the
+  harness mod list it `captured 0 LoadGridsquare handlers` — nothing to defer — yet its gate still takes every
+  square through its own queue (~5,000 squares/s drained on this route, 455 dropped in the storm) and times every
+  per-frame event; `gc calls blocked 0`, `shed 0` in every run. Its own "stalls ≥ 33 ms" line counts the same
+  storm stalls stock has (12–26 per 10 s window with the mod, all lightning re-bakes on the Java side).
+- The stock game is game-thread-bound in the storms (89 % of a core, 100 % of frames under 240 fps, 1 % low 15–17
+  fps); fog on stock costs 29 % (the ~190 screen-wide fog rectangles per level, `docs/findings-fog-2026-09-21.md`).
+- Our build, same runs, same direct launcher: 3.2x clear, 3.5x fog, 5.6x storm, 5.4x storm + fog, zero frames
+  over 33 ms in all four; GPU at 97–98 % (the wall since the 400 fps pass), storm re-bakes spread by
+  `lightingRebakeBudget`. The mod's "fps" figure in its report is Lua ticks per 10 s window (~half the presented
+  frames on this uncapped route), not the frame rate.

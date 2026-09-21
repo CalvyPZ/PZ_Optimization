@@ -298,6 +298,7 @@ in `docs/results.md`).
 | [Every Texture Optimized](https://steamcommunity.com/sharedfiles/filedetails/?id=3119788162) | 616 k | 6,142 re-encoded textures | 163 / 15.2 | 72 / 63 | 135 / 29 |
 | [Lugli – Optimizations](https://steamcommunity.com/sharedfiles/filedetails/?id=3790863696) | 3 k | ZombieBuddy patches | 162 / 15.3 | 73 / 60 | 135 / 28 |
 | [Zed's Better FPS](https://steamcommunity.com/sharedfiles/filedetails/?id=3622986450) ([42.20 fix](https://steamcommunity.com/sharedfiles/filedetails/?id=3782613536)) | 47 k | ZombieBuddy patches: GL state cache, sprite batching | 161 / 15.2 | 75 / 59 | 134 / 28 |
+| [Let Me Drive!](https://steamcommunity.com/sharedfiles/filedetails/?id=3805307651) | new (posted 2026-09-20) | Lua event gate: other mods' chunk handlers deferred, GC-call block, optional zoom cap / speed limit | 154 / 15.9 | 69 / 60 | — (drive only; fog 111 / 18.2 vs stock 114 / 17.7, storm + fog 63 / 64 vs 66 / 66) |
 | **PZ_Optimization** | | class overrides | **481 / 8.8** | **246 / 13.8** | **456 / 8.5** |
 
 Every one of them measures within run-to-run noise of the stock game (fps ±4 %, p99 ±3 ms):
