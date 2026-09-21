@@ -1377,3 +1377,23 @@ MaxGCPauseMillis=25`), runs `dell-graal-*`:
 precompile, script parsing and cache reads all run on cold Graal-compiled code). The desktop and
 laptop verdicts (2026-09-20: ~15 % behind C2) hold and are worse on four cores. Not adopted;
 `jre64` is Zulu again, the Graal copy stays at `jre64_graal` on the Dell.
+
+### 15:20–15:28: night + thunderstorm + heavy fog at 120 km/h on the Dell, stock vs the low-end profile (with the fog pass)
+
+Branch `low-end-profile` with master merged (fog pass `b67c94f`, `fogPass=true` default).
+`--preset storm-fog --mode drive --flag route=E:1200 --flag kmh=193 --flag time_of_day=1`, both
+runs verified in `pzopt-bench.out`: `night_strength=1.0 weather=storm precipitation=1.0 fog=1.0
+fog_quality=0` (ImprovedFog, so the pass applies: fog buffer 480x270), routes complete. G1 on both;
+stock = `--prop enabled=false` with the Dell's stock Display options, optimized = the profile set
+(`treeBakeMaxChunksPerSec=24 lightFPS=10 uiRenderFPS=30 MaxGCPauseMillis=25`). Runs `dell-nightstorm-*`.
+
+| | fps | mean | p50 | p90 | p99 | p99.9 / max | >33 ms | CPU | GPU | game thread | render thread | load |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| stock | 15.4 | 64.8 | 50.9 | 110 | 202 | 826 / 2153 | 627 | 100 % | 53 % | 70 % | 41 % | 94 s |
+| **profile + fog pass** | **31.4** | **31.8** | **27.1** | **45.8** | **101** | **274 / 1369** | **361** | 100 % | 62 % | 80 % | 24 % | 35 s |
+
+2.0x: 15.4 → 31.4 fps, p99 202 → 101 ms; the render thread drops from 41 % to 24 % of a core
+(the fog pass's one draw call and the rain tiles / puddle cache replacing ~100k per-frame quads),
+which on four cores is CPU the game thread gets back (70 → 80 %). Still far from 60 on this
+scene: the box is at 100 % with the streamer at 46 % (120 km/h) and the lighting thread at
+32–40 %, and the storm's lightning re-bakes land in the tail (max 1.4 s).
