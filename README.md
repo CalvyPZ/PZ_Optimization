@@ -37,8 +37,7 @@ machine you play on.
 
 1. [See it in action](#see-it-in-action)
 2. [Results at a glance](#results-at-a-glance)
-   - [Heavy-fog thunderstorm at 120 km/h](#heavy-fog-thunderstorm-at-120-kmh)
-   - [Thunderstorm at 120 km/h](#thunderstorm-at-120-kmh)
+   - [Weather: fog & lightning at 120 km/h](#weather-fog--lightning-at-120-kmh)
    - [Rosewood spin, uncapped](#rosewood-spin-uncapped)
    - [Downtown Louisville, 2,500 zombies](#downtown-louisville-2500-zombies)
    - [Boot and load](#boot-and-load)
@@ -107,48 +106,37 @@ Same machine and conditions as the video unless a section says otherwise. "Stock
 build with every optimization switched off (`enabled=false`), which reproduces the shipped
 game exactly.
 
-### Heavy-fog thunderstorm at 120 km/h
+### Weather: fog & lightning at 120 km/h
 
-Heavy fog was the slowest weather by far: stock draws it as one screen-wide rectangle per
-tile row and level, so every pixel is shaded up to twelve times, one draw call per row. The
-fog pass (`fogPass`, experimental, on by default) draws every row in one call into a
-quarter-size fog buffer and blends it over the scene once. The run is the 1,200-tile drive in a
-thunderstorm in full fog, six lightning strikes on the route (`--preset storm-fog`, runs
-`sbs-stormfog-stock` / `sbs-stormfog-opt`, 2026-09-21).
-
-![120 km/h through a heavy-fog thunderstorm, stock vs all optimizations + fog pass](docs/media/drive-120kmh-storm-fog-stock-vs-optimized.jpg)
-
-| Metric | Stock (cap 300) | All optimizations (uncapped) |
-|---|---|---|
-| fps, mean | 60 | 191 |
-| Frame time, mean / p50 | 16.6 / 15.4 ms | 5.2 / 4.1 ms |
-| Frame time, p90 / p99 / p99.9 | 19.9 / 71.7 / 92.9 ms | 9.1 / 16.5 / 22.3 ms |
-| Frames over 33 ms | 49 | 0 |
-
-Heavy fog alone on the same route in clear weather: stock fog 220 fps, the fog pass
-333–392 fps, no fog 447 fps (the fog's own GPU time 1.52 → 0.35 ms a frame). Full account
-in [`docs/findings-fog-2026-09-21.md`](docs/findings-fog-2026-09-21.md).
-
-### Thunderstorm at 120 km/h
-
-The same drive in a thunderstorm without the fog, a lightning strike every 6 s (runs
-`sbs2-storm120-stock-1` / `sbs2-storm120-opt-1`, 2026-09-21). The optimized side has the
-puddle cache in GPU buffers, the early-depth puddle shaders, the rain tiles, the lightning
-re-bake spread and the tree copies ([Weather](#3-weather-puddles-rain-lightning-fog)). A
-thunderstorm with lightning now runs at 85 % of the clear-weather frame rate on this machine
-(392 vs 454–465 fps); before this pass it was 232 vs 420. Video (AV1 HDR):
-`docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.mp4`, script
-`harness/stitch-storm2-sbs.sh`, findings in
-[`docs/findings-storm-parity-2026-09-21.md`](docs/findings-storm-parity-2026-09-21.md).
+The 1,200-tile drive in a thunderstorm with a lightning strike every 6 s, and the same drive in
+a thunderstorm inside heavy fog (`--preset storm-fog`, six strikes). Heavy fog was the slowest
+weather by far: stock draws it as one screen-wide rectangle per tile row and level, so every
+pixel is shaded up to twelve times, one draw call per row; the fog pass (`fogPass`, on by
+default) draws every row in one call into a quarter-size fog buffer and blends it over the
+scene once. The storm side has the puddle cache in GPU buffers, the early-depth puddle
+shaders, the rain tiles, the lightning re-bake spread and the tree copies
+([Weather](#3-weather-puddles-rain-lightning-fog)). A thunderstorm with lightning now runs at
+85 % of the clear-weather frame rate on this machine (392 vs 454–465 fps); before this pass it
+was 232 vs 420. Runs `sbs2-storm120-stock-1` / `sbs2-storm120-opt-1` and `sbs-stormfog-stock` /
+`sbs-stormfog-opt` (2026-09-21); videos (AV1 HDR)
+`docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.mp4` and
+`drive-120kmh-storm-fog-stock-vs-optimized-1080.mp4`; findings in
+[`docs/findings-storm-parity-2026-09-21.md`](docs/findings-storm-parity-2026-09-21.md) and
+[`docs/findings-fog-2026-09-21.md`](docs/findings-fog-2026-09-21.md).
 
 ![120 km/h through a thunderstorm, stock vs optimized](docs/media/drive-120kmh-storm-stock-vs-optimized-2026-09-21.jpg)
 
-| Metric | Stock | Optimized |
-|---|---|---|
-| fps, mean | 70 | 392 |
-| Frame time, p50 / p99 / p99.9 / max | 13.3 / 67 / 84 / 92 ms | 2.0 / 9.9 / 14.4 / 21 ms |
-| Frames over 33 ms | 46 | 0 |
-| GPU / game thread / render thread busy | 85 / 85 / 83 % | 98 / 68 / 45 % |
+| Metric | Lightning: stock | Lightning: optimized | Fog + lightning: stock | Fog + lightning: optimized |
+|---|---|---|---|---|
+| fps, mean | 70 | 392 | 60 | 191 |
+| Frame time, mean / p50 | 14.2 / 13.3 ms | 2.6 / 2.0 ms | 16.6 / 15.4 ms | 5.2 / 4.1 ms |
+| Frame time, p90 / p99 / p99.9 | 16.6 / 67 / 84 ms | 4.6 / 9.9 / 14.4 ms | 19.9 / 71.7 / 92.9 ms | 9.1 / 16.5 / 22.3 ms |
+| Frames over 33 ms | 46 | 0 | 49 | 0 |
+| GPU / game thread / render thread busy | 85 / 85 / 83 % | 98 / 68 / 45 % | | |
+
+Stock is capped at 300 by the in-game limiter, moot at 60–70 fps; optimized is uncapped. Heavy
+fog alone on the same route in clear weather: stock fog 220 fps, the fog pass 333–392 fps, no
+fog 447 fps (the fog's own GPU time 1.52 → 0.35 ms a frame).
 
 ### Rosewood spin, uncapped
 
