@@ -171,7 +171,8 @@ real above twice that.
 `setparams` + `write_colr` tags), like the gpu-screen-recorder captures; the stitch scripts keep HDR
 sources 10-bit end to end (no tone-map) and map SDR sources to PQ. Text colours in the HDR
 compositions are PQ code values (~60 % = comfortable white). Posters (`.jpg`) and the README GIFs
-are tone-mapped (hable, 200 nits) from the HDR file (2026-09-20 night).**
+are tone-mapped (hable, 200 nits) from the HDR file (2026-09-20 night). Colours, type and layout for
+all of it: `docs/media-style.md`.**
 
 Use `--record` on drive runs and read frames from `recording.mp4` with ffmpeg (tile contact
 sheet) before concluding anything about visuals; it is a monitor capture, so the game window
