@@ -97,6 +97,77 @@ Flags that must be on every measured run: `--prop instrument=true` (else no
 20-28 ms frame). Use the DEFAULT bench save for drive runs; `--source-save
 Apocalypse/2026-09-18_12-18-03` starts off the highway and the car crashes.
 
+## Run queue (harness/queue.sh, 2026-09-21)
+
+The game dirs, displays and Steam clients of the desktop and the three laptops are shared resources;
+`queue.sh` serialises every use of them per machine, routes each session's jobs to the machine that
+session is bound to, and writes a result file per job, so sessions never pgrep, message peers or hand-roll
+ssh wrappers. State is machine-global under `~/.local/state/pzopt-queue/` (`PZQ_DIR`); a job runs from the
+checkout whose `queue.sh` submitted it (its `run.sh`, `build/classes`, `harness/runs/`).
+
+```
+harness/queue.sh submit run      [--machine desktop|flip|dell|mac] [--install opt|stock|keep|<repo>]
+                                 [--goal "<what the change should do>"] [--against <run|baseline.json>]...
+                                 [--parity-against <recorded run>] [--cap N] [--wait] -- <harness/run.sh args>
+harness/queue.sh submit mp       [--goal ...] [--against ...] [--wait] -- <label> [stock]   # desktop only
+harness/queue.sh submit workshop [--wait] --notes "<change notes>" -- --tag win-<rev>-<commit>   # desktop only
+harness/queue.sh submit cmd      [--install ...] [--wait] --label <name> -- <showcase-record.sh ...>   # desktop only
+harness/queue.sh list | machines | bind <machine> | unbind | watch [--exit-on disconnect|job|any] | events [N]
+harness/queue.sh status | wait | result | log [-f] | cancel <id|label>
+harness/queue.sh start [machine...] | stop [--now]   # monitor + workers (transient user units pzq-monitor, pzq-<m>)
+```
+
+**Machines** (`harness/queue/machines.conf`: desktop = local; flip, dell, mac = ssh host, key, checkout,
+`PZ_ROOT`, `run_args`, display-env source, inhibit / steam_shutdown flags, installer, `runner=`). One worker
+unit per machine runs that machine's FIFO. A remote `run` job: rsync `harness/` (+ `build/classes` with
+`--install opt`, installed there with `install.sh --from` / `run-mac.sh install`) to the machine's checkout →
+a generated wrapper (`<job>/remote-job.sh`) exports the desktop session's display env from plasmashell's
+environ, unlocks + inhibits sleep (Dell), shuts Steam down (Dell), runs `harness/run.sh <args> <run_args>`
+(`run-mac.sh` on the Mac) in the ssh foreground → the run dir is rsync'd back to
+`harness/runs/<m>-<label>-<ts>/` (`machine=` added to `run.opts`) and analysed + judged on the desktop.
+
+**Session affinity**: the session id is `$CLAUDE_CODE_SESSION_ID` (every tool shell has it; `PZQ_SESSION`
+overrides). The first `submit` (or `bind <m>`) records `sessions/<sid>/machine`; every later submit goes there,
+`--machine` elsewhere is refused unless `--rebind`. mp / workshop / cmd jobs are desktop-only.
+
+**Constant connection + notifications**: `pzq-monitor` keeps an ssh master per remote machine
+(ControlMaster socket under `machines/<m>/`, ServerAliveInterval 5 s × 2 = the heartbeat) and probes it every
+5 s. A transition (measured: 2 s after a killed sshd, ≤ 15 s for a silent link loss) goes to `machines/<m>/state`,
+`events.log`, the `events` file of every session bound to the machine or with a job queued there, and
+`notify-send`; the machine's pending jobs show `blocked: <m> disconnected` and start when it is back; a
+running job whose connection drops fails with exit 70 and its session is told. Sessions get woken by running
+`harness/queue.sh watch --exit-on any` in a background Bash (exit 3 = a disconnect, 0 = a job of yours
+finished) or by `Monitor`ing `sessions/<sid>/events` / a job's `status` file; `events` prints the recent ones.
+
+**Preflight** on the desktop (waits with the reason in `blocked`): a game process, a `run.sh` /
+`mp/run.sh` / `showcase-record.sh` / `ui-drive.py workshop` outside the queue, a locked desktop; a
+`workshop` job also needs a really logged-on Steam client (one client restart when the session was replaced).
+`--install opt` = `pzopt.sh reinstall` from the job's checkout (build first), `stock` = uninstall, reinstalled
+from the same checkout once the desktop queue drains; `--prop enabled=false` needs no install.
+
+**result.txt** (`--wait` prints it, exit = the job's):
+- `run`: exit code, `run_dir`, `route complete` count, resolution / OpenGL lines, `zoom=` & scene lines from
+  `pzopt-bench.out`, `run.opts` facts (machine), `analyze.py` output, console errors, then **Jev**: `judge.py`
+  over the card with `--goal` (default: a valid stand-alone measurement + the objective's headroom question;
+  the route-completion, crash and machine facts are appended to the goal text because the card cannot carry
+  them) and every `--against` run / baseline json → `verdict=achieved|partial|no_change|regressed|invalid
+  confidence= goal_met= tail_regressed= setup_matches_goal= headroom_finding=` and `<run>/judge.json`;
+  `--parity-against <run>` adds `parity-judge.py` over the two recordings → `parity=<kind> confidence=
+  parity_maintained= look_needed=` and `<run>/parity-judge.json`. `list` shows the verdict per job.
+- `mp`: the `harness/mp/run.sh` summary, `window.py <run>:27` and the same `judge.py` verdict; the dedicated
+  server is stopped after the job unless the next pending desktop job is also `mp`.
+- `workshop`: `scripts/workshop.sh` staging → `steam -applaunch` → `ui-drive.py workshop --notes` (every
+  screen judged by Jev; the per-step lines are in the result) → `workshop_log.txt` tail + the change-notes
+  page's newest entry; `~/Zomboid/.../workshop.txt` copied to `docs/workshop/workshop.txt` (uncommitted). A
+  failure keeps `failure.png` and quits the game so the queue goes on.
+- `cmd`: exit code, output tail, the run dir if the command produced one under the label.
+
+`cancel` drops a pending job or SIGTERMs a running one's process group (run.sh's EXIT trap restores
+`latestSave.ini`; a remote job's ssh is cut). Logs: `$PZQ_DIR/worker-<m>.log`, `monitor.log`;
+`systemctl --user status pzq-monitor pzq-desktop`. Built 2026-09-21 and tested against a throw-away sshd
+(connect / hard disconnect / reconnect, blocked job resuming) — the first real laptop job is the smoke test
+of each machine's conf entry.
+
 ## Launchers
 
 - `steam` needs the Steam launch options `<repo>/harness/steam-launch.sh %command%`; env vars
@@ -157,6 +228,7 @@ same window with `harness/mp/window.py <run>:27 ...`; results in `docs/results.m
 | `dashboard.py` | all runs | `docs/benchmark-progress.html`; regenerate after every run |
 | `waits.py <run>` | JFR wait events (`--jfr --jfr-setting jdk.JavaMonitorWait#threshold=0ms` etc.) | per-thread blocking sites in the route window |
 | `attribute.py` / `sections.py` | JFR samples / GameProfiler recording (`--game-profiler`) | where slow-frame time goes (`sections.py --thread game\|render`: the game records `MainThread` = game thread and `main` = render thread; the probes themselves cost ~8 % of the game thread; prefer JFR) |
+| `flamegraph.py <run> [--out x.svg] [--folded x.txt] [--all]` | pzopt-stacks.out (the overlay's folded game-thread stacks, one block per second, frame-id dictionary; every harness run with the overrides on) | self-contained SVG flame graph of the game thread over the route window (root `GameWindow.frameStep` at the bottom, hover = share, click = zoom, search box; update green / render blue / lighting amber / pzopt magenta), `<run>/flamegraph.svg` by default; `--folded` = classic `a;b;c count` lines; `--all` = the whole run (boot, load). No JFR needed; safepoint-biased at 100 Hz |
 | `gametree.py <run>` | JFR samples (`--jfr --jfr-period 1`) | inclusive call tree of the game thread over the route (`--root`, `--thread main` for the GL thread, `--callers method`, `--min-pct`) |
 | `loadtime.py <runs>` | pzopt-loadtrace.out | load-after-Continue phases side by side |
 | `loadsheet.sh <run>` | recording.mp4 + loadtrace | contact sheet around the load |
@@ -166,7 +238,7 @@ same window with `harness/mp/window.py <run>:27 ...`; results in `docs/results.m
 | `flicker-triple.py <run>/recording.mp4 FRAME` | same | crops of one frame triple with the A-B-A pixels marked (frame-numbered; use `-ss` times for anything compared with flicker.py) |
 | `judge.py <run> --against <run|baseline.json>... --goal "<what the change should do>"` | analyze.py summaries | TypeSafe (Jev) verdict on the uplift: achieved / partial / no_change / regressed / invalid, goal met, tail regressed, setup matches the goal, hardware-headroom finding. Code computes the card, the deltas (compare.py noise floors, presented-frame ratios) and the objective's facts; Jev only reads that JSON. Exit 0 = achieved; writes `<run>/judge.json` |
 | `parity-judge.py <run|mp4 A> <run|mp4 B> [--seconds 20] [--context "..."] [--shots a.png b.png]` | two `--record` recordings of the same route | visual-parity verdict from Jev over numbers only (it never sees pixels): flicker transients, black share, luma pops, the blocky-lights hard-jump metric (> 40 at 30 fps) and solid jump blocks, HUD corners separated, window aligned at the end of on-screen activity (the quit). Known pairs: `bl-amb-stock` vs `bl-amb-before` → lighting_pops 0.93, vs `bl-amb-fix` → parity 0.79. Exit 0 = parity |
-| `ui-drive.py workshop --notes "..." [--dry-run]` / `step "<screen>" "<control>"` / `read` | live screen (spectacle) or `--screen png` | drives the game's menus: OCR (tesseract, inverted 2x; `~/.local/share/tessdata`) → one Jev request per step (screen up?, which line is the control, error showing?) → press-and-release at the line; focus check via xdotool; skill coordinates as fallback only on a confirmed screen. The Workshop deploy sequence lives in `workshop_steps`; validated offline on the 2026-09-21 deploy screenshots, exit 2 stops before any unconfirmed click |
+| `ui-drive.py workshop --notes "..." [--dry-run]` / `step "<screen>" "<control>"` / `read` | live screen (spectacle) or `--screen png` | drives the game's menus: OCR (tesseract, inverted 2x; `~/.local/share/tessdata`) → one Jev request per step (screen up?, which line is the control, error showing?) → press-and-release at the line; focus check via xdotool; skill coordinates as fallback only on a confirmed screen. The Workshop deploy sequence lives in `workshop_steps`; first live deploy 2026-09-21 23:16: 13/13 steps by OCR, no fallback used, 56 s from main menu to desktop (the manual loop took 228 s), `Upload finished : OK`. Preflight stays the skill's (Steam session, peers); hide the in-game overlay with F9 when it covers the wizard title line. Exit 2 stops before any unconfirmed click; `--screens a.png,b.png,...` replays stored screens |
 | `typesafe_client.py` | | shared Jev client (`ask`, `noul`, `choice`, `fmt`); `typesafe-sdk` when importable (user-level pip on the desktop), plain urllib elsewhere; key from `$TYPESAFE_API_KEY` or `~/.config/pzopt/typesafe.key`, never in the repo; ~0.6-1 s per request; `python3 harness/typesafe_client.py` is the smoke test |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
 | `mods-table.py` | numbers typed in from results.md | `docs/media/workshop-mods-comparison.png` (the Workshop mods table image in the README) |

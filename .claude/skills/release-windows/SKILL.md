@@ -93,6 +93,13 @@ numbered after the last image in `docs/workshop/images/` and listed in `docs/wor
    "Page update ..."); when it does not (`No content change detected`), the page check is the
    only proof.
 
+**Queued form (preferred, 2026-09-21):** `harness/queue.sh submit workshop --wait --notes "<change notes>" -- --tag
+win-<rev>-<commit>` does the whole block below (Steam session check with one client restart, stale flag file,
+`workshop.sh --tag`, `steam -applaunch`, `ui-drive.py workshop`, `workshop_log.txt` + change-notes page verification,
+`workshop.txt` copied to `docs/workshop/`) after whatever runs are ahead in the queue, and writes the verification
+into the job's `result.txt`; a failure keeps `failure.png` and quits the game. Commit `docs/workshop/workshop.txt`
+afterwards. By hand:
+
 Preflight, in this order; stop at the first failure:
 
 ```bash
@@ -112,7 +119,7 @@ only hovers the game's buttons, use mousedown / sleep 0.15 / mouseup. `/tmp/wscl
 exactly that on 2026-09-21; recreate it if gone. `harness/ui-drive.py workshop --notes "<change notes>"` runs the
 whole table below by itself (screenshot → OCR → TypeSafe judges the screen and picks the control → press; the
 table's coordinates are its fallbacks; it stops with exit 2 on any unconfirmed screen and verifies the upload from
-`workshop_log.txt`); first live use still gets the maintainer watching, `--dry-run` only judges. By hand:
+`workshop_log.txt`); first live run 2026-09-21 23:16 went 13/13 by OCR in 56 s; hide the overlay with F9 first if it covers the title line. By hand:
 take `spectacle -b -n -f -o` before every click and
 downscale it (`ffmpeg -vf scale=1280:-1`) to check the expected screen is up and has focus — the
 2026-09-21 retry clicked and typed into the desktop after the game lost focus.
