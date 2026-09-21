@@ -972,3 +972,97 @@ the live thread list (`/proc/<pid>/task/*/comm`) has no `pzopt-overlay-u` thread
 `pzopt-overlay.out` is written; the bench (harness implies sampling) fills all four utilization columns
 (cpu 37 %, gpu 19 %, game 89 %, render 24 %), 81 fps mean on the spinning route warm (73 on the first
 boot after the rebuild while the caches regenerated, p99.9 361 → 92 ms).
+
+## 2026-09-21 (09:50–10:30): the Dell laptop (i5-6300HQ / GTX 960M), stock vs optimized, spin and 120 km/h drive
+
+Machine: `diego-dell` (192.168.0.109): Core i5-6300HQ (4 cores, no SMT, 2.3 GHz), GTX 960M via
+PRIME offload (NVIDIA 580.178.04, `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`),
+7.8 GB RAM, SATA SSD, KDE Wayland 1920x1080, on AC; game 42.20.4 `b0bbce05d5` with **its stock
+launcher JSON: `-Xmx3072m -XX:+UseZGC`** (the desktop runs on the tuned G1 JSON with a 4 GB heap).
+Runs over ssh from the desktop, game started directly (never through Steam), `--no-mangohud`
+(in-game overlay log), `--no-dashboard`, `--option frameRate=240`, max zoom = 2.0 on this display
+(the desktop's is 2.5). "Stock" = the build installed with `--prop enabled=false` (every override on
+the build-mismatch stock path, harness plumbing only). One run per cell. Runs `dell-*`.
+
+| run | route | fps | mean | p50 / p90 | p99 | p99.9 / max | >33 ms | cpu | gpu | GC cycles in window | game-thread alloc stalls |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| dell-spin-stock-1 | spin S:450 turn=90 | 6.8 | 147 | 120 / 221 | 492 | 2711 / 3472 | 280 / 283 | 98 % | 20 % | 2 (14 s wall) | 2, 0.7 s |
+| dell-spin-opt-1 | spin S:450 turn=90 | **9.1** | **110** | 86 / 183 | **328** | 1451 / 1548 | 306 / 319 | 98 % | 26 % | 7 (71 s wall) | 2, 0.5 s |
+| dell-drive120-stock-1 | E:1200 kmh=193 | **25.5** | **39** | 30 / 65 | **141** | 346 / 2654 | 454 / 1098 | 99 % | 39 % | 3 (16 s wall) | 2, 1.2 s |
+| dell-drive120-opt-1 | E:1200 kmh=193 | 11.6 | 86 | 62 / 125 | 242 | 3812 / 6730 | 547 / 649 | 100 % | 39 % | 9 (85 s wall) | 10, 6.7 s |
+
+Milliseconds except fps and counts; cpu/gpu from `sysmon.sh` over the route window; GC from
+`gc.log` (ZGC concurrent cycles overlapping the window and `Allocation Stall (MainThread)` lines).
+
+Findings:
+- **This machine is CPU-saturated in every cell** (all four cores at 98–100 %, GPU never above
+  40 %), so the frame rate is the sum of every thread that wants a core, not the game thread's
+  own frame. Stock puts ~330 % of a core into `MainThread` 65 / `World Streamer` 50 / `Lighting`
+  49 / render 22; optimized puts the same ~320 % into `MainThread` 54 / `Lighting` 35 / three
+  `pzopt-recalc` workers 31 / render 12 / streamer 9. The game thread gets **fewer** cycles with
+  the overrides on because the recalc pool and ZGC compete with it for four cores.
+- **The 3 GB ZGC heap is the wall on the drive.** The optimized drive ran 9 GC cycles in a 56 s
+  window and froze the game thread in ten allocation stalls (6.7 s, max 3.2 s: the p99.9 of
+  3.8 s), stock three cycles and two stalls. ZGC needs idle cores to finish its concurrent cycles;
+  with none it falls behind the allocation rate and stalls the allocator. Same mechanism as the
+  laptop's G1 > ZGC finding (2026-09-20 05:05 section), much worse here with half the cores.
+- On the spinning route the overrides still win (6.8 → 9.1 fps, p99 492 → 328 ms) because the
+  route is streamer-bound (1064 chunks in 34–38 s: stock queue wait 419 ms mean, optimized 152 ms).
+  On the drive (3,000 chunks in 40–49 s) the heap/CPU budget dominates and the overrides lose
+  (25.5 → 11.6 fps).
+- Not a launcher/renderer artefact: both sides identical launch (direct, PRIME, same JSON,
+  same options), routes complete, `OpenGL version: 4.6.0 NVIDIA` in every console.
+- The optimized drive run sat **22 min at "Creating display"** (`pzopt-loadtrace.out`: gap
+  between `Creating display` and `closest width=320 freq=58`, one thread at 106 % of a core,
+  GPU 0) before the world loaded and the route ran normally; the route-window numbers are from
+  after that. KDE's idle lock had refused the previous launch attempt (`the desktop session is
+  locked`), `loginctl unlock-session` cleared it and a `SimulateUserActivity` D-Bus poke every 30 s
+  did not keep it away; the journal shows no lock/DPMS event, so what held the window creation is
+  open. `systemd-inhibit` needs polkit over ssh.
+
+Next on this class of machine (not run, maintainer's call): the G1 launcher JSON
+(`config/launcher/ProjectZomboid64.g1.json`) and/or `-Xmx4096m` on the Dell, and `workers=1`
+for the recalc pool when `cores <= 4` (the pool's three threads on four cores starve the game
+thread). Both are one `--gc g1` / `--prop workers=1` run each.
+
+### 10:30–10:58 follow-up: redo of the optimized drive, GC / heap / pool one-at-a-time
+
+Same machine, same route (E:1200, kmh=193, max zoom 2.0, 240 cap, direct launch), one run per
+cell, KDE sleep + lock held off by a D-Bus inhibit holder (`org.freedesktop.ScreenSaver` +
+`PowerManagement.Inhibit` from a long-lived python process; the 22 min hole in `opt-1` was the
+laptop suspending). Boot = launch → Continue, load = Continue → world ready (`loadtime.py`).
+
+| run | GC | heap | recalc workers | fps | mean | p50 | p99 | p99.9 / max | game thread % | boot | load |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| drive120-stock-1 | ZGC | 3 GB | – | 25.5 | 39.3 | 29.8 | 141 | 346 / 2654 | 65 | 24.9 s | 92.0 s |
+| drive120-stock-g1-2 | G1 | 3 GB | – | 22.3 | 44.8 | 32.4 | 176 | 335 / 2306 | 55 | 26.3 s | 79.2 s |
+| drive120-opt-1 | ZGC | 3 GB | 3 | 11.6 | 86.0 | 62.4 | 242 | 3812 / 6730 | 54 | (suspend) | 43.6 s |
+| drive120-opt-2 | ZGC | 3 GB | 3 | 13.0 | 76.8 | 61.4 | 228 | 946 / 2035 | 54 | 26.0 s | 43.3 s |
+| drive120-opt-x4g-1 | ZGC | **4 GB** | 3 | 14.2 | 70.5 | 54.7 | 201 | 1518 / 2830 | 53 | 22.4 s | 50.2 s |
+| drive120-opt-w1-1 | ZGC | 3 GB | **1** | **25.7** | **39.0** | 30.3 | **112** | 437 / 3007 | **72** | 22.3 s | 44.8 s |
+| drive120-opt-g1-1 | **G1** | 3 GB | 3 | 22.9 | 43.7 | 34.4 | 148 | 420 / 1490 | 63 | 23.1 s | **30.4 s** |
+| drive120-opt-g1w1-1 | G1 | 3 GB | 1 | 17.5 | 57.3 | 46.2 | 190 | 561 / 1346 | 54 | 27.4 s | 39.5 s |
+
+Findings:
+- **The optimized defaults halve the drive frame rate on this 4-core machine, reproducibly**
+  (11.6 / 13.0 / 14.2 fps over three runs vs 22–26 stock). Not the heap: 4 GB changes nothing
+  (still 8 game-thread allocation stalls, 4.5 s).
+- **Either fix alone brings it back to stock**: `workers=1` (no `pzopt-recalc` threads; recalc
+  back on the World Streamer) gives the best line of the day, 25.7 fps / p99 112 ms with the game
+  thread at 72 % of a core; `--gc g1` gives 22.9 fps and zero allocation stalls (21 pauses,
+  0.3 s total, max 69–85 ms). Both together read 17.5 fps, inside this box's run-to-run spread
+  (stock ZGC vs G1 differ by 3 fps on identical work; no thermal throttling: counters 0, 52–56 °C).
+- Mechanism: with four cores and every one pegged, the three recalc workers plus ZGC's concurrent
+  threads take cycles straight from the game thread (54 % of a core with the pool vs 65–72 %
+  without). The pool sizing (`workers` = cores − 1) assumes idle cores; on ≤ 4 cores it should
+  default to 1. ZGC additionally stalls the allocator when it cannot keep up (2–10 stalls of up to
+  3.6 s per run in every ZGC cell with the pool on).
+- Load: the pzopt caches take Continue → world from 79–92 s (stock) to 30–45 s (D "animations +
+  file tasks" 32–38 s → 0.2 s once `~/Zomboid/pzopt/` is warm). Boot to the menu is 22–27 s on
+  every row; the desktop's boot gains do not show on this CPU.
+- `stock-g1-1` died at t=34 s with an NVIDIA `Xid 69` class error and SIGABRT in the GL driver
+  (960M, driver 580.178.04): a driver fault, retried as `-2`.
+
+Proposal from this: default `workers` to 1 when `cores <= 4` (one line in `Config`), and note in
+the README that ZGC-shipping launcher JSONs on 4-core machines benefit from `--gc g1` / the G1
+JSON. Not changed yet.
