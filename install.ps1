@@ -44,17 +44,20 @@ function Find-GameDir {
   $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
   if ($steam) { $libs += $steam }
   $libs += "${env:ProgramFiles(x86)}\Steam", "$env:ProgramFiles\Steam"
+  # [IO.Path]::Combine, not Join-Path: libraryfolders.vdf keeps libraries on unplugged drives
+  # and Join-Path throws DriveNotFoundException for those instead of returning a path
   foreach ($lib in $libs) {
-    $vdf = Join-Path $lib 'steamapps\libraryfolders.vdf'
-    if (Test-Path $vdf) {
-      foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) {
+    $vdf = [IO.Path]::Combine($lib, 'steamapps\libraryfolders.vdf')
+    if (Test-Path -LiteralPath $vdf) {
+      foreach ($m in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw), '"path"\s+"([^"]+)"')) {
         $libs += $m.Groups[1].Value.Replace('\\', '\')
       }
     }
   }
   foreach ($lib in $libs | Select-Object -Unique) {
-    foreach ($c in @((Join-Path $lib 'steamapps\common\ProjectZomboid'), (Join-Path $lib 'steamapps\common\ProjectZomboid\projectzomboid'))) {
-      if ((Test-Path (Join-Path $c 'projectzomboid.jar')) -and (Test-Path (Join-Path $c 'ProjectZomboid64.json'))) { return $c }
+    if (-not (Test-Path -LiteralPath $lib)) { continue }
+    foreach ($c in @([IO.Path]::Combine($lib, 'steamapps\common\ProjectZomboid'), [IO.Path]::Combine($lib, 'steamapps\common\ProjectZomboid\projectzomboid'))) {
+      if ((Test-Path -LiteralPath ([IO.Path]::Combine($c, 'projectzomboid.jar'))) -and (Test-Path -LiteralPath ([IO.Path]::Combine($c, 'ProjectZomboid64.json')))) { return $c }
     }
   }
   return $null
