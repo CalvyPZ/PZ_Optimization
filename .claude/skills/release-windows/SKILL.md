@@ -56,6 +56,41 @@ line per OS. Details: `docs/workshop.md`.
 
 ## Steam Workshop deploy (hands-off, 2026-09-21)
 
+### A user-visible change gets a "New!" section on the page, as one image
+
+Before the upload, when the release adds something a player sees (a mode, a button, a scene
+that got faster), the description gets a section at the top, right after the showcase GIF:
+
+```
+[h1]New! <feature name>[/h1]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/<NN>-<slug>.jpg[/img]
+```
+
+**Nothing else in the section: the image carries all the text** — the title ("New! ..."), the
+date of the measurement (top right, `YYYY-MM-DD`), one or two lines saying what the feature is
+and the machine, and the stock-vs-new table with a bar per row. Render it with a script under
+`harness/` in the `docs/media-style.md` style (`harness/lowend-table.py` is the template:
+`DATE`, `ROWS`, the two colour roles stock amber / new green, a gain column), then
+`ffmpeg -y -i docs/media/<name>.png -vf scale=1920:-1 -q:v 3 docs/workshop/images/<NN>-<slug>.jpg`,
+numbered after the last image in `docs/workshop/images/` and listed in `docs/workshop.md`
+(Images). Steps, in order:
+
+1. Render the PNG and the JPG; look at the JPG (Read) before using it.
+2. Add the two lines to `docs/workshop/description.txt`. Keep the substituted page under
+   8,000 characters with margin (the game appends ~50): `python3 -c` the length after
+   replacing `@VERSION@ @REV@ @NFILES@ @ID@`; aim for ≤ 7,900 and shorten an older caption if
+   needed. The previous "New!" section moves down or goes when the next one arrives; the
+   README keeps the long form.
+3. Commit the script, the PNG, the JPG and the description and **push master first**: the
+   `[img]` URLs are raw GitHub links to `master`, so the page shows a broken image until the
+   push is public.
+4. `scripts/workshop.sh --zip <the release zip>` re-stages `workshop.txt` from the description,
+   copy it to `docs/workshop/workshop.txt`, commit, then the click sequence below. A
+   description-only upload (same files) gets **no changelog entry** (`No content change
+   detected` in `workshop_log.txt`): verify it on the item page
+   (`curl -s https://steamcommunity.com/sharedfiles/filedetails/?id=3805285544 | grep -c 'New!'`)
+   and by the image URL being reachable, not on the changelog page.
+
 Preflight, in this order; stop at the first failure:
 
 ```bash
