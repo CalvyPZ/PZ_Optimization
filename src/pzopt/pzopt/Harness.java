@@ -42,6 +42,8 @@ import zombie.vehicles.BaseVehicle;
  *   jitter   tiles     bench/parity, with hold: every frame of the hold the player's X alternates between the end
  *                      square's east edge minus and plus this much (e.g. 0.05), i.e. the square under the player
  *                      flips every frame, like zombies shoving a player standing on a roof edge (carport flicker rig)
+ *   shot_burst N       bench/parity with hold: 1 s into the hold write N in-game screenshots on N consecutive frames,
+ *                      Screenshots/pzopt-burst-NN.png (with jitter: alternating positions, frame-exact flicker checks)
  *   hold     seconds   bench/parity: after the last leg wait this long before quitting (no teleports: the player may walk); the turn
  *                      keeps spinning the facing (a still camera with changing cutaways, for flicker recordings)
  *   shot_at  seconds   bench/parity: this far into the route hold the camera (no teleport, no turn) for 6 s and,
@@ -107,6 +109,10 @@ public final class Harness {
    private static boolean jitterSide;
    private static long holdStartNs = 0L;
    private static int shotPhase; // 0 = pending, 1 = holding, 2 = done
+   /** bench/parity with hold: this many consecutive-frame screenshots 1 s into the hold (flag shot_burst, 0 = off). */
+   private static int shotBurst;
+   private static boolean jitterY; // flag jitter_y: jitter the Y instead of the X
+   private static int burstTaken;
    private static long shotHoldNs;
    private static boolean shotRequested, shot2Requested;
    private static float settle = 15f;
@@ -224,6 +230,8 @@ public final class Harness {
          shotAt = Float.parseFloat(HarnessFlags.get("shot_at", "0"));
          holdSecs = Float.parseFloat(HarnessFlags.get("hold", "0"));
          jitterTiles = Float.parseFloat(HarnessFlags.get("jitter", "0"));
+         shotBurst = Integer.parseInt(HarnessFlags.get("shot_burst", "0"));
+         jitterY = "true".equals(HarnessFlags.get("jitter_y", "false"));
          settle = Float.parseFloat(HarnessFlags.get("settle", "15"));
          maxSeconds = Float.parseFloat(HarnessFlags.get("max_seconds", "90"));
          cruiseKmh = Float.parseFloat(HarnessFlags.get("kmh", "60"));
@@ -460,13 +468,28 @@ public final class Harness {
                   Log.info("harness: route legs done at " + p.getXi() + "," + p.getYi() + "; holding " + holdSecs + " s" + (turnDegPerSec != 0f ? " with turn=" + turnDegPerSec : ""));
                }
                if ((nowNs - holdStartNs) / 1e9f < holdSecs) {
+                  if (shotBurst > 0 && burstTaken < shotBurst && (nowNs - holdStartNs) / 1e9f >= 1f) {
+                     // flag shot_burst: N in-game screenshots on N consecutive frames of the hold (frame-exact flicker checks)
+                     try {
+                        Core.getInstance().TakeFullScreenshot(String.format("pzopt-burst-%02d.png", burstTaken));
+                     } catch (Exception e) {
+                        Log.warn("harness: burst screenshot failed: " + e);
+                     }
+                     burstTaken++;
+                     if (burstTaken == shotBurst) {
+                        Log.info("harness: " + shotBurst + " burst screenshots written (Screenshots/pzopt-burst-NN.png)");
+                     }
+                  }
                   if (jitterTiles > 0f) {
                      // flag jitter: the square under the player flips every frame across the east edge of the end square
                      if (jitterEdgeX == 0f) {
-                        jitterEdgeX = p.getXi() + 1f;
-                        Log.info("harness: jitter " + jitterTiles + " tiles across x=" + jitterEdgeX + " every frame");
+                        jitterEdgeX = jitterY ? p.getYi() + 1f : p.getXi() + 1f;
+                        Log.info("harness: jitter " + jitterTiles + " tiles across " + (jitterY ? "y=" : "x=") + jitterEdgeX + " every frame");
                      }
                      jitterSide = !jitterSide;
+                     if (jitterY) { // flag jitter_y: the same across the south edge (north/south jumps)
+                        p.setY(jitterEdgeX + (jitterSide ? jitterTiles : -jitterTiles));
+                     } else
                      p.setX(jitterEdgeX + (jitterSide ? jitterTiles : -jitterTiles));
                   }
                   return;

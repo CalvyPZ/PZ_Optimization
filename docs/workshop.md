@@ -29,6 +29,11 @@ Windows instruction is one `powershell -ExecutionPolicy Bypass -File ...\install
 the Linux one is `bash .../install.bash`; `--from <dir>` / `-From <dir>` name the folder
 explicitly. The page text lives in `docs/workshop/description.txt` (Steam BBCode;
 `@REV@ @VERSION@ @COMMIT@ @NFILES@ @NOVERRIDES@ @SHA@ @ID@` are filled in by the script).
+**Steam caps the description at 8,000 characters** and the game appends `\n\nWorkshop ID: <id>\nMod ID:
+PZ_Optimization` (~50) before submitting, so the staged `description=` lines must stay under ~7,950;
+over that the upload ends in `failed to update workshop item, result=8` (`Invalid Parameter` in
+`workshop_log.txt`) with nothing changed (2026-09-21, three attempts). A description-only update gets no
+change-notes entry (`No content change detected`); verify it on the item page instead.
 
 Rules the game's validator (`zombie.core.znet.SteamWorkshopItem.validateContents`) enforces,
 checked by the script before the in-game screen has to refuse:
@@ -70,7 +75,8 @@ Optimized" THUMB_ONLY_OPT=1 python3 harness/showcase-thumbnail.py docs/workshop/
 one SDR still per segment of `docs/media/showcase-stock-vs-all-optimizations.mp4` (boot/load,
 120 km/h drive, options tab, Rosewood spin, fog, storm, results card; 1920x900, the posters'
 hable tone-map at 18 / 33 / 50 / 65 / 82 / 98 / 116 s), `08` the options-tab close-up from
-`docs/media/`. `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
+`docs/media/`, `09` the overlay, `10` the Workshop-mods comparison table (`docs/media/workshop-mods-comparison.png`
+from `harness/mods-table.py`, scaled to 1920 wide as JPG). `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
 the header) and a YouTube URL for the showcase video.

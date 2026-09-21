@@ -4170,6 +4170,7 @@ public final class FBORenderCell {
       sb.append(pzopt.GpuSections.summary()); // pzopt: GPU sections (Config.GPU_SECTIONS)
       if (pzopt.PuddleCache.enabled()) { sb.append(" | ").append(pzopt.PuddleCache.stats()); } // pzopt
       if (pzopt.RainTiles.enabled()) { sb.append(" | ").append(pzopt.RainTiles.stats()); } // pzopt
+      if (pzopt.FogPass.enabled()) { sb.append(" | ").append(pzopt.FogPass.stats()); } // pzopt: one-pass fog
       if (pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Config.TREE_BAKE_PASS) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
       if (pzopt.Config.TREE_BAKE_MAX_CHUNKS_PER_SEC > 0) { sb.append(" | trees per-frame frames: ").append(pzoptTreesPerFrameFrames).append(" chunks/s now ").append(String.format(java.util.Locale.ROOT, "%.0f", pzopt.ChunkRate.perSecond())); } // pzopt: treeBakeMaxChunksPerSec
       sb.append(" | top tilesets:");
@@ -5583,7 +5584,25 @@ public final class FBORenderCell {
    private void renderFog(int playerIndex) {
       if (!(IsoCamera.frameState.camCharacterZ < 0.0F)) {
          if (PerformanceSettings.fogQuality != 2) {
+            if (pzopt.FogPass.enabled()) { // pzopt: the FBO renderer draws the rectangles at endFrame anyway; skip the square walk that only fed the row iterator
+               pzopt.GpuSections.begin("fog"); // pzopt: GPU section
+               ImprovedFog.getDrawer().startFrame();
+               boolean first = true;
+               for (int z = 0; z <= 1; z++) {
+                  if (ImprovedFog.startRender(playerIndex, z)) {
+                     if (first) {
+                        first = false;
+                        ImprovedFog.startFrame(ImprovedFog.getDrawer());
+                     }
+                     ImprovedFog.endRender();
+                  }
+               }
+               ImprovedFog.getDrawer().endFrame();
+               pzopt.GpuSections.end("fog");
+               return;
+            }
             FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
+            pzopt.GpuSections.begin("fog"); // pzopt: GPU section
             ImprovedFog.getDrawer().startFrame();
             boolean bFirst = true;
 
@@ -5645,6 +5664,7 @@ public final class FBORenderCell {
             }
 
             ImprovedFog.getDrawer().endFrame();
+            pzopt.GpuSections.end("fog"); // pzopt: GPU section
          }
       }
    }

@@ -100,7 +100,11 @@ Verify, never trust the in-game log (it prints "finished" after a failure too):
 grep 3805285544 ~/.local/share/Steam/logs/workshop_log.txt | tail -3   # "Uploaded new content (ManifestID ...)" + "Upload finished ... : OK"
 ```
 and fetch `https://steamcommunity.com/sharedfiles/filedetails/changelog/3805285544`: the new entry
-must be the first one. `failed to update workshop item, result=2` in the game = `Failed to initialize
+must be the first one. A description-only update (same files) gets no changelog entry at all (`No content
+change detected`): verify it on the item page instead. `result=8` / `Invalid Parameter` = the description
+is over Steam's 8,000 characters (the game appends ~50 for Workshop ID / Mod ID): trim
+`docs/workshop/description.txt`, re-stage, CLOSE the log and start the click sequence again from WORKSHOP
+(the game re-reads workshop.txt on the way). `failed to update workshop item, result=2` in the game = `Failed to initialize
 build on server (No Connection)` in `workshop_log.txt` = the Steam session is dead (see preflight).
 
 Afterwards the animated `preview.gif` is gone (the in-game uploader sends `preview.png`); restoring it
