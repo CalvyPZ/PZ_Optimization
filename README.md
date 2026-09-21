@@ -237,11 +237,26 @@ spinning Rosewood route, uncapped, one run per cell (2026-09-20):
 2.2x on performance (balanced is the same run: the game thread is pegged at 99 % of one core
 either way), 1.6x under the ~21 W power-saver cap; frames per watt double.
 
-**Dell with an i5-6300HQ / GTX 960M** (4 cores, 3 GB ZGC heap, 2026-09-21): the spin improves
-(6.8 → 9.1 fps, p99 492 → 328 ms) but the 120 km/h drive gets **worse** (25.5 → 11.6 fps):
-with four cores the recalc pool and ZGC's concurrent cycles compete with the game thread, and
-the drive ran 9 GC cycles with 6.7 s of allocation stalls. On a machine like that lower
-`workers` or leave the streamer keys off; the GC/heap follow-up is in `docs/results.md`.
+**Dell with an i5-6300HQ / GTX 960M** (4 cores, 1920x1080, Linux, NVIDIA 580; 2026-09-21).
+Four cores change the trade-offs: the recalc pool's threads and the tree bakes both cost the
+game thread more than they save, so the **Low-end hardware** profile in the Optimizations tab
+(no pool, trees baked only while walking, lighting updates 10/s, UI redraw 30/s; see
+[Settings](#settings)) plus the G1 launcher JSON is what these numbers use. Same routes as
+above at max zoom, G1 collector on both sides, one run per cell:
+
+| Route | Stock fps · mean · p99 | Low-end profile fps · mean · p99 |
+|---|---|---|
+| Walking through Rosewood, facing spinning | 49 · 20.5 ms · 69 ms | **81** · 12.3 ms · 30 ms |
+| Drive at 60 km/h | 76 · 13.1 ms · 43 ms | **93** · 10.7 ms · 28 ms |
+| Drive at 120 km/h | 44 · 22.8 ms · 80 ms | **68** · 14.6 ms · 40 ms |
+| Drive at 120 km/h, **night, thunderstorm, heavy fog** | 15.4 · 64.8 ms · 202 ms | **31.4** · 31.8 ms · 101 ms |
+
+The night storm in full fog (`--preset storm-fog --flag time_of_day=1`, six lightning strikes
+on the route) doubles: 15.4 → 31.4 fps, p99 202 → 101 ms, the render thread from 41 % to
+24 % of a core (the fog pass's single draw call, the rain tiles and the puddle cache), CPU the
+game thread gets back on a box that is at 100 % throughout. World load 70 → 25 s. The stock
+JSON's ZGC is not usable here (allocation stalls of up to 3 s once its concurrent threads lose
+the four cores) and GraalVM 25.3 is 25–40 % behind HotSpot C2. Full pass in `docs/results.md`.
 
 ### Against the Workshop's performance mods
 
