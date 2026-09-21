@@ -94,15 +94,30 @@ the header) and a YouTube URL for the showcase video.
 results-card capture from 25 s, a square crop centred on the character (the game camera follows
 them, so the crop is fixed), "PZ Optimized" on a band at the top and the performance overlay
 pasted live along the bottom (the left 747x305 of the panel at 0.6x: fps / ms, percentiles,
-1 %-low / jitter / spikes, loads, verdict, graph; text ~14 px, not denoised). 448x448, 6 fps,
-26 frames (4.4 s: the shot, then the in-game zoom-out and the walk), 96 colours, median-3
-denoise on the game part, gifsicle `--lossy=100`: ~917,000 bytes. Steam's preview limit is
+1 %-low / jitter / spikes, loads, verdict, graph; text ~14 px, not denoised). 448x448, 12 fps,
+53 frames (4.4 s: the shot, then the in-game zoom-out and the walk; per-frame delays 8/8/9 cs so
+the GIF plays at real time), 96 colours, median-3 denoise on the game part, gifsicle
+`--lossy=100`: 987,416 bytes. Steam's preview limit is
 1,000,000 bytes, not 1 MiB (the game's own check says 1,024,000): a 1,011,209-byte GIF came back
 from steamcmd with `Failed to update workshop item (Limit exceeded)`. The asphalt
 grain is what costs (plain LZW is ~145 KB a frame at 512 px whatever the palette); ImageMagick's
 fuzz transparency ghosts on the panning camera and dither triples the size, so neither is used.
-Needs `gifsicle` (`pacman -S gifsicle`, or `GIFSICLE=<binary>`). `GIF_END=x:y:w` gives the
-older zoom-into-the-overlay variant. `09-performance-overlay.jpg` is the overlay panel cropped
+
+Until 2026-09-21 the GIF was 6 fps (26 frames at ~35 KB). Doubling the rate at the same per-frame
+quality came from the HUD elements, not the scene (script header for the numbers): the banner's
+text rows and the header band are translucent, so the scrolling game behind them changed every
+pixel of a static panel; they now keep their previous pixels within a tolerance (glyph changes
+always pass, the panel background freezes: `GIF_TEXT_TOL`, `GIF_HUD_TOL`), and the frame graph is
+redrawn every 4th frame (`GIF_GRAPH_EVERY`). The scene rows only get a spatial denoise
+(`GIF_SCENE_VF`, hqdn3d 3/2 + a mild bilateral: SSIM 0.943 against the composited frames vs the old
+GIF's 0.948). Temporal holds on the scene are out: the camera is never still in this clip (a
+(-4,-2) px/frame drift under the opening shot), so held low-contrast asphalt turns into a stale
+mosaic (SSIM 0.915 at a 6-level tolerance); gifski's dither crawls; 64-80 colours posterize.
+Steam re-encodes the GIF on its CDN (frames kept) and shows it at 268 px on the item page, 448 px
+behind the enlarge click, and at native size where the description embeds it from GitHub.
+Needs `gifsicle` (`pacman -S gifsicle`, or `GIFSICLE=<binary>`; on the desktop it is built from
+source into `~/.local/bin`). `GIF_END=x:y:w` gives the older zoom-into-the-overlay variant.
+`09-performance-overlay.jpg` is the overlay panel cropped
 from the 25 s frame for the carousel and the "Performance overlay" section.
 
 The game's uploader hard-codes `preview.png` and rejects anything that is not a PNG, so the GIF

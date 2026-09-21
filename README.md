@@ -85,6 +85,10 @@ Optimizations tab, the spinning Rosewood route, heavy fog, a thunderstorm. The i
 overlay shows the live frame time; the big number is the 1 s average from its log, the
 results card at the end the whole-route numbers below.
 
+![The optimized build at the end of the showcase: 500 fps uncapped with the performance overlay, animated](docs/workshop/images/00-showcase-thumbnail.gif)
+
+*The last beat of the showcase as the Workshop preview (12 fps GIF): the optimized build at ~500 fps uncapped, the in-game overlay along the bottom.*
+
 | Scene | Stock | Optimized | Change |
 |---|---|---|---|
 | Boot, launch to main menu | 7.3 s | 4.8 s | -34 % |
@@ -572,6 +576,7 @@ Full list with comments: [`src/pzopt/pzopt/Config.java`](src/pzopt/pzopt/Config.
 | `uncappedFps` | `auto` | `true` / `false` force the cap off / on for a run |
 | `instrument` | `false` | per-chunk and per-frame timings for the harness |
 | `gpuSections` | `false` | GPU microseconds per frame section in the log (measurement only) |
+| `luaChecksumExempt` | `true` | the pzopt Lua files are left out of the multiplayer Lua file check (a server without them refused the join) |
 | **Chunk streaming** | | |
 | `parallel` / `workers` | `true` / `min(4, cores-1)` | recalc chunks on a worker pool (`false` = stock single thread) and its width |
 | `wake` | `true` | wake the streamer on enqueue instead of the 140 ms poll |
@@ -900,10 +905,13 @@ Safety rails:
   methods (ZombieBuddy 2.3.3 with ZBBetterFPS loaded fine next to these files; both sets
   active together has not been tested). The Lua-only performance mods measured above are
   harmless but add nothing.
-- **Multiplayer is untested.** The files are client side: there is nothing to install on a
-  server. Several shadowed classes (`IsoChunk`, `WorldStreamer`, `ChunkSaveWorker`,
-  `IsoMetaGrid`) also run on a server, and neither hosting nor joining with the overrides
-  installed has been exercised. Do not install on a dedicated server.
+- **Multiplayer is lightly tested.** The files are client side: there is nothing to install on a
+  server. Joining a community server used to fail with `File doesn't exist on the server:
+  media/lua/shared/pzopt/pzopt_keybinding.lua` (the client lists every `media/lua` file to the
+  server); since 2026-09-21 the `NetChecksum` override leaves the `pzopt/` Lua files out of that
+  list (`luaChecksumExempt`), as the game does for `SandboxVars.lua`. Several shadowed classes
+  (`IsoChunk`, `WorldStreamer`, `ChunkSaveWorker`, `IsoMetaGrid`) also run on a server, and
+  hosting with the overrides installed has not been exercised. Do not install on a dedicated server.
 - **Fog pass (experimental).** With `fogPass` on (the default) power lines can flicker
   slightly in heavy fog while the camera moves; frame captures do not show it, the maintainer
   does at 240 Hz. Untick "Fog in one pass (experimental)" in the tab for stock fog.
