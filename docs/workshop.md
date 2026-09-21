@@ -26,7 +26,9 @@ page states the commit and the zip sha256 so the two can be checked against each
 Steam installs it under `steamapps/workshop/content/108600/<id>/mods/PZ_Optimization/42/`.
 Both installers look for a `pzopt-classes/` folder next to themselves first, so the whole
 Windows instruction is one `powershell -ExecutionPolicy Bypass -File ...\install.ps1` line and
-the Linux one is `bash .../install.bash`; `--from <dir>` / `-From <dir>` name the folder
+the Linux and macOS one is `bash .../install.bash` (on macOS the item lives under
+`~/Library/Application Support/Steam/steamapps/workshop/...` and the files go into
+`Project Zomboid.app/Contents/Java`); `--from <dir>` / `-From <dir>` name the folder
 explicitly. The page text lives in `docs/workshop/description.txt` (Steam BBCode;
 `@REV@ @VERSION@ @COMMIT@ @NFILES@ @NOVERRIDES@ @SHA@ @ID@` are filled in by the script).
 **Steam caps the description at 8,000 characters** and the game appends `\n\nWorkshop ID: <id>\nMod ID:
@@ -78,7 +80,9 @@ hable tone-map at 18 / 33 / 50 / 65 / 82 / 98 / 116 s), `08` the options-tab clo
 `docs/media/`, `09` the overlay, `10` the Workshop-mods comparison table (`docs/media/workshop-mods-comparison.png`
 from `harness/mods-table.py`, scaled to 1920 wide as JPG), `11` the "New! Low-end hardware mode" table
 (`docs/media/dell-lowend-comparison.png` from `harness/lowend-table.py`; the image carries the whole
-section's text and the date, the description holds only the `[img]`, see the release-windows skill).
+section's text and the date, the description holds only the `[img]`, see the release-windows skill),
+`12` the "New! macOS support" table (`docs/media/mac-comparison.png` from `harness/mac-table.py`: the
+M1 Pro 120 km/h drive, two-run means, the Terminal install line in the footer; 2026-09-21).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes

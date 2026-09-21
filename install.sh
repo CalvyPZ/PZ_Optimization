@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Install, remove or inspect the PZ_Optimization class overrides on Linux from a release zip.
+# Install, remove or inspect the PZ_Optimization class overrides on Linux or macOS from a release zip.
 # Standalone: needs bash, curl or gh, and unzip (or python3 / bsdtar). No JDK, no clone.
 #
 #   ./install.sh                     # find the game, download the zip for its revision, install
 #   ./install.sh --zip pzopt-b0bbce05d5-classes.zip
 #   ./install.sh --from /path/to/pzopt-classes   # an unpacked zip, e.g. the Steam Workshop item
-#   ./install.sh --dir /path/to/ProjectZomboid/projectzomboid
+#   ./install.sh --dir /path/to/ProjectZomboid/projectzomboid   # macOS: .../Project Zomboid.app/Contents/Java
 #   ./install.sh --status
 #   ./install.sh --uninstall
 #
-# The zip holds the same class files for Windows and Linux (both Steam depots ship one jar);
+# The zip holds the same class files for Windows, Linux and macOS (the Steam depots ship one jar);
 # the runtime guard disables them, with one console.txt line, if the game revision differs.
 # Files written are recorded in <game dir>/pzopt-installed.txt, the manifest scripts/pzopt.sh
 # uses, so either tool can uninstall what the other installed. projectzomboid.jar is never
-# modified.
+# modified. On macOS the game is "Project Zomboid.app": the files go into Contents/Java, which the
+# bundle's JavaAppLauncher puts ahead of the jar on the class path (no launcher file to edit).
 #
 # The zip is fetched from the GitHub releases with curl (GITHUB_TOKEN is used if set, to
 # avoid API rate limits) or with the gh CLI when it is logged in; --zip skips the download.
@@ -38,26 +39,32 @@ while [[ $# -gt 0 ]]; do
 done
 
 die() { echo "error: $*" >&2; exit 1; }
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }  # macOS has shasum only
 
 # --- locate the game ----------------------------------------------------------------------
 
 candidates() {
   local lib
   for vdf in "$HOME/.local/share/Steam/steamapps/libraryfolders.vdf" "$HOME/.steam/root/steamapps/libraryfolders.vdf" \
-             "$HOME/.steam/steam/steamapps/libraryfolders.vdf" "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"; do
+             "$HOME/.steam/steam/steamapps/libraryfolders.vdf" "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf" \
+             "$HOME/Library/Application Support/Steam/steamapps/libraryfolders.vdf"; do
     [[ -f "$vdf" ]] || continue
     sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"/\1/p' "$vdf" | while IFS= read -r lib; do
       echo "$lib/steamapps/common/ProjectZomboid/projectzomboid"
       echo "$lib/steamapps/common/ProjectZomboid"
+      echo "$lib/steamapps/common/ProjectZomboid/Project Zomboid.app/Contents/Java"
     done
   done
   echo "$HOME/.local/share/Steam/steamapps/common/ProjectZomboid/projectzomboid"
   echo "$HOME/.steam/steam/steamapps/common/ProjectZomboid/projectzomboid"
+  echo "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/Project Zomboid.app/Contents/Java"
 }
+# Linux/Windows depots: the launcher JSON next to the jar; macOS: the jar is Contents/Java of the .app bundle
+is_game_dir() { [[ -f "$1/projectzomboid.jar" ]] && { [[ -f "$1/ProjectZomboid64.json" || -f "$1/../Info.plist" ]]; }; }
 
 if [[ -z "$dir" ]]; then
   while IFS= read -r c; do
-    [[ -f "$c/projectzomboid.jar" && -f "$c/ProjectZomboid64.json" ]] && { dir="$c"; break; }
+    is_game_dir "$c" && { dir="$c"; break; }
   done < <(candidates)
   [[ -n "$dir" ]] || die "game folder not found; pass --dir <folder containing projectzomboid.jar>"
 fi
@@ -65,6 +72,7 @@ fi
 JAR="$dir/projectzomboid.jar"
 JSON="$dir/ProjectZomboid64.json"
 MANIFEST="$dir/pzopt-installed.txt"
+MAC_LAUNCHER="$dir/../MacOS/JavaAppLauncher"   # the .app bundle's launcher (macOS depot)
 
 jar_revision() {
   # zombie.GitVersion holds REVISION as a constant-pool string; no JDK needed to read it
@@ -85,7 +93,7 @@ if [[ $mode == status ]]; then
     while read -r rel sha; do
       [[ "$rel" == \#* || -z "$rel" ]] && continue
       if [[ ! -f "$dir/$rel" ]]; then echo "  MISSING  $rel"; bad=1
-      elif [[ "$(sha256sum "$dir/$rel" | cut -d' ' -f1)" != "$sha" ]]; then echo "  MODIFIED $rel"; bad=1; fi
+      elif [[ "$(sha256 "$dir/$rel")" != "$sha" ]]; then echo "  MODIFIED $rel"; bad=1; fi
     done < "$MANIFEST"
     [[ $bad -eq 0 ]] && echo "  all files present and unchanged"
   else
@@ -119,11 +127,16 @@ fi
 for pid in $(pgrep -f '[P]rojectZomboid64' || true); do
   [[ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" == "$(readlink -f "$dir")" ]] && die "the game is running from $dir; close it first"
 done
+if [[ -x "$MAC_LAUNCHER" ]] && pgrep -f "$(cd "$dir/.." && pwd)/MacOS/JavaAppLauncher" >/dev/null 2>&1; then
+  die "the game is running from $dir; close it first"
+fi
 [[ -f "$MANIFEST" ]] && die "already installed (see --status); run --uninstall first"
 [[ -n "$REV" ]] || die "could not read the game revision from $JAR"
 
 # the launcher must search "." before the jar or loose classes never load
-if command -v python3 >/dev/null; then
+if [[ ! -f "$JSON" && -x "$MAC_LAUNCHER" ]]; then
+  : # macOS: JavaAppLauncher builds -Djava.class.path=<Contents/Java>/ and appends the jars after it (verified 42.20.4)
+elif command -v python3 >/dev/null; then
   python3 - "$JSON" <<'EOF' || die "$JSON does not list \".\" before projectzomboid.jar on the classpath; loose classes would never load"
 import json,sys
 cp=json.load(open(sys.argv[1])).get("classpath",[])
@@ -154,8 +167,10 @@ elif [[ -z "$zip" ]]; then
     command -v curl >/dev/null || die "need curl (or the gh CLI) to download; or pass --zip"
     auth=(); [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
     api="https://api.github.com/repos/$REPO_SLUG/releases"
-    rels=$(curl -fsSL "${auth[@]}" -H "Accept: application/vnd.github+json" "$api?per_page=50") || die "could not list releases of $REPO_SLUG"
-    found=$(python3 - "$rels" "$pattern" "$tag" <<'EOF2'
+    # ${auth[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u
+    rels=$(curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$api?per_page=50") || die "could not list releases of $REPO_SLUG"
+    if command -v python3 >/dev/null; then
+      found=$(python3 - "$rels" "$pattern" "$tag" <<'EOF2'
 import json,sys
 rels,pattern,tag=json.loads(sys.argv[1]),sys.argv[2],sys.argv[3]
 for r in rels:
@@ -165,9 +180,16 @@ for r in rels:
 sys.exit(1)
 EOF2
 ) || die "no release has $pattern (your game revision $REV is a build these classes were not built for)"
+    else
+      # no python3 (a Mac without the Command Line Tools): each asset object starts with its API url and
+      # carries its name a few fields later; the release's tag_name precedes its assets array
+      found=$(printf '%s' "$rels" | tr -d '\n ' | grep -oE '"tag_name":"[^"]*"|"url":"[^"]*/releases/assets/[0-9]+","id":[0-9]+,"node_id":"[^"]*","name":"[^"]*"' \
+        | awk -v pat="$pattern" -v want="$tag" -F'"' '/^"tag_name"/ {t=$4; next} $NF=="" && $(NF-1)==pat && (want=="" || t==want) {print t, $4; exit}')
+      [[ -n "$found" ]] || die "no release has $pattern (your game revision $REV is a build these classes were not built for)"
+    fi
     tag=${found%% *}; url=${found#* }
     echo "downloading $pattern from release $tag"
-    curl -fsSL "${auth[@]}" -H "Accept: application/octet-stream" -o "$tmp/$pattern" "$url"
+    curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" -o "$tmp/$pattern" "$url"
   fi
   zip="$tmp/$pattern"
 fi
@@ -215,17 +237,17 @@ while IFS= read -r rel; do
   [[ -e "$dir/$rel" ]] && die "refusing to overwrite existing file: $dir/$rel (a previous install? run --uninstall)"
 done <<< "$files"
 
-jar_before=$(sha256sum "$JAR" | cut -d' ' -f1)
+jar_before=$(sha256 "$JAR")
 if [[ -n "$from" ]]; then copy_dir "$from" "$dir"; else extract_zip "$zip" "$dir"; fi
 {
   echo "# files written by install.sh — do not edit"
   echo "# revision=$zip_rev installed=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  while IFS= read -r rel; do echo "$rel $(sha256sum "$dir/$rel" | cut -d' ' -f1)"; done <<< "$files"
+  while IFS= read -r rel; do echo "$rel $(sha256 "$dir/$rel")"; done <<< "$files"
 } > "$MANIFEST"
-jar_after=$(sha256sum "$JAR" | cut -d' ' -f1)
+jar_after=$(sha256 "$JAR")
 [[ "$jar_before" == "$jar_after" ]] || die "projectzomboid.jar changed during install (this should be impossible)"
 [[ -n "${tmp:-}" ]] && rm -rf "$tmp"
 
-echo "installed $(echo "$files" | wc -l) files into $dir for game revision $zip_rev; projectzomboid.jar untouched"
+echo "installed $(echo "$files" | wc -l | tr -d ' ') files into $dir for game revision $zip_rev; projectzomboid.jar untouched"
 echo "launch from Steam; ~/Zomboid/console.txt shows one '[pzopt] loaded override ... active' line per class"
 echo "settings: Options > Optimizations in the game, or $dir/pzopt.properties"

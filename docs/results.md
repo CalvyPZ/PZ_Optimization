@@ -1412,3 +1412,44 @@ master 5645dc1 merged (fog pass included). Findings: `docs/findings-storm-parity
 | `sbs2-storm120-opt-1` | defaults (2026-09-21 storm pass: puddleVbo, puddleEarlyZ, rainSplashesFast, treeAppend on top of the 09-20 storm work and the fog pass) | none | 392.1 | 2.0 / 9.9 / 14.4 / 21.3 | 0 | 98 % / 68 % / 45 % |
 
 Same route, same build for both panes (props only). The 2026-09-20 pair was 71.5 vs 268.7 fps.
+
+## 2026-09-21 (15:45–16:15): macOS — MacBook Pro M1 Pro, 120 km/h drive, stock vs optimized
+
+First run of the overrides on the macOS Steam depot. Machine: MacBook Pro, Apple M1 Pro (8 CPU /
+14 GPU cores), 16 GB, macOS 27.0, Apple's OpenGL over Metal (`OpenGL version: 2.1 Metal - 91.7`),
+game 42.20.4 `b0bbce05d5` (same jar as the desktop), 1920x1200 fullscreen at 120 Hz, vsync off,
+`frameRate=240`, `uiRenderOffscreen=true` (the Mac's own option), zoom 2.5, bundled Zulu 25.0.1
+JRE with the Info.plist options (ZGC, `-Xmx3072m`). Route: `--mode drive --flag route=E:1200
+--flag kmh=193 --flag zoom=max --prop instrument=true --option frameRate=240` through
+`harness/run-mac.sh` over ssh (direct launch, `-Dzomboid.steam=0`, no MangoHud; frame times from
+`pzopt-frames.out`, machine CPU/GPU from `top` + `ioreg`). Stock = the same install with
+`--prop enabled=false`. Two runs per side, one at a time; every route completed (1,200 tiles in
+38.6–39.1 s, ~122 km/h), no crash.
+
+| Run | fps mean | frame mean / p99 / p99.9 / max (ms) | >33 / >50 ms | queue wait mean / p50 (ms) | CPU (8 cores) | GPU | game / render thread |
+|---|---|---|---|---|---|---|---|
+| mac-drive120-stock-1 | 143.2 | 7.0 / 17.0 / 35.3 / 74.6 | 7 / 3 | 155.5 / 157.8 | 56 % | 72 % | 78 / 76 % |
+| mac-drive120-stock-2 | 146.5 | 6.8 / 16.0 / 29.1 / 235.7 | 3 / 2 | 156.1 / 154.9 | 57 % | 72 % | 80 / 77 % |
+| mac-drive120-opt-1 | **213.0** | 4.7 / 11.7 / 23.2 / 47.9 | 1 / 0 | 48.0 / 8.9 | 54 % | 77 % | 87 / 64 % |
+| mac-drive120-opt-2 | **193.2** | 5.2 / 15.7 / 26.1 / 38.9 | 2 / 0 | 40.8 / 8.8 | 57 % | 76 % | 85 / 66 % |
+
+Means: 145 → 203 fps (1.4x), frame mean 6.9 → 5.0 ms, p99 16.5 → 13.7, p99.9 32.2 → 24.7, chunk
+queue wait median 156 → 9 ms. The optimized side spreads 10 % between its two runs (the stock
+side 2 %), so p99 differences under ~4 ms are inside the noise here. Notes:
+
+- The loose classes load under the stock launcher too: `JavaAppLauncher` builds
+  `-Djava.class.path=<Contents/Java>/` and appends the jars after it (33 `[pzopt] loaded override
+  ... active` lines at the main menu from `open "Project Zomboid.app"`), so `install.sh` on macOS
+  is the Linux install pointed at `Contents/Java`, no launcher file to edit. `install.sh` was
+  adapted (Steam library path, `.app` layout, `shasum`, bash 3.2's empty-array trap under `set -u`,
+  a python-less release lookup) and tested with and without python3 on the machine.
+- `persistentVbo` falls back (no `ARB_buffer_storage` in Apple's GL, the guard in
+  `GLVertexBufferObject.pzoptUsePersistent`); the settings line still prints `persistentVbo=true`.
+- Chunk latency p90/p99 is *worse* optimized (585 / 1649 ms vs 419 / 1729) while the median wins
+  18x: the same 4-worker recalc pool pattern the Dell showed (`workers=4` on 8 cores; the game
+  thread is at 86 %). `--prop workers=2` is the A/B to run next; not done.
+- Neither side is saturated at 203 fps: game thread 86 % of a core, GPU 77 %, machine 56 %. The
+  remaining tail (p99.9 25 ms, 39–48 ms maxima) is unattributed on this machine; no JFR run yet.
+- One stock run had a single 236 ms frame (stock-2 max); nothing like it on the optimized side.
+- The Steam URL handler (`open steam://rungameid/108600`) from an ssh session does nothing
+  visible; launching the `.app` with `open` or the JRE directly both work from ssh.

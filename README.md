@@ -9,8 +9,8 @@ the worst stalls from the chunk streamer, the renderer, the weather and the load
 Options tab, and every number in this file comes from the hands-off benchmark harness in
 this repo.
 
-**Target: Build 42.20.4, jar revision `b0bbce05d5`, Windows and Linux** (both Steam depots
-ship the same jar). The overrides refuse to run against any other revision: they log one
+**Target: Build 42.20.4, jar revision `b0bbce05d5`, Windows, Linux and macOS** (the three
+Steam depots ship the same jar). The overrides refuse to run against any other revision: they log one
 line and the game behaves as stock.
 
 | | |
@@ -42,6 +42,7 @@ machine you play on.
    - [Downtown Louisville, 2,500 zombies](#downtown-louisville-2500-zombies)
    - [Boot and load](#boot-and-load)
    - [Windows](#windows)
+   - [macOS](#macos)
    - [Handheld and old laptops](#handheld-and-old-laptops)
    - [Against the Workshop's performance mods](#against-the-workshops-performance-mods)
 3. [Install](#install)
@@ -216,6 +217,31 @@ the game thread (93 % of wall). A Windows-only 0.5 s micro stutter reported by u
 overlay's CPU-load sampling on the game thread; sampling is now opt-in and on a background
 thread (2026-09-21).
 
+### macOS
+
+MacBook Pro with an Apple M1 Pro (8 CPU / 14 GPU cores, 16 GB), macOS 27, Apple's OpenGL over
+Metal ("2.1 Metal - 91.7"), 1920x1200 fullscreen at 120 Hz, vsync off, 240 fps cap, zoom 2.5,
+the 120 km/h highway drive (1,200 tiles east from the bench save), two runs per side, means
+shown with the two values in brackets (2026-09-21; runs `mac-drive120-*`). Same files,
+installed with `install.sh` into `Project Zomboid.app/Contents/Java`; stock is the same
+install with `enabled=false`.
+
+| Metric | Stock | Optimized | Change |
+|---|---|---|---|
+| fps, mean | 145 (143 / 147) | **203** (213 / 193) | 1.4x |
+| Frame time, mean / p99 / p99.9 | 6.9 / 16.5 / 32.2 ms | 5.0 / 13.7 / 24.7 ms | -28 / -17 / -23 % |
+| Frame time, max | 74.6 / 235.7 ms | 47.9 / 38.9 ms | |
+| Frames over 33 ms / 50 ms | 7 + 3 / 3 + 2 | 1 + 2 / 0 | |
+| Chunk queue wait, mean / median | 156 / 156 ms | 44 / 9 ms | 3.5x / 18x |
+| GPU busy (`ioreg`) | 72 % | 77 % | |
+| Game thread / render thread, of one core | 79 / 77 % | 86 / 65 % | |
+
+Apple's GL has no `ARB_buffer_storage`, so `persistentVbo` falls back to the stock buffer path
+by itself; everything else runs as on Linux. The optimized runs are neither at the cap nor
+saturated (game thread 86 % of a core, GPU 77 %) and spread 10 % between themselves, so the
+remaining tail is the next thing to look at there. The harness port is `harness/run-mac.sh`
+(direct launch from the bundle's JRE, `top` + `ioreg` sampler).
+
 ### Handheld and old laptops
 
 **AYANEO Flip 1S DS** (Ryzen AI 9 HX 370, Radeon 890M, 1920x1080, Linux, Mesa 26.2), on AC,
@@ -291,15 +317,17 @@ so **close the game first** whichever method you pick.
 ### Requirements
 
 - Project Zomboid on Steam on the **Build 42.20.4** beta (right-click the game, Properties,
-  Betas). Both the Windows and the Linux depot work; the jar is the same.
-- Windows: Windows PowerShell 5.1 or newer (built in). Linux: `bash`, `curl` or the `gh`
-  CLI, and `unzip` (or `python3`). No JDK on either.
+  Betas). The Windows, Linux and macOS depots all work; the jar is the same.
+- Windows: Windows PowerShell 5.1 or newer (built in). Linux and macOS: `bash`, `curl` or
+  the `gh` CLI, and `unzip` (or `python3`); a stock Mac has all of them, no Xcode or Homebrew
+  needed. No JDK anywhere.
 - Nothing is compiled; nothing is written outside the game folder and `Zomboid/pzopt/`.
 
 Every installer below does the same thing: locate the game through Steam's library list
 (or `-Dir` / `--dir <folder>` / `PZ_DIR`), read the game revision from the jar, check that
 the launcher classpath loads loose classes and that no file it would write already exists,
-copy the classes next to `projectzomboid.jar`, and record every file in
+copy the classes next to `projectzomboid.jar` (on macOS that is
+`Project Zomboid.app/Contents/Java`), and record every file in
 `pzopt-installed.txt` so the uninstall is exact. The jar is never touched.
 
 ### Method A: Steam Workshop
@@ -321,6 +349,12 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files (x86)\Steam\steamapps
 bash ~/.local/share/Steam/steamapps/workshop/content/108600/3805285544/mods/PZ_Optimization/42/install.bash
 ```
 
+**macOS** (Terminal):
+
+```sh
+bash ~/Library/Application\ Support/Steam/steamapps/workshop/content/108600/3805285544/mods/PZ_Optimization/42/install.bash
+```
+
 The script finds the unpacked `pzopt-classes/` folder next to itself and installs from it,
 no download. Updates arrive through the Workshop; run the same command again after an update
 (`-Uninstall` / `--uninstall` first if the status says a file changed). Item layout and
@@ -338,13 +372,17 @@ Invoke-WebRequest https://github.com/xD3I/PZ_Optimization/releases/latest/downlo
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install.ps1"
 ```
 
-**Linux:**
+**Linux and macOS** (Terminal):
 
 ```sh
 curl -fsSLO https://github.com/xD3I/PZ_Optimization/releases/latest/download/install.sh
 chmod +x install.sh
 ./install.sh
 ```
+
+On macOS the script finds `Project Zomboid.app` through Steam's library list and installs
+into its `Contents/Java`; the bundle's launcher already searches that folder before the jar,
+so nothing in the app is edited.
 
 Both scripts take the same options: `-Status` / `--status` (installed for which revision,
 any `MISSING` / `MODIFIED` file, the contents of `pzopt.properties` if present),
@@ -356,7 +394,9 @@ install a zip you already have, `-From` / `--from <folder>` to install an unpack
 Download `pzopt-b0bbce05d5-classes.zip` (about 850 KB) from the
 [release page](https://github.com/xD3I/PZ_Optimization/releases/latest) and unpack it into
 the folder that holds `projectzomboid.jar`, without overwriting anything (`Expand-Archive`
-without `-Force`, or `unzip -n`). The zip carries `pzopt-files.txt`, the list of everything
+without `-Force`, or `unzip -n`). On macOS that folder is inside the app bundle: in
+`~/Library/Application Support/Steam/steamapps/common/ProjectZomboid`, right-click
+`Project Zomboid.app`, Show Package Contents, `Contents/Java`. The zip carries `pzopt-files.txt`, the list of everything
 it adds. The revision in the file name must match your game (42.20.4 is `b0bbce05d5`); a
 zip for another revision disables itself at start-up. To remove it, delete the files listed
 in `pzopt-files.txt` and the empty folders they leave, or run either installer's uninstall.
@@ -393,7 +433,7 @@ do not run there.
 
 Start the game from Steam as usual. The first boot is slower (caches are written under
 `Zomboid/pzopt/`). Once at the main menu, `Zomboid/console.txt` (Windows
-`%USERPROFILE%\Zomboid`, Linux `~/Zomboid`) shows one `[pzopt] loaded override ... active`
+`%USERPROFILE%\Zomboid`, Linux and macOS `~/Zomboid`) shows one `[pzopt] loaded override ... active`
 line per class in its first seconds:
 
 ```powershell
@@ -407,7 +447,7 @@ grep -c '\[pzopt\] loaded override' ~/Zomboid/console.txt
 | You see | Meaning |
 |---|---|
 | dozens of lines | the overrides are active. Options has an **Optimizations** tab and Display has the **Uncapped** entry. Done. |
-| `0` | the class files did not load. Check that `<game>\pzopt\Overrides.class` exists and that `ProjectZomboid64.json` lists `"."` before `"projectzomboid.jar"` under `classpath` (it does on the stock depot). |
+| `0` | the class files did not load. Check that `<game>\pzopt\Overrides.class` exists and that `ProjectZomboid64.json` lists `"."` before `"projectzomboid.jar"` under `classpath` (it does on the stock depot; the macOS bundle has no JSON, its launcher puts `Contents/Java` first by itself). |
 | a line saying the overrides were built for another revision | your game is not 42.20.4 / `b0bbce05d5`; the game runs as stock. Switch Steam to that beta or wait for a matching release. |
 
 ### Uninstall
@@ -419,7 +459,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall      # Windows
 ```
 
 ```sh
-./install.sh --uninstall        # Linux, release or Workshop install
+./install.sh --uninstall        # Linux / macOS, release or Workshop install
 scripts/pzopt.sh uninstall      # Linux, from-source install
 ```
 
@@ -811,7 +851,9 @@ noise).
 
 The game's launcher config `ProjectZomboid64.json` ships with
 `"classpath": [".", "projectzomboid.jar"]`. The install directory comes before the jar, so a
-loose `.class` file there **shadows** the same class inside the jar. The overrides are copied
+loose `.class` file there **shadows** the same class inside the jar. The macOS bundle has no
+JSON; its `JavaAppLauncher` builds `-Djava.class.path=<Contents/Java>/` and appends the jars
+after it, which is the same order. The overrides are copied
 in as loose files and removed by deleting them; the jar's checksum never changes. This is the
 "manual class replacement" method described on the
 [PZ wiki's Java page](https://pzwiki.net/wiki/Java).
@@ -872,8 +914,9 @@ Safety rails:
 - **Security.** Build 42.20.4 removed Lua `loadstring` and restricted the file types Lua may
   write. This mod does not widen either: the `LuaCompiler` override only caches compiled
   prototypes of the same source text, and all writes stay under `Zomboid/pzopt/`.
-- **Platforms.** Measured on Windows 11 with NVIDIA GL and on the native Linux depot with
-  NVIDIA GL under XWayland (Mesa Zink and native Wayland too); Proton is prepared but not
+- **Platforms.** Measured on Windows 11 with NVIDIA GL, on the native Linux depot with
+  NVIDIA GL under XWayland (Mesa Zink and native Wayland too), and on macOS on an M1 Pro
+  (Apple's GL over Metal; one drive route, [macOS](#macos)); Proton is prepared but not
   measured. A long free-play soak (interiors, zombies behind fences, curtain and door state
   changes) is still open on both.
 - **Steam performance monitor.** Caps the optimized game at ~160 fps by pinning the GL

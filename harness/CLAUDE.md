@@ -191,6 +191,26 @@ the route end by itself when no MangoHud is loaded. `analyze.py` runs on the emb
 (`focusloss=true`), which stops `IsoChunk.update` and with it the frame sampler: keep the window
 focused. Reference numbers in `baseline/windows/`, findings in `docs/windows-test.md`.
 
+## macOS
+
+`run-mac.sh` (bash 3.2, runs on the Mac) is the same for the macOS depot (`Project Zomboid.app`):
+`install <classes-dir>` / `uninstall` / `status` put the desktop's `build/classes` into
+`Contents/Java` with a `pzopt-installed.txt` manifest (the bundle's `JavaAppLauncher` builds
+`-Djava.class.path=<Contents/Java>/` ahead of the jars, so the loose classes load under Steam too),
+`--label ... --mode drive --flag ... --prop ... --option ...` does a run: harness mod, bench save
+rebuilt from `Saves/Sandbox/pzopt-bench-template` (unpack the `.tar.zst` there once, streamed as a
+plain tar: the Mac has no zstd), flag file, `pzopt.properties`, direct launch from the bundled
+`jre-aarch64` with the Info.plist `JVMOptions` (`-Dzomboid.steam=0`, `-XstartOnFirstThread`,
+`-cp .:projectzomboid.jar`) under `caffeinate -dis`, a `top` + `ioreg` (IOAccelerator "Device
+Utilization %") sampler with sysmon.sh's columns, collection into `harness/runs/`, every touched
+file restored. No MangoHud, JFR or recording; `pzopt-frames.out` is the frame source for both
+sides, the overlay log only exists with the overrides on. Stock = `--prop enabled=false`. The
+desktop side: rsync `harness/run-mac.sh`, `harness/mod`, `build/classes` over, run in the ssh
+session's foreground, rsync `harness/runs/mac-*` back and analyze here. Apple's GL is "2.1 Metal"
+(no `ARB_buffer_storage`: `persistentVbo` falls back). A launch from an ssh session opens the
+window on the logged-in desktop; `open steam://rungameid/108600` from ssh does nothing visible,
+`open "<the .app>"` runs the stock launcher. Reference runs `mac-drive120-*` (2026-09-21).
+
 ## Pitfalls that already cost runs
 
 - EXIT trap under `set -e`: a failing last command of an `&&` list aborts the restore.

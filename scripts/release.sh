@@ -75,9 +75,9 @@ if gh release view "$tag" >/dev/null 2>&1; then
   echo "release $tag already exists; delete it or commit first" >&2
   exit 1
 fi
-notes="Prebuilt class overrides for Windows and Linux, built $(date -u +%Y-%m-%d) from $short for game revision $rev${version:+ (Build $version)}."
+notes="Prebuilt class overrides for Windows, Linux and macOS, built $(date -u +%Y-%m-%d) from $short for game revision $rev${version:+ (Build $version)}."
 [[ -n "$extra_notes" ]] && notes="$notes $extra_notes"
-notes="$notes Install with install.ps1 (Windows) or install.sh (Linux) from this release, or unpack the zip into the game folder by hand (README; $nfiles manifest entries). sha256 $sha"
+notes="$notes Install with install.ps1 (Windows) or install.sh (Linux, macOS) from this release, or unpack the zip into the game folder by hand (README; $nfiles manifest entries). sha256 $sha"
 gh release create "$tag" "$zipname" install.sh install.ps1 --target "$full" \
   --title "Windows build${version:+ ($version / $rev)} from $short" --notes "$notes"
 gh release view "$tag" --json url,assets -q '.url, (.assets[] | .name + " " + (.size|tostring))'
