@@ -70,7 +70,8 @@ Optimized" THUMB_ONLY_OPT=1 python3 harness/showcase-thumbnail.py docs/workshop/
 one SDR still per segment of `docs/media/showcase-stock-vs-all-optimizations.mp4` (boot/load,
 120 km/h drive, options tab, Rosewood spin, fog, storm, results card; 1920x900, the posters'
 hable tone-map at 18 / 33 / 50 / 65 / 82 / 98 / 116 s), `08` the options-tab close-up from
-`docs/media/`. `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
+`docs/media/`, `09` the overlay, `10` the Workshop-mods comparison table (`docs/media/workshop-mods-comparison.png`
+from `harness/mods-table.py`, scaled to 1920 wide as JPG). `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
 the header) and a YouTube URL for the showcase video.
