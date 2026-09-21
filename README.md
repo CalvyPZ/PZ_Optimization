@@ -249,6 +249,8 @@ above (120 km/h drive, the same drive in a thunderstorm, the Rosewood spin), unc
 Each mod was checked in the console to be loaded and patching (`docs/results.md`,
 2026-09-21 sections, has the per-mod details and every number).
 
+![Workshop performance mods vs PZ_Optimization on the three routes](docs/media/workshop-mods-comparison.png)
+
 | Mod | Subscribers | What it is | Drive 120 km/h fps / p99 | Storm 120 km/h | Rosewood spin |
 |---|---|---|---|---|---|
 | Stock game | | | 167 / 15.5 ms | 75 / 59 ms | 135 / 27 ms |
