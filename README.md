@@ -51,6 +51,38 @@ zoom, 5120x2160. Machine: Ryzen 7 9800X3D, RTX 4090, Crucial T705 NVMe, 32 GB DD
 "Stock" is this build with every optimization switched off, which reproduces the
 shipped game exactly.
 
+### 120 km/h through a heavy-fog thunderstorm: stock vs all optimizations + the fog pass (2026-09-21)
+
+Heavy fog was the slowest weather by far: stock draws it as one screen-wide rectangle per
+tile row and level, so every pixel is shaded up to twelve times with seven noise fetches and
+a depth write that defeats early rejection, one draw call per row. On the 120 km/h route
+in clear weather that alone was 447 → 220 fps. The fog pass (`fogPass`, experimental, on
+by default; [Renderer](#2-renderer)) draws every row in one call into a quarter-size fog
+buffer that is depth-tested against the scene and blended over it once. The video is the
+same 1,200-tile drive in the harness's heaviest weather, a thunderstorm in full fog
+(`--preset storm-fog`, six lightning strikes on the route), stock on the left and all
+optimizations plus the fog pass on the right (`harness/stitch-stormfog-sbs.sh`, runs
+`sbs-stormfog-stock` / `sbs-stormfog-opt`; AV1 10-bit HDR, the click-through copy is a
+1920-wide encode of the same file).
+
+[![120 km/h through a heavy-fog thunderstorm, stock vs all optimizations + fog pass](docs/media/drive-120kmh-storm-fog-stock-vs-optimized.jpg)](docs/media/drive-120kmh-storm-fog-stock-vs-optimized-1080.mp4)
+
+| Metric | Stock settings (cap 300) | All optimizations + fog pass (uncapped) |
+|---|---|---|
+| fps, mean | 60 | 191 |
+| Frame time, mean | 16.6 ms | 5.2 ms |
+| Frame time, p50 | 15.4 ms | 4.1 ms |
+| Frame time, p90 | 19.9 ms | 9.1 ms |
+| Frame time, p99 | 71.7 ms | 16.5 ms |
+| Frame time, p99.9 | 92.9 ms | 22.3 ms |
+| Frames over 33 ms | 49 | 0 |
+
+Heavy fog alone on the same route in clear weather, uncapped: stock fog 220 fps / 4.5 ms
+mean, the fog pass 333–392 fps / 2.6–3.0 ms, no fog 447 fps / 2.2 ms (GPU time of the fog
+itself 1.52 → 0.35 ms a frame). Full account in `docs/findings-fog-2026-09-21.md`. One
+known issue keeps the pass marked experimental: a slight flicker on power lines in fog
+while the camera moves; switching the pass off in the Optimizations tab restores stock fog.
+
 ### Rosewood uncapped: stock vs optimized vs all optimizations (2026-09-20 evening)
 
 The same spinning Rosewood route with the frame cap off, recorded with the build's own
@@ -563,6 +595,9 @@ Full list with comments: `src/pzopt/pzopt/Config.java`.
 | `soundZoneCache` | `true` | ambient zone parameters reuse their zone scan while the listener's square is unchanged |
 | `chunkHandoffDivisor` | `8` | freshly loaded chunks handed to the game thread per frame: at most 1 + queue/8 (`0` = stock, up to 4) |
 | `weatherFxScalePct` | `100` | weather mask and particle buffers at this share of the screen size (measured as a wash at 50) |
+| `fogPass` | `true` | heavy fog in one draw call into a scaled fog buffer, depth-aware composite (experimental: off removes a slight power-line flicker in fog) |
+| `fogScalePct` | `25` | the fog buffer per axis as % of the screen (25..100; 100 = per-pixel depth) |
+| `fogMaskFrames` | `20` | the fog rows come from per-chunk masks and a segment cache refreshed this often (`0` = stock per-square walk every frame) |
 | `hotsaveStaged` | `false` | hot save serialised one part per streamer update (off: the meta-grid files could disagree) |
 | `gpuSections` | `false` | GPU microseconds per frame section in the log (timestamp queries; measurement only) |
 | `lightSwitchCheckFrames` | `15` | a light switch reuses its has-electricity answer for this many frames (`0` = stock) |
@@ -767,6 +802,27 @@ handed to the game thread at most 1 + queue/8 per frame instead of up to four
 route, p90 6.3 to 3.1 ms, p99 13.2 to 7.7 ms. GPU time per frame section is available with
 `gpuSections=true` (timestamp queries in the sprite stream, printed in the log): the chunk
 composite is about 0.6 ms a frame, bakes 0.3 to 0.5 ms, the weather pass 0.1 to 0.17 ms.
+
+**Heavy fog in one pass** (`fogPass`, experimental, 2026-09-21; `fogScalePct`,
+`fogMaskFrames`). Stock `ImprovedFog` draws heavy fog as one screen-wide rectangle per tile
+row per level, each 96 texture pixels tall while rows are 16 apart: every pixel is shaded up
+to twelve times with seven noise fetches, a `gl_FragDepth` write (no early depth rejection)
+and one blend, one draw call with three uniform updates per row segment (~190 a frame),
+while the game thread walks every on-screen square and its objects per level only to feed
+the row iterator in painter's order, which the FBO renderer never needs. The pass draws all
+rectangles in one call (the per-rectangle uniforms are vertex attributes, the depth comes
+from the vertex) into a fog buffer of 25 % of the viewport per axis; the scene depth is read
+in place (the offscreen buffer's depth is a texture now, `MultiTextureFBO2`), reduced per
+block to its nearest and farthest value with a fog value computed for each, and the composite
+blends every screen pixel from the four nearest fog texels interpolated by its own depth,
+so a wire over distant ground gets the rows stock draws over it. The noise texture is sampled
+through a mipmapped sampler (without it the scaled buffer's sparse fetches were memory-bound
+on an iGPU). On the game thread per-chunk masks of the squares that take fog (refreshed
+every 20 frames, staggered) and a cache of the row segments replace the square walk. Desktop
+120 km/h uncapped: clear 447 fps, stock fog 220, fog pass 333–392; laptop 1080p 259 / 98 /
+223; the fog's own GPU time 1.52 → 0.35 ms a frame. Falls back to the stock drawer if the
+driver refuses the depth texture or a shader. Known issue: a slight power-line flicker in fog
+while the camera moves that frame captures do not reproduce; `fogPass=false` is stock fog.
 
 ### 3. Boot: launch to main menu
 
@@ -1004,13 +1060,15 @@ class inside the jar. The overrides are copied in as loose files and removed by
 deleting them; the jar's checksum never changes. This is the "manual class
 replacement" method described on the [PZ wiki's Java page](https://pzwiki.net/wiki/Java).
 
-Shadowed classes (28 game classes plus one from-scratch shim):
+Shadowed classes (40 game classes plus one from-scratch shim):
 
 | Area | Classes |
 |---|---|
 | Streaming and render | `zombie.iso.IsoChunk`, `zombie.iso.WorldStreamer`, `zombie.iso.ChunkSaveWorker`, `zombie.iso.IsoMetaCell`, `zombie.core.VBO.GLVertexBufferObject`, `zombie.iso.fboRenderChunk.FBORenderCell`, `zombie.GameWindow`, `zombie.core.PerformanceSettings` |
 | Boot and load | `zombie.fileSystem.FileSystemImpl`, `zombie.fileSystem.TexturePackDevice`, `zombie.tileDepth.TileDepthTextures`, `zombie.core.textures.TextureIDAssetManager`, `zombie.MapCollisionData`, `zombie.iso.IsoMetaGrid`, `zombie.gameStates.GameLoadingState`, `zombie.buildingRooms.BuildingRoomsEditor`, `zombie.core.skinnedmodel.advancedanimation.AnimationSet`, `zombie.core.skinnedmodel.model.AnimationAssetManager`, `zombie.core.skinnedmodel.model.Model`, `zombie.core.textures.ImageData`, `zombie.scripting.ScriptParser`, `zombie.scripting.objects.Item`, `se.krka.kahlua.luaj.compiler.LuaCompiler` |
 | Game thread (2026-09-20) | `zombie.iso.weather.fx.WeatherFxMask`, `zombie.iso.objects.IsoLightSwitch`, `se.krka.kahlua.j2se.KahluaTableImpl` |
+| Fog pass (2026-09-21) | `zombie.iso.weather.fog.ImprovedFog`, `zombie.iso.weather.fog.ImprovedFogDrawer`, `zombie.core.textures.MultiTextureFBO2` |
+| Overlay, thunderstorm, streaming (2026-09-20/21) | `zombie.core.opengl.RenderThread`, `zombie.iso.fboRenderChunk.FBORenderCutaways`, `zombie.audio.parameters.ParameterZone`, `zombie.iso.IsoChunkMap`, `zombie.core.opengl.VBORenderer`, `zombie.iso.IsoPuddles`, `zombie.iso.weather.fx.ParticleRectangle`, `zombie.iso.weather.fx.WeatherParticleDrawer`, `zombie.iso.LightingJNI` |
 | Window shims | `org.lwjglx.opengl.Display`, `org.lwjglx.input.Mouse` |
 | From scratch | `zombie.gameStates.TISLogoState` |
 
@@ -1059,6 +1117,10 @@ Safety rails:
   free-play soak (interiors, zombies behind fences, curtain and door state
   changes) is still open. Two rendering flags stay off because of known artifacts
   (see [Renderer](#2-renderer)).
+- **Fog pass (experimental).** With `fogPass` on (the default) power lines can flicker
+  slightly in heavy fog while the camera moves; frame captures at 60 fps do not show it,
+  the maintainer does at 240 Hz. Untick "Fog in one pass (experimental)" in the
+  Optimizations tab for stock fog (at stock cost).
 - **Platforms.** Measured on Windows 11 with NVIDIA GL (`docs/windows-test.md`)
   and on the native Linux depot with NVIDIA GL under XWayland (Mesa Zink and
   native Wayland too). On Windows the bench route was run and the frame-cap
