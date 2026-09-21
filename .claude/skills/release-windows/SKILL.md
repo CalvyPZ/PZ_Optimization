@@ -85,11 +85,13 @@ numbered after the last image in `docs/workshop/images/` and listed in `docs/wor
    `[img]` URLs are raw GitHub links to `master`, so the page shows a broken image until the
    push is public.
 4. `scripts/workshop.sh --zip <the release zip>` re-stages `workshop.txt` from the description,
-   copy it to `docs/workshop/workshop.txt`, commit, then the click sequence below. A
-   description-only upload (same files) gets **no changelog entry** (`No content change
-   detected` in `workshop_log.txt`): verify it on the item page
-   (`curl -s https://steamcommunity.com/sharedfiles/filedetails/?id=3805285544 | grep -c 'New!'`)
-   and by the image URL being reachable, not on the changelog page.
+   copy it to `docs/workshop/workshop.txt`, commit, then the click sequence below. Verify on
+   the item page, not only the changelog: `curl -s
+   https://steamcommunity.com/sharedfiles/filedetails/?id=3805285544 | grep -c 'New!'` must be
+   1 and the page must contain the image's raw URL. Re-staging usually re-encodes
+   `preview.png`, so Steam records a new manifest and a changelog entry (2026-09-21 15:56,
+   "Page update ..."); when it does not (`No content change detected`), the page check is the
+   only proof.
 
 Preflight, in this order; stop at the first failure:
 
