@@ -29,6 +29,11 @@ Windows instruction is one `powershell -ExecutionPolicy Bypass -File ...\install
 the Linux one is `bash .../install.bash`; `--from <dir>` / `-From <dir>` name the folder
 explicitly. The page text lives in `docs/workshop/description.txt` (Steam BBCode;
 `@REV@ @VERSION@ @COMMIT@ @NFILES@ @NOVERRIDES@ @SHA@ @ID@` are filled in by the script).
+**Steam caps the description at 8,000 characters** and the game appends `\n\nWorkshop ID: <id>\nMod ID:
+PZ_Optimization` (~50) before submitting, so the staged `description=` lines must stay under ~7,950;
+over that the upload ends in `failed to update workshop item, result=8` (`Invalid Parameter` in
+`workshop_log.txt`) with nothing changed (2026-09-21, three attempts). A description-only update gets no
+change-notes entry (`No content change detected`); verify it on the item page instead.
 
 Rules the game's validator (`zombie.core.znet.SteamWorkshopItem.validateContents`) enforces,
 checked by the script before the in-game screen has to refuse:
