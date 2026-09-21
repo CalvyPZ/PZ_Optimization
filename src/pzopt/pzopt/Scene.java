@@ -23,6 +23,20 @@ import zombie.iso.weather.ClimateManager;
  *       well, so {@code storm} + {@code fog=heavy} is the heaviest STAGE_STORM the game can roll. Rendered by
  *       {@code ImprovedFog} (options {@code fogQuality} 0/1) or the legacy fog circle + particles (2); the
  *       sandbox {@code MaxFogIntensity} cap is logged, not overridden;</li>
+ *   <li>{@code see_all=true} — the native lighting marks every square seen and visible (the spectator view a
+ *       dead player had in B41; {@code LightingJNI} override): the never-seen black behind buildings is gone, so a
+ *       dense downtown (Louisville preset) is fully drawn. More visible tiles and characters than a normal view;
+ *       compare only runs with the same value;</li>
+ *   <li>{@code population=N|max} — sandbox zombie population multipliers (ZombieConfig.PopulationMultiplier,
+ *       PopulationStartMultiplier and PopulationPeakMultiplier, 0-4, {@code max} = 4) pushed to the native
+ *       population manager at world-ready ({@code onConfigReloaded}). Cells the bench save never visited get
+ *       their zombies generated with the new multiplier when their chunks first load, so with a far
+ *       {@code start=} teleport (Louisville preset) the whole route is populated at that density; already
+ *       visited cells keep their saved population;</li>
+ *   <li>{@code zombies=off} — no zombies at all: the population multipliers go to 0 (as {@code population=0})
+ *       and every zombie loaded with the save or streamed in later is removed from the world on each tick
+ *       (the game's own removeFromWorld + removeFromSquare pair), so a manual walk on a copy of a real save
+ *       is not interrupted by grabs;</li>
  *   <li>{@code torch=on|off} — {@code on} puts a lit Base.HandTorch in the player's primary hand
  *       (a cone light that follows the facing, so with {@code turn} it sweeps the lighting grid);
  *       {@code off} makes sure no light item is equipped;</li>
@@ -34,13 +48,17 @@ import zombie.iso.weather.ClimateManager;
  * </ul>
  * Unset keys leave the save as it is. Nothing here is written back: runs use the bench save copy.
  */
-final class Scene {
+public final class Scene {
    private static float timeOfDay = -1f;
    private static String weather = "";
    private static float fog = -1f;
    private static String torch = "";
    private static boolean visible;
    private static float thunderSecs = 6f;
+   private static float population = -1f;
+   private static boolean zombiesOff;
+   private static int zombiesRemoved;
+   private static volatile boolean seeAll;
    private static long lastThunderNs;
    private static int thunderCount;
    private static InventoryItem torchItem;
@@ -58,8 +76,31 @@ final class Scene {
       torch = HarnessFlags.get("torch", "").trim().toLowerCase(java.util.Locale.ROOT);
       thunderSecs = Float.parseFloat(HarnessFlags.get("thunder_secs", "6"));
       visible = Boolean.parseBoolean(HarnessFlags.get("visible", "false"));
+      population = parsePopulation(HarnessFlags.get("population", ""));
+      zombiesOff = "off".equalsIgnoreCase(HarnessFlags.get("zombies", "").trim());
+      if (zombiesOff && population < 0f) {
+         population = 0f;
+      }
+      seeAll = Boolean.parseBoolean(HarnessFlags.get("see_all", "false"));
       if (!requested()) {
          return;
+      }
+      if (seeAll) {
+         Log.info("harness: see_all: every square is marked seen and visible by the native lighting (LightingJNI override)");
+      }
+      if (population >= 0f) {
+         // before any chunk of the route loads (Harness teleports to start= right after this): the native
+         // popman reads these at chunk-add time for cells without saved population data
+         zombie.SandboxOptions.ZombieConfig cfg = zombie.SandboxOptions.instance.zombieConfig;
+         cfg.populationMultiplier.setValue(population);
+         cfg.populationStartMultiplier.setValue(population);
+         cfg.populationPeakMultiplier.setValue(population);
+         zombie.popman.ZombiePopulationManager.instance.onConfigReloaded();
+         Log.info("harness: zombie population multipliers forced to " + population + " (start/peak too); zombies loaded now: " + zombiesLoaded());
+      }
+      if (zombiesOff) {
+         removeZombies();
+         Log.info("harness: zombies=off: " + zombiesRemoved + " zombies removed at world-ready; any that stream in later are removed too");
       }
       if (visible) {
          p.setInvisible(false, true); // ghost mode off for the native lighting (opt-in; zombies then react to the player)
@@ -150,6 +191,9 @@ final class Scene {
 
    /** Per-frame upkeep while the run is live: keep the overrides pinned and fire the scheduled lightning. */
    static void tick(IsoPlayer p, long nowNs) {
+      if (zombiesOff) {
+         removeZombies();
+      }
       if (!torch.isEmpty() && nowNs - lastTorchLogNs >= 5_000_000_000L) {
          lastTorchLogNs = nowNs;
          Log.info("harness: torch check: player strength " + p.getTorchStrength() + " dist " + p.getLightDistance() + " cone " + p.isTorchCone()
@@ -260,7 +304,43 @@ final class Scene {
    }
 
    static boolean requested() {
-      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible;
+      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible || population >= 0f || seeAll || zombiesOff;
+   }
+
+   /** Flag see_all=true: read by the LightingJNI override on every player update (false until apply() ran). */
+   public static boolean seeAll() {
+      return seeAll;
+   }
+
+   /** "" = leave the save's sandbox values (-1); "max" = 4 (the sandbox ceiling); numbers are clamped to 0-4. */
+   static float parsePopulation(String v) {
+      v = v.trim().toLowerCase(java.util.Locale.ROOT);
+      if (v.isEmpty()) return -1f;
+      if ("max".equals(v) || "insane".equals(v)) return 4f;
+      return Math.max(0f, Math.min(4f, Float.parseFloat(v)));
+   }
+
+   /** Real (non-virtual) zombies in the loaded cell right now. */
+   /** zombies=off: every zombie in the cell's list leaves the world (the pair IsoZombie.update uses for a zombie with no square). */
+   private static void removeZombies() {
+      try {
+         java.util.ArrayList<zombie.characters.IsoZombie> list = new java.util.ArrayList<>(zombie.iso.IsoWorld.instance.getCell().getZombieList());
+         for (zombie.characters.IsoZombie z : list) {
+            z.removeFromWorld();
+            z.removeFromSquare();
+            zombiesRemoved++;
+         }
+      } catch (Exception e) {
+         Log.warn("harness: zombies=off: removal failed: " + e);
+      }
+   }
+
+   static int zombiesLoaded() {
+      try {
+         return zombie.iso.IsoWorld.instance.getCell().getZombieList().size();
+      } catch (Exception e) {
+         return -1;
+      }
    }
 
    /** Lines for pzopt-bench.out. */
@@ -284,6 +364,8 @@ final class Scene {
             + "\nfog=" + (fog >= 0f ? Float.toString(fog) : "save")
             + "\ntorch=" + (torch.isEmpty() ? "save" : torch) + "\nvisible=" + visible
             + "\nnight_strength=" + night + "\nprecipitation=" + precip + "\nfog_intensity=" + fogNow + "\nfog_fx=" + fogFx
-            + "\nfog_quality=" + zombie.core.PerformanceSettings.fogQuality + "\nlightning_strikes=" + thunderCount;
+            + "\nfog_quality=" + zombie.core.PerformanceSettings.fogQuality + "\nlightning_strikes=" + thunderCount
+            + "\npopulation=" + (population >= 0f ? Float.toString(population) : "save") + "\nzombies_loaded=" + zombiesLoaded() + "\nzombies_removed=" + zombiesRemoved
+            + "\nsee_all=" + seeAll;
    }
 }

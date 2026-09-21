@@ -984,6 +984,33 @@ add a square: with the prefilter the loop simply stops after the first visit, wh
 result. The wall's own `ChunkLevelData` is used when the square lies in the wall's chunk instead
 of a hash lookup per square. Counters `pzoptWallsVisited`, `pzoptWallsSkipped`.
 
+## zombie.iso.fboRenderChunk.FBORenderCutaways (fourth edit, 2026-09-21, carport roof debounce)
+
+Behind `pzopt.Config.ROOF_HIDE_DEBOUNCE_FRAMES` (`roofHideDebounceFrames`, default 8; 0 = stock;
+Options > Optimizations "Carport roof hide/show settle time"). In `checkOrphanStructures`, per
+chunk level with orphan structures (a carport / pergola roof: a building whose only room is
+`emptyoutside`), the answer of `OrphanStructures.shouldCutaway()` is compared with the current
+`PlayerInRange` state; when they differ, a per-player counter on the `OrphanStructures` object
+(`pzoptPendingFrames[4]`, reset by `calculate` and `resetForStore`) counts consecutive frames of
+the new answer and the level is skipped (`continue`, current state kept, nothing invalidated)
+until the counter reaches the setting. The first answer after `Unset` is applied at once, as in
+stock. Stock applies every change immediately and invalidates the level (2048) each time, so a
+decision that changes every frame (the maintainer's 2026-09-21 video: player on the SE edge of a
+detached carport, zombies around, the roof toggling every frame until the game was paused)
+re-bakes four chunk levels per frame and the roof flickers. Counter `roof flips held` on the
+instrument line.
+
+## zombie.iso.fboRenderChunk.FBORenderCutaways (third edit, 2026-09-21, dev log of roof hide/show decisions)
+
+Diagnostic only, behind `pzopt.Config.DEV_CUTAWAY_LOG` (`devCutawayLog`, default false): a
+private static `pzoptDevCutawayLog(String)` prints at most 400 `cutaway dev f<frame>: ...` lines.
+It is called (a) at the end of `CalculateBuildingsToCollapse` when the buildings-to-collapse list
+changed (old and new size, the new defs' bounds, `cell.occludedByOrphanStructureFlag`, the number
+of points of interest), (b) in `checkOrphanStructures` on each `PlayerInRange` flip (`orphan
+HIDE` / `orphan SHOW`, chunk and level), and (c) in `shouldRenderBuildingSquare` when the
+adjacent-chunk counter forces an `OrphanStructures.calculate`. No decision is changed. Added for
+the carport-roof per-frame flicker report (user video, 2026-09-21).
+
 ## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, light info chunk gate)
 
 `prepareChunkForUpdating` refreshes the light info of every square of every level of a chunk
@@ -1224,3 +1251,75 @@ runs `i4-repro` (nudge 0, no (a): glass over the curtain), `i4-fix` ((b) alone, 
 curtain covers the glass, same pixels), `i4-wpf` / `i4-tpf` ((b) alone with one key off:
 dithered glass), `i4-fix2` / `i4-wpf2` / `i4-tpf2` ((a) + (b): curtain covers the glass in all
 three settings).
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-21, tree pass; GitHub issue #5)
+
+Trees baked into the chunk-level textures (`treesInChunkTexture`) get their own draw pass
+(`pzopt.Config.TREE_BAKE_PASS`, `treeBakePass`, default true; the drawer is `pzopt.TreeBake`,
+described in `src/CLAUDE.md`). Edits, all marked `// pzopt: issue #5`:
+
+1. **`renderMinusFloor(IsoChunk, IsoGridSquare, PZArrayList)`** skips `IsoTree` objects while the
+   pass is active (`pzoptTreePassActive()`: the two keys, the overrides enabled and the
+   wind-sprite-effects option off, under which stock never bakes a tree anyway).
+2. **`renderOneLevel`**, on the bake path just before `endRenderChunkLevel(c, level, zoom, true)`,
+   calls `pzoptBakeTrees(c, playerIndex, zoom)` when `level` is the texture's top level, i.e. after
+   every level of the texture has been drawn.
+3. **`pzoptBakeTrees`** walks the 5x5 chunk neighbourhood of `c` (the chunk itself and the
+   neighbours whose lighting has been done). For every square at a level of this texture that
+   carries a tree which would bake (`pzoptTreeBakes`: not highlighted, animating, wind- or
+   hit-affected, fading, awaiting its texture or translucent under the player; for the chunk's own
+   trees also the `MinusFloor` render layer this bake computed), that the cutaway data lets render,
+   that is not occluded and not a force-render square, the sprite's full rectangle in this texture's
+   space is computed (`pzopt.TreeBake.spriteRect`, from the square, the chunk corner, IsoTree's
+   offset rule for the JUMBO sizes and the texture's untrimmed size). The chunk's own trees are
+   drawn when the rectangle touches the texture; a neighbour's tree only when the part of it inside
+   this texture is not entirely inside the tree's own chunk texture (`needsCopy`), so a tree that
+   fits its own texture is never duplicated. The colour is the square's light info (a neighbour's
+   square gets `cacheLightInfo()` first, as the stock bake does for the north and west squares it
+   draws); `unlit` sprites draw white. The depth is the one the sprite path would write for the
+   square's south corner (`getSquareDepthData` minus this chunk's `getChunkDepthData`), and a
+   neighbour's tree with a negative result (a nearer chunk, below this texture's depth range) is
+   skipped because its own and nearer textures hold it. Each texture of the tree (main sprite and the
+   attached foliage overlays) is handed to the drawer with its trimmed rectangle and the depth at
+   its top and bottom rows (`depthAtRow`: the base at the ground row, one level's depth nearer per
+   level of height). The chunk's own baked trees also get `renderFlag = false`, what the stock bake
+   records for `checkTreeTranslucency`.
+4. **Export fingerprints.** While walking its own trees, the pass sums an identity hash of every
+   tree that needs a copy in each of the 24 neighbours' textures (`IsoChunk.pzoptTreeExportFp`, one
+   int per slot). A slot whose value changed since the chunk's last bake re-bakes that neighbour's
+   texture (`invalidateLevel(minLevel, DIRTY_TREES)`) if it has one, so a tree chopped, grown, gone
+   per frame or back on this chunk never leaves a stale copy elsewhere.
+5. **`checkTreeTranslucency`** calls `pzoptInvalidateTreeCopies(tree)` where it already invalidates
+   the tree's render square (state change, texture arrived): every neighbour texture that needs a
+   copy of the tree re-bakes in the same frame as the tree's own chunk.
+6. The periodic counters line gets `tree bake: passes= trees= copies= quads= neighbours re-baked=`.
+
+Why: a chunk-level texture covers its chunk's footprint plus two levels and the JUMBO_L
+allowance above it (`extraHeightForJumboTrees`), but a tree sprite is anchored on one square and
+is up to seven tiles wide and sixteen tile heights tall. Baked through the plain sprite path
+into its own chunk's texture (the previous `treeBakeDirect` path) a JUMBO tree is clipped at the
+texture border: the maintainer's report of crowns cut by straight edges and of a chunk-sized
+black rectangle (a tree drawn black, as stock draws trees on never-seen squares in heavy fog,
+clipped the same way). The plain path also writes one flat depth for the whole sprite while the
+walls it overlaps write per-pixel depths that get nearer with height (`zDepthBlendZ` to the
+front corner one level up), so an upper-storey wall behind a tree cut a vertical strip out of
+its crown. Stock's own chunk-texture tree batch (`FBORenderTrees` with `renderThreadCurrent`
+set) draws the crown dark and behind the house (run `trees-ab-batch`), which is presumably why
+stock never bakes trees. The pass draws the quads through VBORenderer's position/colour/uv/depth
+format (`vboRenderer_PositionColorUVDepth`, the fragment shader writes the interpolated depth),
+under `GL_LEQUAL` with depth writes and the alpha test on, last in the texture, so content in
+front already in the depth buffer occludes the tree and content behind is painted over, like
+the stock per-frame tree billboard against the composited textures. Verified on the issue's
+capture (`--source-save Apocalypse/2026-09-20_22-30-24 --flag start=11023,6720 --flag fog=heavy`
+`--shot-at 1`): run `trees-fix1` differs from the per-frame reference `trees-ab-off` in 0.08 % of
+the pixels (crown outlines), the previous bake `trees-shot` in 3.43 %; on the Rosewood capture
+(`route=S:450 zoom=1 --shot-at 12`, runs `trees-town-on` / `-off` / `-plain`) the pass matches the
+plain path's brightness and the per-frame reference drawn without `vboFastQuads`. Spinning
+route (`gt` route, 25 s): 280 fps with the pass, 281.5 with the plain path, bakes +9 % (the
+neighbour re-bakes), flicker rig 0.3 px/frame at scale 2560 (stock 3.8).
+
+## zombie.iso.IsoChunk (fifth edit, 2026-09-21, tree export fingerprints)
+
+A public `int[] pzoptTreeExportFp` (25 slots, allocated by `FBORenderCell.pzoptBakeTrees` on the
+chunk's first tree pass) and its reset to null in `resetForStore()`, so a reused chunk object
+starts without another chunk's fingerprints.

@@ -46,11 +46,19 @@ Modes:
   lightning strike 60 tiles from the player every 6 s (`--flag thunder_secs=N`), `fog` = the save's hour
   with the weather period stopped and fog pinned at 1.0 (`fog=heavy`; `ImprovedFog` with `fogQuality`
   0/1 in options.ini, legacy fog circle with 2), `storm-fog` = storm + `fog=heavy` with the stock storm
-  fog tint (the heaviest STAGE_STORM the game can roll; `--preset storm --flag fog=0.5` for a lighter one).
-  Scene flags on their own: `time_of_day=H`, `weather=storm|clear`, `fog=heavy|off|0..1`, `torch=on|off`,
+  fog tint (the heaviest STAGE_STORM the game can roll; `--preset storm --flag fog=0.5` for a lighter one),
+  `louisville` (2026-09-20 night) = the spin through downtown Louisville with the zombie population maxed:
+  `start=12450,1280` (teleport at world-ready; `IsoChunkMap.ProcessChunkPos` reloads the grid around the new
+  square), `population=max` (sandbox PopulationMultiplier / Start / Peak = 4 pushed to the native popman before
+  the chunks load: ~2,000 zombies at the route start, ~2,500 by the end), `settle=20`, `route=S:150 speed=6`
+  (same 25 s and turn; at 18 tiles/s the walk outran chunk handoff at the ~30 fps this scene runs at) and
+  `see_all=true` (`LightingJNI` override marks every square seen and visible; without it the tall blocks leave
+  most of the screen never-seen black). Runs `show-louisville-*`; stock 23.7 fps / p99 94 ms, optimized
+  31.7 / 57, both game-thread bound at 98 %.
+  Scene flags on their own: `start=X,Y`, `population=N|max`, `zombies=off` (population 0 + every loaded zombie removed each tick), `jitter=T` (with hold: player X flips across the end square's east edge by ±T tiles every frame), `see_all=true`, `time_of_day=H`, `weather=storm|clear`, `fog=heavy|off|0..1`, `torch=on|off`,
   `visible=true` (`pzopt.Scene`; applied at world-ready, re-pinned every frame, recorded in `pzopt-bench.out`
   as `time_of_day/game_hour/weather/fog/torch/visible/night_strength/precipitation/fog_intensity/fog_fx/
-  fog_quality/lightning_strikes`; `torch check` console line every 5 s; the sandbox `MaxFogIntensity` cap
+  fog_quality/lightning_strikes/population/zombies_loaded/see_all`, plus `start=` = the route's first square; `torch check` console line every 5 s; the sandbox `MaxFogIntensity` cap
   and `FogCycle` are logged at apply time, a cap other than 1 is a warning).
   Compare a preset only with runs of the same preset. 2026-09-20 numbers (`docs/results.md`): night
   283 fps = daylight, torch on or off (the beam costs nothing measurable); storm 83 fps, p99 43 ms
@@ -143,12 +151,17 @@ real above twice that.
 | `flicker-triple.py <run>/recording.mp4 FRAME` | same | crops of one frame triple with the A-B-A pixels marked (frame-numbered; use `-ss` times for anything compared with flicker.py) |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe); its quad6 captures are SDR H.264, composed in SDR and mapped to PQ/BT.2020 (reference white 203 nits) at the end |
+| `stitch-louisville-sbs.sh <stock-label> <opt-label> [out]` | two `--preset louisville` recordings (in-game overlay on) | side-by-side aligned at the quit-to-black instant (the game quits the moment the route ends: a hard sync point in both captures, unlike the file birth time, which is 0.3-0.6 s off and drifts 6 ms/s) minus the route length; overlay insets at half size; header numbers from `analyze.py`'s overlay line; `docs/media/louisville-horde-spin-stock-vs-optimized.mp4` |
 | `stitch-storm-sbs.sh` | stock + optimized 120 km/h thunderstorm recordings (`sbs-storm120-*`, in-game overlay on) | side-by-side aligned at the car's motion onset, each run's overlay inset at full resolution |
 | `encode-av1-hdr.sh in out [width]` | any mp4 | AV1 10-bit HDR re-encode (HDR input kept, SDR input mapped to PQ/BT.2020), optional downscale; used for the 60 km/h video and the `-1080` README copies |
 | `stitch-triple.sh` | three bench recordings (stock settings, optimized 2026-09-19, optimized + game-thread pass) | 2:1 quad video with a results panel; clip starts derived from run.opts launch_epoch and pzopt-schedule.out (recorder starts ~1 s after launch_epoch) |
 | `stitch-triple-hdr.sh` | three uncapped bench recordings (stock settings, optimized before the 2026-09-20 evening pass, all optimizations) | 2:1 quad video kept in HDR end to end (NVENC AV1 10-bit, PQ/BT.2020 tags via `setparams` + `write_colr`); the in-game overlay region of each capture is pasted 1:1 (x1.25) into its panel so the numbers stay readable; results panel from env `RES_*`. Recordings: `--record --no-mangohud --env MANGOHUD_CONFIG=no_display --prop overlay=true --prop overlayFont=Large` (the maintainer's Steam launch options are `steam-launch.sh mangohud %command%`, so MangoHud is injected on every Steam launch and must be hidden explicitly) |
 | `stitch-sbs.sh` | stock + optimized 120 km/h recordings | side-by-side video with live boot/load counters and a hardware panel; header explains the HUD-clock sync. The first ~2.3 s of every capture show the desktop: never start a pane before the game window appears |
 | `stitch-sbs-gif.sh` | the stitch-sbs.sh mp4 | two README GIFs under GitHub's 10 MB limit: `-load.gif` (boot + load, real time) and `-drive.gif` (10 s of the route + the result lines) |
+| `showcase-record.sh <drive120\|spin\|louisville\|fog120\|storm120\|menu> <stock\|opt>` | | one showcase recording: in-game overlay (Large), no MangoHud, AV1 HDR capture, both sides uncapped; `stock` = every runtime and boot key off via `--prop`, `menu` = verify mode sitting in the world for the Options tab capture (driven by hand with xdotool; the XWayland pointer is 1.25x the xdotool coordinates on this desktop). Runs `show-*` (2026-09-20 evening) |
+| `showcase-times.py <labels>` | run.opts, pzopt-schedule.out, pzopt-loadtrace.out, pzopt-overlay.out, recording.mp4 | per run: route-start onset in the video (frame differencing on 48x20 thumbnails around route_start_epoch_ms; drive runs show one isolated spike there), the epoch→video offset, boot / load seconds and their video times, whole-route fps / p99 / 1 %-low, fps in 0.25 s bins. JSON for the stitch |
+| `stitch-showcase.py [out]` | the eight `show-*` recordings + the menu one | the ≤2 min showcase (`docs/media/showcase-stock-vs-all-optimizations.mp4`, 3840x1800 2.13:1, AV1 HDR): title, boot + load counters flowing into the 120 km/h drive, the Optimizations tab, spin / fog / storm, results card = centred table on a black frosted-glass panel (blurred, darkened crop of `RESULTS_BG`, the maintainer's own capture from `RESULTS_BG_SS` s on) (no title card); stock left, optimized right, big 1 s-average fps per side from the overlay log, ASS text (libass), silent segments as intermediates under `/tmp/pzopt-showcase` joined with xfade; audio built in the join: the menu theme, swapped for the game's rain loop (`ZomboidSound.bank` stream 15042 `world_ext_rain_general_very_strong`, index from the FSB5 name table, vgmstream) over the storm, then a two-pass linear loudnorm to -16 LUFS with the video copied (`FAST=1` preview, `SKIP_SEGS=1` / `ONLY=3,7` re-join). acrossfade truncated an audio chain once; delays + amix instead |
+| `showcase-thumbnail.py [out]` | a frame of the results-card capture (`THUMB_SRC`, `THUMB_T`, `THUMB_CROP`) | the YouTube thumbnail: tone-mapped, cropped 16:9 around the player and the zombie, "PZ optimized before GTA VI" on top, `FPS_STOCK` vs `FPS_OPT` big at the bottom, Pillow |
 | `issue4-gif.py [before after out]` | `shot-game.png` of two `--shot-at` runs at the same camera position (default the newest `i4-repro-*` and `i4-fix2-*`: Rosewood living room 8147,11507, `--flag close_curtains=true`, zoom 1) | `docs/media/issue4-curtains-before-after.gif`, two labelled 2.2 s frames (issue #4, windows through closed curtains); `--flag find=curtains` lists curtain squares to pick a `start=` |
 | `proton-preflight.sh` | Steam manifests | read-only Proton readiness report |
 | `simulate.py` | | streamer queue simulation |

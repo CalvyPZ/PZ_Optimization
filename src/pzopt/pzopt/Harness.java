@@ -28,13 +28,21 @@ import zombie.vehicles.BaseVehicle;
  *   vehicle  script    drive mode: vehicle spawned on the nearest road when the player is on foot (default the race car; "none" = fixture required)
  *   kmh      km/h      drive mode: cruise-control speed (default 60); the route follows the road (roadFollow)
  *   speed    tiles/s   default 18 (about car speed on a road)
+ *   start    X,Y       bench/parity: teleport the player to this world square at world-ready, before the settle
+ *                      time (the route then begins there). Any distance: IsoChunkMap.ProcessChunkPos unloads the
+ *                      grid and reloads it around the new square, like the debug teleport. Give the streamer a
+ *                      longer settle (the Louisville preset uses 20 s) so the load burst is over before the route
+ *   population N|max   sandbox zombie population multipliers forced at world-ready (see Scene)
  *   turn     deg/s     bench/parity: spin the player's facing at this rate along the route so the view cone, lighting
  *                      cone and cutaways keep changing (default 0 = keep the save's facing)
  *   settle   seconds   wait after the world is up before moving (default 15; harness/run.sh passes 5: the
  *                      load burst and the forced-zoom bake are over ~2 s after the world is up)
  *   zoom     max|level  force the camera zoom before the route (auto-zoom off); drive mode defaults to max, other modes keep the save's zoom
  *   max_seconds        drive mode: give up (route_status=timeout) after this long on the route (default 90)
- *   hold     seconds   bench/parity: after the last leg stay on the end square this long before quitting; the turn
+ *   jitter   tiles     bench/parity, with hold: every frame of the hold the player's X alternates between the end
+ *                      square's east edge minus and plus this much (e.g. 0.05), i.e. the square under the player
+ *                      flips every frame, like zombies shoving a player standing on a roof edge (carport flicker rig)
+ *   hold     seconds   bench/parity: after the last leg wait this long before quitting (no teleports: the player may walk); the turn
  *                      keeps spinning the facing (a still camera with changing cutaways, for flicker recordings)
  *   shot_at  seconds   bench/parity: this far into the route hold the camera (no teleport, no turn) for 6 s and,
  *                      2 s into the hold, write Zomboid/Screenshots/pzopt-shot.png (Core.TakeFullScreenshot) and
@@ -93,6 +101,10 @@ public final class Harness {
    private static float shotAt = 0f;
    /** bench: seconds to stay on the route's end square, still spinning, before the run ends (flag hold, 0 = off). */
    private static float holdSecs = 0f;
+   /** bench: hold-time X oscillation across the end square's east edge, in tiles (flag jitter, 0 = off). */
+   private static float jitterTiles = 0f;
+   private static float jitterEdgeX;
+   private static boolean jitterSide;
    private static long holdStartNs = 0L;
    private static int shotPhase; // 0 = pending, 1 = holding, 2 = done
    private static long shotHoldNs;
@@ -211,6 +223,7 @@ public final class Harness {
          turnDegPerSec = Float.parseFloat(HarnessFlags.get("turn", "0"));
          shotAt = Float.parseFloat(HarnessFlags.get("shot_at", "0"));
          holdSecs = Float.parseFloat(HarnessFlags.get("hold", "0"));
+         jitterTiles = Float.parseFloat(HarnessFlags.get("jitter", "0"));
          settle = Float.parseFloat(HarnessFlags.get("settle", "15"));
          maxSeconds = Float.parseFloat(HarnessFlags.get("max_seconds", "90"));
          cruiseKmh = Float.parseFloat(HarnessFlags.get("kmh", "60"));
@@ -252,6 +265,16 @@ public final class Harness {
                    // a throw here would repeat every frame (the state never advances) and the run never exits
                    reject("scene setup failed: " + e);
                    return;
+                }
+                String startFlag = HarnessFlags.get("start", "").trim();
+                if (!startFlag.isEmpty() && !driving) {
+                   // far start (flag start=X,Y): after the scene (population multipliers) so the chunks the jump
+                   // loads are generated with them; the settle time covers the reload burst
+                   String[] xy = startFlag.split(",");
+                   int sx = Integer.parseInt(xy[0].trim());
+                   int sy = Integer.parseInt(xy[1].trim());
+                   Log.info("harness: teleporting from " + p.getXi() + "," + p.getYi() + " to start " + sx + "," + sy);
+                   p.teleportTo(sx, sy, 0);
                 }
                 if (driving) {
                    vehicle = p.getVehicle();
@@ -332,7 +355,7 @@ public final class Harness {
                    vehicleStartY = vehicle.getY();
                    lastTelemetryNs = 0L;
                 }
-                Log.info("harness: route start");
+                Log.info("harness: route start" + (Scene.requested() ? " (zombies loaded: " + Scene.zombiesLoaded() + ")" : ""));
                boolean closeCurtains = "true".equals(HarnessFlags.get("close_curtains", "false"));
                if (closeCurtains || "curtains".equals(HarnessFlags.get("find", ""))) {
                   findCurtains(p, closeCurtains); // dev: curtain screenshot rig (issue #4)
@@ -420,7 +443,9 @@ public final class Harness {
             // whole-tile teleports through the game's own API (what the debug
             // teleport tools use); it also takes the player out of a vehicle,
             // which plain setX/setY does not survive
-            if ((int)x != p.getXi() || (int)y != p.getYi()) {
+            boolean holding = leg >= legs.size() && holdSecs > 0f;
+            if (!holding && ((int)x != p.getXi() || (int)y != p.getYi())) {
+               // no teleports during the hold: the player may walk away from the end square (manual tests)
                p.teleportTo((int)x, (int)y, 0);
             }
             if (turnDegPerSec != 0f) {
@@ -435,6 +460,15 @@ public final class Harness {
                   Log.info("harness: route legs done at " + p.getXi() + "," + p.getYi() + "; holding " + holdSecs + " s" + (turnDegPerSec != 0f ? " with turn=" + turnDegPerSec : ""));
                }
                if ((nowNs - holdStartNs) / 1e9f < holdSecs) {
+                  if (jitterTiles > 0f) {
+                     // flag jitter: the square under the player flips every frame across the east edge of the end square
+                     if (jitterEdgeX == 0f) {
+                        jitterEdgeX = p.getXi() + 1f;
+                        Log.info("harness: jitter " + jitterTiles + " tiles across x=" + jitterEdgeX + " every frame");
+                     }
+                     jitterSide = !jitterSide;
+                     p.setX(jitterEdgeX + (jitterSide ? jitterTiles : -jitterTiles));
+                  }
                   return;
                }
             }

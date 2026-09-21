@@ -905,3 +905,29 @@ resolution). Direct launcher (no Steam), `--flag weather=storm`, `--no-mangohud 
 |---|---|---|---|---|---|---|
 | `sbs-storm120-stock-1` | every pzopt render key off (the `u400show-stock` set + today's keys off) | 300 (framecap.ini won over `--option frameRate=244`; moot at 71 fps) | 71.5 | 13.1 / 67 / 87 / 103 | 42 | 96 % / 83 % / 84 % |
 | `sbs-storm120-opt-1` | defaults incl. rain tiles, puddle cache, lighting re-bake spread | none | 268.7 | 3.3 / 8.8 / 12.7 / 19.9 | 0 | 98 % / 61 % / 97 % |
+
+## 2026-09-20 (23:30–23:55): downtown Louisville with the zombie population maxed, stock vs optimized
+
+New bench preset `--preset louisville` (`harness/run.sh`): teleport to 12450,1280 at world-ready
+(`start=` flag, `IsoChunkMap.ProcessChunkPos` reloads the grid), sandbox zombie population
+multipliers forced to 4 before the chunks load (`population=max`, `Scene` -> native popman), 20 s
+settle, the spinning walk (`turn=90`) at 6 tiles/s over 150 tiles (25 s), `see_all=true` (new
+`LightingJNI` override: every square seen and visible, else the tall blocks leave most of the screen
+never-seen black). ~2,000 zombies loaded at the route start, ~2,500 by the end. Recorded with
+`harness/showcase-record.sh louisville stock|opt` (uncapped, in-game overlay, no MangoHud, AV1 HDR),
+stitched with `harness/stitch-louisville-sbs.sh` ->
+`docs/media/louisville-horde-spin-stock-vs-optimized.mp4` (3840x810, 27 s, aligned at the quit instant).
+
+| run | build | fps mean | p50 / p99 / p99.9 / max ms | >33 ms | GPU / game / render | zombies |
+|---|---|---|---|---|---|---|
+| `show-louisville-stock-3` | every pzopt key off, uncapped | 23.7 | 39.5 / 94.4 / 135.5 / 160.6 | 402 of 592 | 43 % / 98 % / 28 % | 2503 |
+| `show-louisville-opt-3` | defaults, uncapped | 31.7 | 29.8 / 56.6 / 122.6 / 171.0 | 234 of 793 | 42 % / 98 % / 17 % | 2441 |
+
+Both sides are game-thread bound (98 % of a core) with the GPU at ~42 %: this scene is the zombie
+update (character update / animation / pathing on the game thread), which no pzopt key touches yet;
+the +34 % fps and halved p99 come from the render-side keys (chunk textures, cutaways, light info).
+`docs/plan-500fps.md` lists the character update as the untouched item; this preset is its benchmark.
+Earlier attempts: at 18 tiles/s (`show-louisville-opt-1`, 33.9 fps) the walk outran chunk handoff and
+the second half of the route was black; without `see_all` (`-2`, 89.6 fps because most of the screen
+was black) the recording was unwatchable. The 5,116-zombie first run also had 21 GC events / 1.2 s in
+the window (max 567 ms).

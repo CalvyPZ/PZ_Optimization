@@ -176,6 +176,24 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   texture with them empty. FBORenderCell now keeps the lists across invalidations (IsoChunk clears them
   on pool reuse) and never holds cutaway re-bakes. Repro/metric: `run.sh --flag hold=10` + `harness/flicker.py`
   (runs `flick-*`); stock 3.8 vs broken 26 transient px/frame at `--scale 2560`.
+- Carport roof flicker (2026-09-21, maintainer video: detached carport roof toggling every frame with the player
+  on its SE edge and zombies around, steady while paused): the hide/show of an orphan structure (`emptyoutside`-only
+  building) is now debounced, `roofHideDebounceFrames=8` (`FBORenderCutaways.checkOrphanStructures`, tab entry,
+  counter `roof flips held`). No harness rig reproduced the per-frame toggle (teleport walk, edge `jitter=`, manual
+  walk with `zombies=off` gave 0 flips; the maintainer's session with zombies gave 13 flips in 30 s), so the driver is
+  still open; `--prop devCutawayLog=true` logs every decision. Spot: save copy `Apocalypse/2026-09-20_22-30-24`,
+  `start=11024,6721`, roof 11021-11024 / 6718-6721. Issue #5: `treesInChunkTexture` clips JUMBO trees to their
+  chunk-level texture (rectangle / flat top) at that spot.
+- Issue #5 (2026-09-21, `docs/override-edits.md` tree pass entry): JUMBO trees baked through the plain sprite
+  path were clipped to their chunk-level texture (up to 7 tiles wide, 16 tile heights tall vs a texture that
+  covers the chunk plus two levels) and cut by upper-floor walls behind them (flat sprite depth vs the walls'
+  height-tilted depth). `pzopt.TreeBake` + `FBORenderCell.pzoptBakeTrees` (`treeBakePass`, default on) draw
+  baked trees last in every texture their sprite reaches, with a depth that rises with the crown; export
+  fingerprints on `IsoChunk` re-bake neighbours holding a copy when a tree changes. Stock's own chunk-texture
+  tree batch is broken (dark crown behind the house), so it stays unused. Repro / A-B: the issue's `--shot-at`
+  command, `--prop treeBakePass=false` (old bake), `--prop treesInChunkTexture=false` (per frame). Found on the
+  way: `vboFastQuads=true` draws per-frame FBORenderTrees quads ~40 % darker than the stock element path
+  (runs `trees-town-off` vs `trees-town-off-slowvbo`), reported to the VBORenderer session, not fixed here.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
   still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).

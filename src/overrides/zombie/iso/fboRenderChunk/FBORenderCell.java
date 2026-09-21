@@ -54,6 +54,7 @@ import zombie.iso.IsoChunk;
 import zombie.iso.IsoChunkLevel;
 import zombie.iso.IsoChunkMap;
 import zombie.iso.IsoDirections;
+import zombie.iso.IsoDepthHelper; // pzopt: tree pass
 import zombie.iso.IsoFloorBloodSplat;
 import zombie.iso.IsoGridSquare;
 import zombie.iso.IsoMarkers;
@@ -94,6 +95,7 @@ import zombie.iso.objects.IsoWorldInventoryObject;
 import zombie.iso.objects.interfaces.BarricadeAble;
 import zombie.iso.sprite.CorpseFlies;
 import zombie.iso.sprite.IsoSprite;
+import zombie.iso.sprite.IsoSpriteInstance; // pzopt: tree pass
 import zombie.iso.sprite.IsoSpriteGrid;
 import zombie.iso.sprite.IsoSpriteManager;
 import zombie.iso.sprite.shapers.FloorShaper;
@@ -1189,6 +1191,7 @@ public final class FBORenderCell {
                   if (renderSquare != null && renderSquare != square) {
                      renderSquare.invalidateRenderChunkLevel(4096L);
                   }
+                  this.pzoptInvalidateTreeCopies(tree, playerIndex); // pzopt: issue #5
                }
             }
             if (tree != null && !this.isTreeRenderedEveryFrame(tree)) {
@@ -1210,6 +1213,7 @@ public final class FBORenderCell {
                   if (renderSquare != null && tree.getSquare() != renderSquare) {
                      renderSquare.invalidateRenderChunkLevel(4096L);
                   }
+                  this.pzoptInvalidateTreeCopies(tree, playerIndex); // pzopt: issue #5, the neighbours holding a copy
                }
             }
          }
@@ -2289,6 +2293,12 @@ public final class FBORenderCell {
                   var17.close();
                }
 
+               // pzopt: issue #5. Trees go in last, after every level of the texture, so the depth test settles them
+               // against walls and roofs of all its levels; neighbours' trees that reach into this texture come too.
+               if (pzoptTreePassActive() && FBORenderChunkManager.instance.renderChunk != null
+                     && FBORenderChunkManager.instance.renderChunk.isTopLevel(level)) {
+                  this.pzoptBakeTrees(c, playerIndex, zoom);
+               }
                FBORenderChunkManager.instance.endRenderChunkLevel(c, level, zoom, true);
                pzopt.GpuSections.end("bake"); // pzopt: GPU section
                return;
@@ -2730,6 +2740,260 @@ public final class FBORenderCell {
          return object instanceof IsoTree && !pzoptTreeTextureReady(object);
       }
       return object instanceof IsoTree;
+   }
+
+   // ---- pzopt: tree pass (Config.TREE_BAKE_PASS, pzopt.TreeBake, issue #5) ----------------------------------------
+
+   /** Baked trees are drawn by {@link #pzoptBakeTrees} instead of the MinusFloor loop. */
+   private static boolean pzoptTreePassActive() {
+      return pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Config.TREE_BAKE_PASS && pzopt.Overrides.enabled()
+         && !Core.getInstance().getOptionDoWindSpriteEffects();
+   }
+
+   /** Would this tree bake right now (the tree cases of isObjectRenderLayer_MinusFloor and IsoTree.render)? */
+   private boolean pzoptTreeBakes(IsoTree tree, boolean aiming) {
+      if (tree.square == null || tree.square.z >= 1000 || tree.isHighlighted() || tree.isAnimating()) {
+         return false;
+      }
+      if (tree.getObjectRenderEffects() != null || tree.getObjectRenderEffectsToApply() != null || tree.fadeAlpha < 1.0F) {
+         return false;
+      }
+      return !this.isTreeRenderedEveryFrame(tree) && !this.pzoptIsTranslucentTree(tree, aiming);
+   }
+
+   private final pzopt.TreeBake.Rect pzoptTreeRect = new pzopt.TreeBake.Rect();
+   private final pzopt.TreeBake.Rect pzoptTreeOwnTexture = new pzopt.TreeBake.Rect();
+   private final pzopt.TreeBake.Rect pzoptTreeOtherTexture = new pzopt.TreeBake.Rect();
+
+   /** The tree's full sprite rectangle in the logical space of chunk (wx, wy)'s texture with offsets goX / yoff. */
+   private boolean pzoptTreeRect(IsoTree tree, int wx, int wy, float goX, float yoff, pzopt.TreeBake.Rect out) {
+      IsoSprite sprite = tree.getSprite();
+      if (sprite == null) {
+         return false;
+      }
+      Texture texture = sprite.getTextureForCurrentFrame(tree.getForwardIsoDirection(), tree);
+      if (texture == null) {
+         return false;
+      }
+      int tileScale = Core.tileScale;
+      float scale = pzopt.TreeBake.spriteScale(tileScale, texture.getWidthOrig(), texture.getHeightOrig());
+      IsoGridSquare square = tree.square;
+      pzopt.TreeBake.spriteRect(square.x, square.y, square.z, wx, wy, pzopt.TreeBake.offsetX(sprite.name, tileScale),
+         pzopt.TreeBake.offsetY(sprite.name, tileScale), texture.getWidthOrig() * scale, texture.getHeightOrig() * scale, goX, yoff, tileScale, out);
+      return true;
+   }
+
+   /** Texture-space y offset of the chunk-level texture for levels minLevel..topLevel (FBORenderChunkManager's yoff). */
+   private static float pzoptTextureYOffset(int minLevel, int topLevel) {
+      return (topLevel - minLevel + 1) * FBORenderChunk.PIXELS_PER_LEVEL + minLevel * FBORenderChunk.PIXELS_PER_LEVEL
+         + FBORenderLevels.extraHeightForJumboTrees(minLevel, topLevel);
+   }
+
+   /**
+    * The logical area of chunk {@code n}'s texture for the level group starting at {@code minLevel}, in the space of
+    * the texture of chunk {@code c} (offsets goX / yoff), sized as FBORenderLevels allocates it. False when n has no
+    * such level group.
+    */
+   private static boolean pzoptChunkTextureRect(IsoChunk n, IsoChunk c, int minLevel, float zoom, float goX, float yoff, pzopt.TreeBake.Rect out) {
+      if (minLevel < 0 || minLevel < n.minLevel || minLevel > n.maxLevel) {
+         return false;
+      }
+      int topLevel = Math.min(minLevel + 1, n.maxLevel);
+      int scale = FBORenderLevels.getTextureScale(zoom);
+      float w = (float)FBORenderLevels.calculateTextureWidthForLevels(minLevel, topLevel, zoom) / scale;
+      float h = (float)FBORenderLevels.calculateTextureHeightForLevels(minLevel, topLevel, zoom) / scale;
+      pzopt.TreeBake.neighbourTextureRect(n.wx - c.wx, n.wy - c.wy, goX, yoff, pzoptTextureYOffset(minLevel, topLevel), w, h, Core.tileScale, out);
+      return true;
+   }
+
+   /** Re-bakes chunk n's texture for the level group at minLevel if it exists; a texture not yet baked pulls the trees itself. */
+   private static void pzoptInvalidateTreeHolder(IsoChunk n, int minLevel, int playerIndex, float zoom) {
+      FBORenderLevels renderLevels = n.getRenderLevels(playerIndex);
+      if (renderLevels.getFBOForLevel(minLevel, zoom) != null) {
+         renderLevels.invalidateLevel(minLevel, 4096L);
+         pzopt.TreeBake.neighboursInvalidated++;
+      }
+   }
+
+   /** Re-bakes every neighbour texture that holds a copy of the tree (its baked / per-frame state changed). */
+   private void pzoptInvalidateTreeCopies(IsoTree tree, int playerIndex) {
+      if (!pzoptTreePassActive() || tree.square == null || tree.square.chunk == null) {
+         return;
+      }
+      IsoChunk c = tree.square.chunk;
+      int minLevel = FBORenderLevels.calculateMinLevel(tree.square.z);
+      float zoom = Core.getInstance().getZoom(playerIndex);
+      pzopt.TreeBake.Rect sprite = this.pzoptTreeRect;
+      pzopt.TreeBake.Rect own = this.pzoptTreeOwnTexture;
+      pzopt.TreeBake.Rect other = this.pzoptTreeOtherTexture;
+      // any frame works as long as every rectangle uses the same one: c's corner, no texture offsets
+      float goX = 0.0F;
+      float yoff = 0.0F;
+      if (!pzoptChunkTextureRect(c, c, minLevel, zoom, goX, yoff, own) || !this.pzoptTreeRect(tree, c.wx, c.wy, goX, yoff, sprite)) {
+         return;
+      }
+      for (int dwy = -2; dwy <= 2; dwy++) {
+         for (int dwx = -2; dwx <= 2; dwx++) {
+            if (dwx == 0 && dwy == 0) {
+               continue;
+            }
+            IsoChunk n = this.cell.getChunk(c.wx + dwx, c.wy + dwy);
+            if (n != null && pzoptChunkTextureRect(n, c, minLevel, zoom, goX, yoff, other) && pzopt.TreeBake.needsCopy(sprite, other, own)) {
+               pzoptInvalidateTreeHolder(n, minLevel, playerIndex, zoom);
+            }
+         }
+      }
+   }
+
+   /**
+    * The tree pass of one chunk-level texture, run after its top level is baked: every baked tree of this chunk, and
+    * every baked tree of the chunks up to two away whose sprite reaches into this texture beyond its own texture, is
+    * drawn as a depth-tilted quad by pzopt.TreeBake in this texture's space and relative to this chunk's depth. Also
+    * refreshes this chunk's export fingerprints: when the set of its trees needing a copy in a neighbour's texture
+    * changed since its last bake (a tree chopped, grown, gone per-frame or back), that neighbour is re-baked so it
+    * does not keep a stale copy.
+    */
+   private void pzoptBakeTrees(IsoChunk c, int playerIndex, float zoom) {
+      FBORenderChunk rc = FBORenderChunkManager.instance.renderChunk;
+      int minLevel = rc.getMinLevel();
+      int topLevel = rc.getTopLevel();
+      if (minLevel < 0) {
+         return;
+      }
+      pzopt.TreeBake.passes++;
+      float scale = rc.highRes ? 2.0F : 1.0F;
+      float goX = FBORenderChunkManager.instance.getXOffset();
+      float yoff = FBORenderChunkManager.instance.getYOffset();
+      boolean aiming = IsoPlayer.getPlayer(playerIndex).isAnyAimKeyDown();
+      int camX = PZMath.fastfloor(IsoCamera.frameState.camCharacterX);
+      int camY = PZMath.fastfloor(IsoCamera.frameState.camCharacterY);
+      int tileScale = Core.tileScale;
+      pzopt.TreeBake.Rect sprite = this.pzoptTreeRect;
+      pzopt.TreeBake.Rect own = this.pzoptTreeOwnTexture;   // this texture
+      pzopt.TreeBake.Rect other = this.pzoptTreeOtherTexture; // a neighbour's texture, in this texture's space
+      pzopt.TreeBake.ownTextureRect(goX, rc.w / scale, rc.h / scale, own);
+      pzopt.TreeBake.Drawer drawer = null;
+      int[] exportFp = c.pzoptTreeExportFp;
+      if (exportFp == null) {
+         exportFp = c.pzoptTreeExportFp = new int[25];
+      }
+      int[] newFp = new int[25];
+      IsoChunk[] slotChunk = new IsoChunk[25];
+      for (int slot = 0; slot < 25; slot++) {
+         slotChunk[slot] = slot == 12 ? c : this.cell.getChunk(c.wx + slot % 5 - 2, c.wy + slot / 5 - 2);
+      }
+      for (int slot = 0; slot < 25; slot++) {
+         boolean ownChunk = slot == 12;
+         IsoChunk n = slotChunk[slot];
+         if (n == null || (!ownChunk && n.lightingNeverDone[playerIndex])) {
+            continue;
+         }
+         // a neighbour's tree is copied only where it reaches beyond its own texture (most trees never do)
+         if (!ownChunk && !pzoptChunkTextureRect(n, c, minLevel, zoom, goX, yoff, other)) {
+            continue;
+         }
+         int z0 = Math.max(minLevel, n.minLevel);
+         int z1 = Math.min(topLevel, n.maxLevel);
+         for (int z = z0; z <= z1; z++) {
+            IsoGridSquare[] squares = n.squares[n.squaresIndexOfLevel(z)];
+            ChunkLevelData levelData = n.getCutawayDataForLevel(z);
+            for (int i = 0; i < squares.length; i++) {
+               IsoGridSquare square = squares[i];
+               if (square == null || !square.has(IsoObjectType.tree)) {
+                  continue;
+               }
+               IsoTree tree = square.getTree();
+               if (tree == null || !this.pzoptTreeBakes(tree, aiming)) {
+                  continue;
+               }
+               if (ownChunk && tree.getRenderInfo(playerIndex).layer != ObjectRenderLayer.MinusFloor) {
+                  continue; // this bake's calculateObjectRenderInfo put it in a per-frame layer
+               }
+               if (!levelData.shouldRenderSquare(playerIndex, square) || FBORenderOcclusion.getInstance().isOccluded(square.x, square.y, square.z)
+                     || FBORenderCutaways.getInstance().isForceRenderSquare(playerIndex, square)) {
+                  continue;
+               }
+               if (!this.pzoptTreeRect(tree, c.wx, c.wy, goX, yoff, sprite)) {
+                  continue;
+               }
+               if (ownChunk) {
+                  // export fingerprints: which of this chunk's trees need a copy in each neighbour's texture
+                  for (int e = 0; e < 25; e++) {
+                     if (e != 12 && slotChunk[e] != null && pzoptChunkTextureRect(slotChunk[e], c, minLevel, zoom, goX, yoff, other)
+                           && pzopt.TreeBake.needsCopy(sprite, other, own)) {
+                        newFp[e] += System.identityHashCode(tree) * 31 + 1;
+                     }
+                  }
+                  tree.renderFlag = false; // baked: what renderMinusFloor_NotDoorOrWall records for checkTreeTranslucency
+                  if (!pzopt.TreeBake.overlaps(sprite, own)) {
+                     continue;
+                  }
+               } else if (!pzopt.TreeBake.needsCopy(sprite, own, other)) {
+                  continue;
+               }
+               if (!ownChunk) {
+                  square.cacheLightInfo(); // as the stock bake does for the N / W neighbour squares it draws
+               }
+               if (square.getLightInfo(playerIndex) == null) {
+                  continue;
+               }
+               // depth relative to this texture's chunk: the square's south corner, as the sprite path writes it
+               float base = IsoDepthHelper.getSquareDepthData(camX, camY, square.x + 0.99F, square.y + 0.99F, z).depthStart;
+               base -= IsoDepthHelper.getChunkDepthData(PZMath.fastfloor(camX / 8.0F), PZMath.fastfloor(camY / 8.0F), c.wx, c.wy, z).depthStart;
+               if (base < 0.0F) {
+                  continue; // a nearer chunk's tree: below this texture's depth range, its own and nearer textures hold it
+               }
+               ColorInfo light = this.sanitizeLightInfo(playerIndex, square);
+               boolean unlit = tree.getSprite().getProperties().has(IsoFlagType.unlit);
+               float cr = unlit ? 1.0F : light.r;
+               float cg = unlit ? 1.0F : light.g;
+               float cb = unlit ? 1.0F : light.b;
+               if (drawer == null) {
+                  drawer = pzopt.TreeBake.alloc();
+               }
+               IsoDirections dir = tree.getForwardIsoDirection();
+               // sprite.x0 / y0 is the origin the sprite path would use; each texture adds its own trim offsets
+               this.pzoptAddTreeTexture(drawer, tree.getSprite().getTextureForCurrentFrame(dir, tree), sprite.x0, sprite.y0, sprite.ground, base, cr, cg, cb, tileScale);
+               if (tree.attachedAnimSprite != null) {
+                  for (int k = 0; k < tree.attachedAnimSprite.size(); k++) {
+                     IsoSpriteInstance inst = tree.attachedAnimSprite.get(k);
+                     this.pzoptAddTreeTexture(drawer, inst.parentSprite.getTextureForCurrentFrame(dir, tree), sprite.x0, sprite.y0, sprite.ground, base, cr, cg, cb, tileScale);
+                  }
+               }
+               pzopt.TreeBake.treesDrawn++;
+               if (!ownChunk) {
+                  pzopt.TreeBake.copiesDrawn++;
+               }
+            }
+         }
+      }
+      for (int slot = 0; slot < 25; slot++) {
+         if (newFp[slot] != exportFp[slot]) {
+            exportFp[slot] = newFp[slot];
+            IsoChunk e = slotChunk[slot];
+            if (e != null && e != c && minLevel >= e.minLevel && minLevel <= e.maxLevel) {
+               pzoptInvalidateTreeHolder(e, minLevel, playerIndex, zoom);
+            }
+         }
+      }
+      if (drawer != null) {
+         SpriteRenderer.instance.drawGeneric(drawer);
+      }
+   }
+
+   /** One texture of a tree (main sprite or foliage overlay) placed like IsoSprite.performRenderFrame would. */
+   private void pzoptAddTreeTexture(pzopt.TreeBake.Drawer drawer, Texture texture, float sx, float sy, float ground, float base,
+                                    float r, float g, float b, int tileScale) {
+      if (texture == null || !texture.isReady() || texture.getTextureId() == null) {
+         return;
+      }
+      float scale = pzopt.TreeBake.spriteScale(tileScale, texture.getWidthOrig(), texture.getHeightOrig());
+      float x0 = sx + texture.getOffsetX() * scale;
+      float y0 = sy + texture.getOffsetY() * scale;
+      float x1 = x0 + texture.getWidth() * scale;
+      float y1 = y0 + texture.getHeight() * scale;
+      drawer.add(texture, x0, y0, x1, y1, pzopt.TreeBake.depthAtRow(base, ground, y0, tileScale),
+         pzopt.TreeBake.depthAtRow(base, ground, y1, tileScale), r, g, b, 1.0F);
    }
 
    /** JUMBO trees do not come out of the chunk-texture tree batch (missing at game load, 2026-09-19); they stay per frame. */
@@ -3259,10 +3523,14 @@ public final class FBORenderCell {
       IsoObject[] objects = (IsoObject[])objectList.getElements();
       int numObjects = objectList.size();
 
+      boolean pzoptTreePass = pzoptTreePassActive(); // pzopt: baked trees are drawn by pzoptBakeTrees at the end of the texture
       for (int i = 0; i < numObjects; i++) {
          IsoObject object = objects[i];
          ObjectRenderInfo renderInfo = object.getRenderInfo(playerIndex);
          if (renderInfo.layer == ObjectRenderLayer.MinusFloor) {
+            if (pzoptTreePass && object instanceof IsoTree) {
+               continue; // pzopt: issue #5
+            }
             IsoGridSquare renderSquare = object.getRenderSquare();
             if (renderSquare != null && chunk == renderSquare.chunk) {
                if (bForceRender) {
@@ -3870,11 +4138,13 @@ public final class FBORenderCell {
          .append(" squares changed=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptCutawayChangedSquares)
          .append(" walls visited=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptWallsVisited)
          .append(" skipped=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptWallsSkipped)
+         .append(" roof flips held=").append(zombie.iso.fboRenderChunk.FBORenderCutaways.pzoptRoofFlipsHeld) // pzopt: roofHideDebounceFrames
          .append(" | occlusion rebuilds skipped=").append(pzoptOcclusionRebuildsSkipped)
          .append(" light info skipped=").append(pzoptLightInfoSkipped).append(" levels gated=").append(pzoptLightInfoLevelsGated);
       sb.append(pzopt.GpuSections.summary()); // pzopt: GPU sections (Config.GPU_SECTIONS)
       if (pzopt.PuddleCache.enabled()) { sb.append(" | ").append(pzopt.PuddleCache.stats()); } // pzopt
       if (pzopt.RainTiles.enabled()) { sb.append(" | ").append(pzopt.RainTiles.stats()); } // pzopt
+      if (pzoptTreePassActive()) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));

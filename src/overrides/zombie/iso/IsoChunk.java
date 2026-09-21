@@ -150,6 +150,10 @@ public final class IsoChunk {
    // pzopt: frame number of the last cacheLightInfo per square, rows indexed playerIndex * 64 + level + 32
    // (Config.LIGHT_INFO_ONCE_PER_FRAME, used by FBORenderCell)
    public int[][] pzoptLightInfoFrame;
+   // pzopt: per 5x5 neighbour slot, a fingerprint of this chunk's baked trees whose sprite overlaps that neighbour's
+   // chunk-level texture, so a tree removed or turned per-frame here re-bakes the neighbour that holds a copy of it
+   // (Config.TREE_BAKE_PASS, pzopt.TreeBake, issue #5)
+   public int[] pzoptTreeExportFp;
    // pzopt: marker so the game log shows the loose class was loaded, not the jar's copy
    static {
       pzopt.Overrides.onClassLoaded("zombie.iso.IsoChunk");
@@ -5400,6 +5404,7 @@ public final class IsoChunk {
    public void resetForStore() {
       loadGridSquare.remove(this);
       this.pzoptOccluderMaskSet = 0L; // pzopt: a reused chunk object starts without stored occluder masks
+      this.pzoptTreeExportFp = null; // pzopt: tree export fingerprints belong to the previous chunk
       this.pzoptClearPerFrameLists(); // pzopt: FBORenderCell keeps them across invalidations; a reused chunk starts empty
       this.randomId = 0;
       this.revision = 0L;

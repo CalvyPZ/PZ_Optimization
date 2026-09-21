@@ -7,7 +7,7 @@
 #                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
 #                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]... [--mod ID]... [--vmarg ARG]...
 #                  [--lead secs] [--route-seconds secs] [--launcher auto|steam|direct] [--option key=value]...
-#                  [--preset night-torch|night-dark|storm|fog|storm-fog]
+#                  [--preset night-torch|night-dark|storm|fog|storm-fog|louisville]
 #
 # --preset NAME    scene preset: bench mode on the spinning game-thread route (route=S:450 turn=90 zoom=max,
 #                  --route-seconds 25) plus the scene flags pzopt.Scene reads (time_of_day, torch, weather).
@@ -19,6 +19,17 @@
 #                    fog          the save's hour and weather period stopped, fog pinned at 1.0 (fog=heavy; rendered by
 #                                 ImprovedFog with options.ini fogQuality 0/1, the legacy fog circle with 2)
 #                    storm-fog    storm + fog=heavy with the stock storm fog tint: the heaviest STAGE_STORM the game rolls
+#                    louisville   the spinning route through downtown Louisville with the zombie population
+#                                 maxed: start=12450,1280 (teleport at world-ready; the leg runs through the
+#                                 densest TownZone blocks, x 12000-13000 y 1300-1700), route=S:150 speed=6 (same
+#                                 25 s and turn; at 18 tiles/s the walk outran chunk handoff at the ~30 fps this
+#                                 scene runs at and the second half of the route was black) and population=max (sandbox
+#                                 PopulationMultiplier / Start / Peak = 4, pushed to the native popman before the
+#                                 chunks load, so the never-visited Louisville cells spawn at that density);
+#                                 settle=20 so the far-teleport reload burst is over before the route; see_all=true
+#                                 (LightingJNI override: every square seen and visible, else the tall blocks leave
+#                                 most of the screen never-seen black). Check start= / population= / zombies_loaded=
+#                                 / see_all= in pzopt-bench.out; compare only with other louisville runs
 #                  Preset flags go first, so any --flag / --mode / --route-seconds given on the command line wins
 #                  (e.g. --preset storm --flag fog=0.5 is a storm with half fog).
 #
@@ -119,7 +130,8 @@ if [[ -n "$preset" ]]; then
     storm)       preset_flags=(weather=storm) ;;
     fog)         preset_flags=(fog=heavy) ;;
     storm-fog)   preset_flags=(weather=storm fog=heavy) ;;
-    *) echo "unknown preset: $preset (night-torch|night-dark|storm|fog|storm-fog)" >&2; exit 2 ;;
+    louisville)  preset_flags=(start=12450,1280 population=max settle=20 route=S:150 speed=6 see_all=true) ;;
+    *) echo "unknown preset: $preset (night-torch|night-dark|storm|fog|storm-fog|louisville)" >&2; exit 2 ;;
   esac
   extra_flags=(route=S:450 turn=90 zoom=max "${preset_flags[@]}" "${extra_flags[@]}")   # later duplicates win (Properties.load)
   [[ $mode_set -eq 1 ]] || mode=bench

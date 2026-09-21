@@ -275,9 +275,25 @@ public final class FBORenderCutaways {
          FBORenderCutaways.ChunkLevelData chunkLevelData = chunk.getCutawayData().getDataForLevel(z2);
          FBORenderCutaways.OrphanStructures orphanStructures = chunkLevelData.orphanStructures;
          if (orphanStructures.hasOrphanStructures) {
-            if (orphanStructures.shouldCutaway()) {
+            // pzopt: Config.ROOF_HIDE_DEBOUNCE_FRAMES. The hide/show decision for a carport / pergola roof can change
+            // every frame while the player stands on its edge (or is pushed across it); stock applies each change at
+            // once and re-bakes the level, so the roof flickers. A change is applied only once the new answer has
+            // held for that many consecutive frames; the first answer (PlayerInRange.Unset) is applied at once.
+            boolean pzoptWantHide = orphanStructures.shouldCutaway();
+            int pzoptDebounce = pzopt.Overrides.enabled() ? pzopt.Config.ROOF_HIDE_DEBOUNCE_FRAMES : 0;
+            if (pzoptDebounce > 0 && !orphanStructures.isPlayerInRange(playerIndex, FBORenderCutaways.PlayerInRange.Unset)) {
+               boolean pzoptIsHidden = orphanStructures.isPlayerInRange(playerIndex, FBORenderCutaways.PlayerInRange.True);
+               if (pzoptWantHide == pzoptIsHidden) {
+                  orphanStructures.pzoptPendingFrames[playerIndex] = 0;
+               } else if (++orphanStructures.pzoptPendingFrames[playerIndex] < pzoptDebounce) {
+                  pzoptRoofFlipsHeld++;
+                  continue; // not stable yet: keep the current state
+               }
+            }
+            if (pzoptWantHide) {
                if (!orphanStructures.isPlayerInRange(playerIndex, FBORenderCutaways.PlayerInRange.True)) {
                   orphanStructures.setPlayerInRange(playerIndex, FBORenderCutaways.PlayerInRange.True);
+                  pzoptDevCutawayLog("orphan HIDE chunk " + chunk.wx + "," + chunk.wy + " level " + z2); // pzopt: dev log
                   bForceCutawayUpdate = true;
                   renderLevels.invalidateLevel(z2, 2048L);
                   if (z2 < chunk.getMaxLevel()) {
@@ -286,6 +302,7 @@ public final class FBORenderCutaways {
                }
             } else if (!orphanStructures.isPlayerInRange(playerIndex, FBORenderCutaways.PlayerInRange.False)) {
                orphanStructures.setPlayerInRange(playerIndex, FBORenderCutaways.PlayerInRange.False);
+               pzoptDevCutawayLog("orphan SHOW chunk " + chunk.wx + "," + chunk.wy + " level " + z2); // pzopt: dev log
                bForceCutawayUpdate = true;
                renderLevels.invalidateLevel(z2, 2048L);
                if (z2 < chunk.getMaxLevel()) {
@@ -479,6 +496,7 @@ public final class FBORenderCutaways {
       }
    }
 
+   public static long pzoptRoofFlipsHeld; // pzopt: orphan-structure hide/show changes held by roofHideDebounceFrames
    // pzopt: counters for the log (visits, chunks invalidated, squares whose flag changed)
    public static long pzoptCutawayVisits;
    public static long pzoptCutawayChunksInvalidated;
@@ -786,9 +804,28 @@ public final class FBORenderCutaways {
          }
       }
 
+      if (changed) { // pzopt: dev log
+         StringBuilder sb = new StringBuilder("collapse list changed: ").append(btc.tempLastBuildingsToCollapse.size()).append(" -> ").append(btc.buildingsToCollapse.size()).append(" [");
+         for (int i = 0; i < btc.buildingsToCollapse.size(); i++) {
+            BuildingDef b = btc.buildingsToCollapse.get(i);
+            sb.append(i > 0 ? " " : "").append(b.getX()).append(",").append(b.getY()).append("-").append(b.getX2()).append(",").append(b.getY2());
+         }
+         sb.append("] orphanFlag=").append(this.cell.occludedByOrphanStructureFlag).append(" poi=").append(this.pointOfInterest.size());
+         pzoptDevCutawayLog(sb.toString());
+      }
       btc.tempLastBuildingsToCollapse.clear();
       PZArrayUtil.addAll(btc.tempLastBuildingsToCollapse, btc.buildingsToCollapse);
       return changed;
+   }
+
+   // pzopt: Config.DEV_CUTAWAY_LOG, first 400 lines only
+   private static int pzoptDevCutawayLines;
+
+   static void pzoptDevCutawayLog(String what) {
+      if (pzopt.Config.DEV_CUTAWAY_LOG && pzoptDevCutawayLines < 400) {
+         pzoptDevCutawayLines++;
+         pzopt.Log.info("cutaway dev f" + IsoWorld.instance.getFrameNo() + ": " + what);
+      }
    }
 
    public ArrayList<BuildingDef> getCollapsedBuildings() {
@@ -942,6 +979,7 @@ public final class FBORenderCutaways {
             if (chunkLevelData.orphanStructures.adjacentChunkLoadedCounter != square.chunk.adjacentChunkLoadedCounter) {
                chunkLevelData.orphanStructures.adjacentChunkLoadedCounter = square.chunk.adjacentChunkLoadedCounter;
                chunkLevelData.orphanStructures.calculate(square.chunk);
+               pzoptDevCutawayLog("orphan recalc (adjacent counter) chunk " + square.chunk.wx + "," + square.chunk.wy + " level " + square.z); // pzopt: dev log
             }
 
             FBORenderCutaways.OrphanStructures orphanStructures = chunkLevelData.orphanStructures;
@@ -1884,12 +1922,14 @@ public final class FBORenderCutaways {
    public static final class OrphanStructures {
       FBORenderCutaways.ChunkLevelData chunkLevelData;
       final FBORenderCutaways.PlayerInRange[] playerInRange = new FBORenderCutaways.PlayerInRange[4];
+      final int[] pzoptPendingFrames = new int[4]; // pzopt: consecutive frames the opposite hide/show answer has held (roofHideDebounceFrames)
       boolean hasOrphanStructures;
       long isOrphanStructureSquare;
       int adjacentChunkLoadedCounter;
 
       void calculate(IsoChunk chunk) {
          Arrays.fill(this.playerInRange, FBORenderCutaways.PlayerInRange.Unset);
+         Arrays.fill(this.pzoptPendingFrames, 0); // pzopt
          this.hasOrphanStructures = false;
          this.isOrphanStructureSquare = 0L;
          if (this.chunkLevelData.level >= chunk.minLevel && this.chunkLevelData.level <= chunk.maxLevel) {
@@ -2045,6 +2085,7 @@ public final class FBORenderCutaways {
 
       void resetForStore() {
          Arrays.fill(this.playerInRange, FBORenderCutaways.PlayerInRange.Unset);
+         Arrays.fill(this.pzoptPendingFrames, 0); // pzopt
          this.hasOrphanStructures = false;
          this.isOrphanStructureSquare = 0L;
          this.adjacentChunkLoadedCounter = 0;
