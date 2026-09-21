@@ -158,7 +158,8 @@ elif [[ -z "$zip" ]]; then
   tmp=$(mktemp -d)
   if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
     if [[ -z "$tag" ]]; then
-      tag=$(gh release list -R "$REPO_SLUG" --json tagName -q '.[].tagName' | grep -- "-${REV}-\|-${REV}\$" | head -1 || true)
+      # newest published first: the API's own order is by the tagged commit, not by publish date
+      tag=$(gh release list -R "$REPO_SLUG" --json tagName,publishedAt -q 'sort_by(.publishedAt) | reverse | .[].tagName' | grep -- "-${REV}-\|-${REV}\$" | head -1 || true)
       [[ -n "$tag" ]] || die "no release for game revision $REV (your game is a build these classes were not built for)"
     fi
     echo "downloading $pattern from release $tag"
@@ -168,11 +169,16 @@ elif [[ -z "$zip" ]]; then
     auth=(); [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
     api="https://api.github.com/repos/$REPO_SLUG/releases"
     # ${auth[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u
+    # the list's order is by the tagged commit's date, not by publish date: /releases/latest first, then the
+    # list sorted by published_at (the no-python3 scanner takes the list as it comes)
+    latest=$(curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$api/latest" 2>/dev/null || true)
     rels=$(curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$api?per_page=50") || die "could not list releases of $REPO_SLUG"
+    [[ -n "$latest" ]] && rels="[$latest,${rels#[}"
     if command -v python3 >/dev/null; then
       found=$(python3 - "$rels" "$pattern" "$tag" <<'EOF2'
 import json,sys
 rels,pattern,tag=json.loads(sys.argv[1]),sys.argv[2],sys.argv[3]
+rels=[rels[0]]+sorted(rels[1:],key=lambda r:r.get("published_at") or "",reverse=True)
 for r in rels:
     if tag and r["tag_name"]!=tag: continue
     for a in r["assets"]:

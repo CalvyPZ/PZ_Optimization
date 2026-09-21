@@ -170,7 +170,8 @@ if ($From) {
     if ($env:GITHUB_TOKEN) { $h.Authorization = "Bearer $env:GITHUB_TOKEN" }
     $rels = Invoke-RestMethod -Headers $h "https://api.github.com/repos/$RepoSlug/releases?per_page=50"
     $asset = $null
-    foreach ($r in $rels) {
+    # the list's order is by the tagged commit's date, not by publish date
+    foreach ($r in ($rels | Sort-Object -Property published_at -Descending)) {
       if ($Tag -and $r.tag_name -ne $Tag) { continue }
       $a = $r.assets | Where-Object { $_.name -eq $pattern } | Select-Object -First 1
       if ($a) { $asset = $a; $Tag = $r.tag_name; break }

@@ -16,8 +16,8 @@
 #   3. points latestSave.ini at the bench save, writes ~/Zomboid/Lua/pzopt-harness.txt and
 #      <app>/Contents/Java/pzopt.properties, applies --option keys to options.ini,
 #   4. starts the game directly from the bundled JRE with the Info.plist JVMOptions (-Dzomboid.steam=0, the
-#      classpath ".:projectzomboid.jar" so the loose classes shadow the jar — the Steam launcher's own
-#      classpath is the jar only), wrapped in caffeinate so the display stays on; samples CPU (top) and GPU
+#      classpath ".:projectzomboid.jar" so the loose classes shadow the jar, the same order the bundle's
+#      JavaAppLauncher uses), wrapped in caffeinate so the display stays on; samples CPU (top) and GPU
 #      (ioreg IOAccelerator "Device Utilization %") into sysmon.csv with harness/sysmon.sh's columns,
 #   5. waits for the JVM to exit (the Java harness quits at the route end), collects console.txt, pzopt-*.out,
 #      sysmon.csv, crash logs into harness/runs/<label>-<timestamp>/, restores every file it touched.
@@ -199,8 +199,10 @@ caff_pid=$!
 sleep 2
 # caffeinate execs the utility in place and forks a child that holds the assertion, so the JVM is
 # the pid whose command line starts with the java binary (the child's line also contains it)
-game_pid=$(pgrep -f "^$JAVA " | head -1 || true)
-[[ -n "$game_pid" ]] || game_pid=$(pgrep -f 'zombie.gameStates.MainScreenState' | head -1 || true)
+game_pid=""
+for p in $(pgrep -f 'zombie.gameStates.MainScreenState' || true); do
+  case "$(ps -o comm= -p "$p" 2>/dev/null)" in *caffeinate*) ;; *) game_pid="$p"; break ;; esac
+done
 [[ -n "$game_pid" ]] || die "the JVM did not start (see $out/launcher-stdout.txt)"
 echo "game running (pid $game_pid); waiting for exit (timeout ${timeout}s)"
 ps -o pid,ppid,%cpu,command -p "$caff_pid,$game_pid" > "$out/sysmon.log" 2>&1 || true   # which pid the sampler follows
