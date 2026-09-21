@@ -471,7 +471,15 @@ after Display & Performance. The top of the tab is the master switch with two bu
 **Disable all (stock game)** unticks it, and after the next launch the game runs its
 original code everywhere, as if nothing were installed (the log says so, and the tab's
 heading reads "since this boot: OFF"); **Enable all (recommended defaults)** ticks it
-again and puts every setting back to the build's defaults. Both go through the usual
+again and puts every setting back to the build's defaults. A third button, **Low-end
+hardware (4 cores or less)**, is the set measured on a 4-core Core i5-6300HQ with a
+GTX 960M (2026-09-21, `docs/results.md`): no chunk worker pool, trees baked into chunk
+textures only while walking (`treeBakeMaxChunksPerSec`: while driving a chunk texture
+lives seconds and baking its trees cost more than drawing them), and on the Display page
+lighting updates 10/s and the UI redrawn 30/s — 120 km/h drive 44 → 68 fps, walking
+49 → 81, p99 halved. On such a machine also use the G1 launcher JSON
+(`config/launcher/ProjectZomboid64.g1.json`): the stock ZGC stalls the game for seconds
+on four cores. All three go through the usual
 Apply / Accept and restart dialog. Below the switch come nine titled groups: chunk textures (what bakes, bake
 budgets), cutaways / lighting / weather, sprite buffers, chunk streaming, boot
 (threads and caches, parsers) and world load (file system and decoding, loading

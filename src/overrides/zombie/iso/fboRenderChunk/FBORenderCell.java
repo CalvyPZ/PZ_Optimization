@@ -386,6 +386,7 @@ public final class FBORenderCell {
 
    private void renderTilesInternal(int maxHeight) {
       pzopt.GpuSections.frame(IsoWorld.instance.getFrameNo()); // pzopt: GPU sections per-frame tick
+      this.pzoptUpdateTreeMode(); // pzopt: treeBakeMaxChunksPerSec, once per frame
       FBORenderChunkManager.instance.recycle();
       if (DebugOptions.instance.terrain.renderTiles.enable.getValue()) {
          if (IsoCell.floorRenderShader == null) {
@@ -2734,7 +2735,7 @@ public final class FBORenderCell {
    public boolean isTreeRenderedEveryFrame(IsoObject object) {
       // pzopt: with treesInChunkTexture a tree is only drawn per frame while it is translucent (player under it),
       // fading, or wind-animated; the rest bake into the chunk texture (checkTreeTranslucency handles the transitions)
-      if (pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Overrides.enabled()) {
+      if (pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Overrides.enabled() && !this.pzoptTreesPerFrameNow) {
          // a tree whose texture is still loading (the JUMBO packs arrive after the first bake at game load) draws
          // per frame until it is ready; checkTreeTranslucency then re-dirties its level so it bakes in
          return object instanceof IsoTree && !pzoptTreeTextureReady(object);
@@ -2745,9 +2746,34 @@ public final class FBORenderCell {
    // ---- pzopt: tree pass (Config.TREE_BAKE_PASS, pzopt.TreeBake, issue #5) ----------------------------------------
 
    /** Baked trees are drawn by {@link #pzoptBakeTrees} instead of the MinusFloor loop. */
-   private static boolean pzoptTreePassActive() {
+   private boolean pzoptTreePassActive() {
       return pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Config.TREE_BAKE_PASS && pzopt.Overrides.enabled()
-         && !Core.getInstance().getOptionDoWindSpriteEffects();
+         && !this.pzoptTreesPerFrameNow && !Core.getInstance().getOptionDoWindSpriteEffects();
+   }
+
+   /**
+    * pzopt: treeBakeMaxChunksPerSec. While chunks stream in faster than this, new chunk textures are baked without
+    * trees and the trees draw per frame (a texture that lives a second or two is not worth baking its trees into);
+    * decided once per frame so a bake and the per-frame path never disagree within a frame. Textures already baked
+    * keep their trees until they re-bake for their own reasons: a tree's layer is stored in its ObjectRenderInfo at
+    * bake time, and the tree-copy fingerprints re-bake neighbours whose copies went stale, so a mode flip costs no
+    * re-bake burst. Counter: pzoptTreesPerFrameFrames.
+    */
+   private boolean pzoptTreesPerFrameNow;
+   private int pzoptTreeModeFrame = -1;
+   static long pzoptTreesPerFrameFrames;
+
+   private void pzoptUpdateTreeMode() {
+      int frame = IsoWorld.instance.getFrameNo();
+      if (frame == this.pzoptTreeModeFrame) {
+         return;
+      }
+      this.pzoptTreeModeFrame = frame;
+      int max = pzopt.Config.TREE_BAKE_MAX_CHUNKS_PER_SEC;
+      this.pzoptTreesPerFrameNow = max > 0 && pzopt.Overrides.enabled() && pzopt.ChunkRate.perSecond() > max;
+      if (this.pzoptTreesPerFrameNow) {
+         pzoptTreesPerFrameFrames++;
+      }
    }
 
    /** Would this tree bake right now (the tree cases of isObjectRenderLayer_MinusFloor and IsoTree.render)? */
@@ -4144,7 +4170,8 @@ public final class FBORenderCell {
       sb.append(pzopt.GpuSections.summary()); // pzopt: GPU sections (Config.GPU_SECTIONS)
       if (pzopt.PuddleCache.enabled()) { sb.append(" | ").append(pzopt.PuddleCache.stats()); } // pzopt
       if (pzopt.RainTiles.enabled()) { sb.append(" | ").append(pzopt.RainTiles.stats()); } // pzopt
-      if (pzoptTreePassActive()) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
+      if (pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Config.TREE_BAKE_PASS) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
+      if (pzopt.Config.TREE_BAKE_MAX_CHUNKS_PER_SEC > 0) { sb.append(" | trees per-frame frames: ").append(pzoptTreesPerFrameFrames).append(" chunks/s now ").append(String.format(java.util.Locale.ROOT, "%.0f", pzopt.ChunkRate.perSecond())); } // pzopt: treeBakeMaxChunksPerSec
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));

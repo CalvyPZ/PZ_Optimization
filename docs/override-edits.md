@@ -1323,3 +1323,34 @@ neighbour re-bakes), flicker rig 0.3 px/frame at scale 2560 (stock 3.8).
 A public `int[] pzoptTreeExportFp` (25 slots, allocated by `FBORenderCell.pzoptBakeTrees` on the
 chunk's first tree pass) and its reset to null in `resetForStore()`, so a reused chunk object
 starts without another chunk's fingerprints.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-21 afternoon, trees per frame while chunks churn; `treeBakeMaxChunksPerSec`)
+
+A per-frame mode bit `pzoptTreesPerFrameNow`, set once per frame by `pzoptUpdateTreeMode()` at the
+top of `renderTilesInternal` (frame number stamp `pzoptTreeModeFrame`): true when
+`Config.TREE_BAKE_MAX_CHUNKS_PER_SEC` is above 0 and `pzopt.ChunkRate.perSecond()` (chunk hand-offs
+to the game thread, exponential average over half-second windows) is above it.
+`isTreeRenderedEveryFrame` treats every tree as per-frame while the bit is set (the stock answer),
+and `pzoptTreePassActive()` — now an instance method — is false, so a chunk level baked in that
+frame gets no trees and no tree pass, and the per-frame path draws them. Counter
+`pzoptTreesPerFrameFrames` and the current rate on the instrument line.
+
+Why: on a 4-core i5-6300HQ (Dell, `docs/results.md` 2026-09-21 low-end section) baking trees
+while driving at 120 km/h was a net loss — a chunk texture lives a second or two, and baking its
+trees (own texture plus the neighbour copies of the tree pass, plus the tree pass's 5x5-chunk scan)
+cost more game-thread time than drawing them per frame for that long: `workers=1` 19.5 fps, with
+`treeBakePass=false` 28.6, with `treesInChunkTexture=false` 42.7 (stock 29.1). Walking through
+Rosewood at max zoom the bake amortises over hundreds of frames and the default set is 47.3 fps
+against stock's 31.5. So the choice follows the chunk rate instead of a fixed key. No re-bake burst
+on a mode flip: a tree's layer is stored in its `ObjectRenderInfo` at bake time and read per frame,
+so textures baked with trees keep drawing them from the texture until they re-bake for their own
+reasons, and the tree export fingerprints (`pzoptTreeExportFp`) re-bake a neighbour whose copy of a
+tree went stale. During the seconds a neighbour still holds a copy of a tree now drawn per frame,
+that tree is drawn twice in the overlap (slightly denser alpha edges), the same transient the
+fingerprint re-bake already covers. Default 0 (always bake, the desktop behaviour); the Options
+tab's "Low-end hardware" profile sets 24.
+
+## zombie.iso.IsoChunk (sixth edit, 2026-09-21 afternoon)
+
+One line at the top of `loadInMainThread()`: `pzopt.ChunkRate.loaded()`, the hand-off counter the
+edit above reads.
