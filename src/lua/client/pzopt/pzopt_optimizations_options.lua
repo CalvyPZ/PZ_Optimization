@@ -10,13 +10,6 @@
 --  path, the same as a build mismatch, whatever the other keys say. "Disable all (stock)" turns it
 --  off; "Enable all" turns it on and puts every other control back to the build's defaults.
 --  Both only change the controls; Apply / Accept saves them like any other option.
---  Right of the controls sits the preview panel (PzoptPreview, fixed while the list scrolls): for the
---  setting under the mouse it plays two clips side by side, the stock game and the optimized build on the
---  same route (animated GIFs under media/ui/pzopt/compare/, made by harness/menu-gifs.py, decoded by
---  pzopt.GifTextures), shows the setting's description and its value now / at the next launch, and draws
---  one bar per resource (game thread, render thread, other cores, GPU, VRAM, RAM, disk, load time, chunk
---  arrival) from the EFFECTS table below: left = less work / sooner, right = more. Which clip a setting
---  shows is its section's `clip`, overridden per key in KEY_CLIP.
 -- Installed by scripts/pzopt.sh into <game dir>/media/lua/client/pzopt/ (loose game-dir Lua is
 -- loaded like any other, no mod to enable).
 
@@ -33,7 +26,7 @@ local FPS_COLOURS = { "blue", "green", "yellow", "red", "white", "cyan", "lime",
 -- Keys, labels and tooltips. `choices` makes a combo (integer or string); `note[value]` annotates an entry.
 local SECTIONS = {
     {
-        title = "Chunk textures: what bakes", clip = "drive",
+        title = "Chunk textures: what bakes",
         entries = {
             { key = "treesInChunkTexture", label = "Bake trees into chunk textures",
               tip = "Static trees are drawn once into the chunk textures instead of every frame; only fading trees stay per-frame. Off = stock (every tree every frame)." },
@@ -56,7 +49,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Chunk textures: bake budgets", clip = "nightdrive",
+        title = "Chunk textures: bake budgets",
         entries = {
             { key = "bakeBudget", label = "Chunk textures baked per frame",
               choices = { "0", "2", "4", "8", "16", "32" }, note = { ["0"] = "unlimited, stock" },
@@ -90,7 +83,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Cutaways, lighting and weather (game thread)", clip = "spin",
+        title = "Cutaways, lighting and weather (game thread)",
         entries = {
             { key = "cutawayFast", label = "Replay cutaway masks",
               tip = "Clean chunk levels replay their stored wall-cutaway occluder masks instead of re-testing every square." },
@@ -147,7 +140,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Sprite buffers", clip = "drive",
+        title = "Sprite buffers",
         entries = {
             { key = "persistentVbo", label = "Persistently mapped sprite buffers",
               tip = "Sprite ring buffers use persistently mapped buffer storage instead of an orphan and re-map per batch. About 2.7x the uncapped frame rate at max zoom." },
@@ -159,7 +152,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Multiplayer", clip = "drive",
+        title = "Multiplayer",
         entries = {
             { key = "luaChecksumExempt", label = "Leave the pzopt Lua files out of the server file check",
               tip = "When joining a server the game lists every Lua file under media/lua to the server; the three pzopt files (this tab, the frame cap combo, the key binding) only exist on clients and a server without them refused the join with \"File doesn't exist on the server\". They are skipped like the game skips SandboxVars.lua. Applies on the next launch." },
@@ -209,7 +202,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Performance overlay: fps colour", clip = "spin",
+        title = "Performance overlay: fps colour",
         entries = {
             { key = "overlayFpsColor", label = "Colour the fps number",
               tip = "The fps number takes one of four colours by how close it is to the target; off = white like the rest of the line." },
@@ -248,7 +241,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Chunk streaming", clip = "drive",
+        title = "Chunk streaming",
         entries = {
             { key = "parallel", label = "Parallel chunk loading",
               tip = "Chunk recalculation runs on a worker pool. Off = the stock single-threaded pass." },
@@ -271,7 +264,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Boot: threads and caches", clip = "load",
+        title = "Boot: threads and caches",
         entries = {
             { key = "fmodAsync", label = "Start audio on a boot thread",
               tip = "FMOD and its banks (~1.6 s) initialise on a thread during boot." },
@@ -293,7 +286,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "Boot: parsers", clip = "load",
+        title = "Boot: parsers",
         entries = {
             { key = "scriptParserFast", label = "Linear script parser",
               tip = "Script comments strip in one pass and tokens parse without re-substringing; identical output (the stock passes cost 1.8 s at boot)." },
@@ -302,7 +295,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "World load: file system and decoding", clip = "load",
+        title = "World load: file system and decoding",
         entries = {
             { key = "fileThreads", label = "File threads in game",
               choices = { "1", "2", "4", "6", "8", "12" },
@@ -324,7 +317,7 @@ local SECTIONS = {
         },
     },
     {
-        title = "World load: loading screen", clip = "load",
+        title = "World load: loading screen",
         entries = {
             { key = "noLoadFade", label = "Skip the loading-screen fade",
               tip = "The loading screen does not fade to black (350 ms) before the world's own fade-in." },
@@ -365,301 +358,6 @@ local function tooltipFor(entry, pinnedBy)
         t = t .. " Pinned by " .. pinnedBy .. " for this install; the menu cannot change it."
     end
     return t
-end
-
--- ---------------------------------------------------------------------------------------------------
--- Preview panel: the two clips, the description and the effect bars of the setting under the mouse.
-
--- Clips under media/ui/pzopt/compare/<clip>-stock.gif / -opt.gif (harness/menu-gifs.py, harness/menu-gifs.json
--- names the runs). A section's `clip` is the default for its keys; KEY_CLIP picks another for one key.
-local CLIP_TITLES = {
-    drive = "120 km/h highway drive, clear day, max zoom",
-    spin = "Rosewood, camera spinning through town, max zoom",
-    fog = "120 km/h drive in heavy fog, max zoom",
-    storm = "120 km/h drive in a thunderstorm, max zoom",
-    horde = "Downtown Louisville, zombie population maxed",
-    torch = "Night, hand torch, turning in place",
-    nightdrive = "Night drive with headlights",
-    load = "Launch to the main menu, then Continue to the world (real time)",
-}
-local KEY_CLIP = {
-    rainTiles = "storm", puddleCache = "storm", rainSplashesFast = "storm", puddleEarlyZ = "storm", puddleVbo = "storm",
-    puddleCacheFrames = "storm", weatherMaskIdleSkip = "storm", weatherFxScalePct = "storm", vboBatchKb = "storm",
-    vboFastQuads = "storm", lightingRebakeBudget = "storm", lightingRebakeMaxFrames = "storm",
-    fogPass = "fog", fogScalePct = "fog", fogMaskFrames = "fog",
-    lightingStrongDelta = "torch", lightingFlush = "torch", lightingBudget = "torch",
-    lightSwitchCheckFrames = "horde", soundZoneCache = "horde", gridStackInterval = "horde",
-    bakeBudget = "drive", rebakeBudget = "drive", rebakeMaxFrames = "drive", treeBakeMaxChunksPerSec = "drive",
-    curtainDepthNudgePct = "spin", treeBakePass = "spin", treeBakeDirect = "spin", roofHideDebounceFrames = "spin",
-}
-
--- One bar per resource. `less` / `more` are the words for the two directions; `moreIsWork` colours the "more"
--- side blue instead of amber: putting idle cores to work is the point, not a cost.
-local AXES = {
-    { id = "cpu", label = "CPU: game thread", less = "less", more = "more",
-      tip = "The thread that simulates the world and prepares every frame; it is what limits the frame rate most of the time." },
-    { id = "render", label = "CPU: render thread", less = "less", more = "more",
-      tip = "The thread that feeds the GPU." },
-    { id = "cores", label = "CPU: other cores", less = "less", more = "more", moreIsWork = true,
-      tip = "Worker threads: chunk loading, boot and file decoding, sampling." },
-    { id = "gpu", label = "GPU", less = "less", more = "more" },
-    { id = "vram", label = "VRAM", less = "less", more = "more" },
-    { id = "ram", label = "RAM", less = "less", more = "more" },
-    { id = "disk", label = "Disk / caches", less = "less", more = "more" },
-    { id = "load", label = "Boot and load time", less = "shorter", more = "longer" },
-    { id = "chunks", label = "Chunk arrival", less = "sooner", more = "later" },
-}
-local MAGNITUDE = { "a little ", "", "much " }
-
--- How each key changes the load on the parts above against the stock game, -3 .. 3 (0 / absent = no measurable
--- change): -1 a few percent, -2 clearly measurable, -3 the big wins (docs/results.md, docs/findings-*.md). A combo's
--- bars describe moving it away from stock in the direction the tab offers.
-local EFFECTS = {
-    enabled = { cpu = -3, render = -3, gpu = -1, cores = 2, ram = 1, disk = 1, load = -3, chunks = -2 },
-    -- chunk textures
-    treesInChunkTexture = { cpu = -3, render = -2, gpu = -1 },
-    treeBakeMaxChunksPerSec = { cpu = -1 },
-    treeBakeDirect = {},
-    treeBakePass = { cpu = 1 },
-    treeAppend = { cpu = -2, gpu = -1 },
-    windowsInChunkTexture = { cpu = -2, render = -1, gpu = -1 },
-    translucentTilesInChunkTexture = { cpu = -3, render = -2, gpu = -1 },
-    curtainDepthNudgePct = {},
-    bakeBudget = { cpu = -2 },
-    rebakeBudget = { cpu = -1 },
-    rebakeMaxFrames = {},
-    lightingRebakeBudget = { cpu = -2, gpu = -1 },
-    lightingRebakeMaxFrames = { cpu = -1 },
-    lightingRebakeMs = { cpu = -1 },
-    lightingStrongDelta = { cpu = 1 },
-    lightingGlobalDeltaPct = { cpu = -1 },
-    lightingFlush = { cpu = 1 },
-    lightingBudget = { cpu = -2 },
-    -- cutaways, lighting, weather
-    cutawayFast = { cpu = -2 },
-    cutawayRadius = { cpu = -2 },
-    gridStackInterval = { cpu = -1 },
-    lightSwitchCheckFrames = { cpu = -1 },
-    rainTiles = { cpu = -3, render = -3, gpu = -1 },
-    puddleCache = { cpu = -3, ram = 1 },
-    rainSplashesFast = { cpu = -1 },
-    puddleEarlyZ = { gpu = -2 },
-    puddleVbo = { render = -3, gpu = -1, vram = 1 },
-    puddleCacheFrames = { cpu = -1 },
-    weatherMaskIdleSkip = { cpu = -1, gpu = -1 },
-    weatherFxScalePct = { gpu = -2, render = -1, vram = -1 },
-    fogPass = { gpu = -3, render = -2, cpu = -1, vram = 1 },
-    fogScalePct = { gpu = -2, vram = -1 },
-    fogMaskFrames = { cpu = -1 },
-    roofHideDebounceFrames = {},
-    cutawayVisitPrefilter = { cpu = -1 },
-    cutawayInvalidateChanged = { cpu = -2, gpu = -1 },
-    occlusionSkipLightingOnly = { cpu = -1 },
-    lightInfoChunkGate = { cpu = -1 },
-    lightInfoOncePerFrame = { cpu = -1 },
-    soundZoneCache = { cpu = -1 },
-    -- sprite buffers
-    persistentVbo = { render = -3, gpu = -1 },
-    vboBatchKb = { render = -2, vram = 1 },
-    vboFastQuads = { render = -1 },
-    -- multiplayer
-    luaChecksumExempt = {},
-    -- overlay
-    overlaySampling = { cpu = 1, cores = 1 },
-    overlay = { cpu = 1 },
-    overlayLog = { disk = 1 },
-    overlayTree = { cpu = 1, cores = 1 },
-    overlayVerdict = {},
-    overlayGraph = { cpu = 1 },
-    overlayFlame = { cpu = 1, cores = 1 },
-    gameThreadProfileHz = { cores = 1, cpu = 1 },
-    -- chunk streaming
-    parallel = { cores = 3, ram = 1, chunks = -3 },
-    workers = { cores = 2, chunks = -1 },
-    loadWorkers = { cores = 2, load = -1 },
-    wake = { chunks = -2 },
-    chunkHandoffDivisor = { cpu = -1, chunks = 1 },
-    hotsaveStaged = { cpu = -1 },
-    hotsaveIntervalSec = { cpu = -2, disk = -2 },
-    -- boot
-    fmodAsync = { load = -2, cores = 1 },
-    preloadAnimSets = { load = -2, cores = 1 },
-    bootPump = { load = -2, cores = 2, ram = 1 },
-    bootFileThreads = { load = -1, cores = 2 },
-    earlyModels = { load = -1 },
-    luaPrecompile = { load = -2, cores = 2 },
-    animClipCache = { load = -2, disk = 2 },
-    packIndex = { load = -2, disk = 1 },
-    scriptParserFast = { load = -2, ram = -1 },
-    itemParamSwitch = { load = -1 },
-    -- world load
-    fileThreads = { load = -1, cores = 2 },
-    fileInflight = { load = -1, ram = 1 },
-    textureBufferMb = { load = -1, ram = 2 },
-    parallelDepthMaps = { load = -1, cores = 1 },
-    loaderCpuFixes = { load = -1, cpu = -1 },
-    shaderCache = { load = -3, render = -1 },
-    mipmapArrays = { cores = -1 },
-    noLoadFade = { load = -1 },
-    noIntroWait = { load = -2 },
-}
-
--- SDR values of the media style (docs/media-style.md): stock amber, optimized green, a third series blue
-local C_STOCK = { r = 0.79, g = 0.35, b = 0.17 }
-local C_OPT = { r = 0.27, g = 0.87, b = 0.49 }
-local C_BLUE = { r = 0.23, g = 0.56, b = 0.88 }
-local C_TEXT = { r = 0.94, g = 0.94, b = 0.96 }
-local C_GREY = { r = 0.66, g = 0.66, b = 0.70 }
-local C_DIM = { r = 0.40, g = 0.40, b = 0.45 }
-local CLIP_W, CLIP_H = 512, 216
-
-local function clipPath(clip, side)
-    return "media/ui/pzopt/compare/" .. clip .. "-" .. side .. ".gif"
-end
-
-PzoptPreview = ISPanel:derive("PzoptPreview")
-
-function PzoptPreview:new(x, y, w, h, panel, rows)
-    local o = ISPanel.new(self, x, y, w, h)
-    o.panel = panel   -- the scrolling options panel the rows live in
-    o.rows = rows     -- { entry, option, clip, y, h } in the panel's content space
-    o.row = nil
-    o.backgroundColor = { r = 0.04, g = 0.04, b = 0.06, a = 1 } -- opaque: the list's long labels pass under it
-    o.borderColor = { r = 0.31, g = 0.31, b = 0.35, a = 1 }
-    o.pad = 12
-    o.maxHeight = h
-    o.fontS = UIFont.Small
-    o.fontM = UIFont.Medium
-    o.hS = getTextManager():getFontHeight(UIFont.Small)
-    o.hM = getTextManager():getFontHeight(UIFont.Medium)
-    return o
-end
-
--- the wheel over the preview scrolls the options list, like anywhere else on the page
-function PzoptPreview:onMouseWheel(del)
-    return false
-end
-
-function PzoptPreview:select(row)
-    self.row = row
-end
-
--- The row under the mouse: the list's mouse position is in its content space (scroll included), like row.y.
-function PzoptPreview:pick()
-    local panel = self.panel
-    if not panel:isMouseOver() or self:isMouseOver() then return end
-    local mx, my = panel:getMouseX(), panel:getMouseY()
-    if mx >= self.x then return end
-    for _, row in ipairs(self.rows) do
-        if my >= row.y and my < row.y + row.h then
-            self:select(row)
-            return
-        end
-    end
-end
-
-function PzoptPreview:text(str, x, y, col, font, alpha)
-    self:drawText(str, x, y, col.r, col.g, col.b, alpha or 1, font or self.fontS)
-end
-
--- One clip box: caption, the current frame (or why there is none), a hairline frame.
-function PzoptPreview:drawClip(x, y, w, h, caption, path, now, col)
-    self:text(caption, x, y, col, self.fontS)
-    y = y + self.hS + 2
-    self:drawRect(x, y, w, h, 1, 0.02, 0.02, 0.03)
-    local ok, tex = pcall(function() return perf():getPzoptGifFrame(path, now) end)
-    if ok and tex then
-        self:drawTextureScaledAspect(tex, x, y, w, h, 1, 1, 1, 1)
-    else
-        local state = ok and perf():getPzoptGifState(path) or "error"
-        local msg = "no clip for this setting yet"
-        if state == "loading" then msg = "loading..." elseif state == "error" then msg = "clip could not be decoded" end
-        self:drawTextCentre(msg, x + w / 2, y + h / 2 - self.hS / 2, C_DIM.r, C_DIM.g, C_DIM.b, 1, self.fontS)
-    end
-    self:drawRectBorder(x, y, w, h, 1, 0.31, 0.31, 0.35)
-    return y + h
-end
-
-function PzoptPreview:drawWrapped(str, x, y, w, col, font)
-    local wrapped = getTextManager():WrapText(font or self.fontS, str, w)
-    local h = font == self.fontM and self.hM or self.hS
-    for line in string.gmatch(wrapped, "[^\n]+") do
-        self:text(line, x, y, col, font)
-        y = y + h
-    end
-    return y
-end
-
--- The effect bars: a track per axis with the zero line in the middle; the bar grows left for less work / sooner
--- (green) and right for more (amber, or blue where more means idle cores put to work), a word says the same.
-function PzoptPreview:drawBars(x, y, w, fx)
-    local labW = math.min(170, math.floor(w * 0.3))
-    local wordW = 110
-    local barX = x + labW + 10
-    local barW = w - labW - 10 - wordW - 8
-    local rowH = self.hS + 6
-    local mid = barX + math.floor(barW / 2)
-    local half = math.floor(barW / 2) - 2
-    for _, axis in ipairs(AXES) do
-        local v = fx[axis.id] or 0
-        if v > 3 then v = 3 elseif v < -3 then v = -3 end
-        self:drawTextRight(axis.label, x + labW, y + 3, C_GREY.r, C_GREY.g, C_GREY.b, 1, self.fontS)
-        self:drawRect(barX, y + 3, barW, rowH - 6, 1, 0.11, 0.11, 0.13)
-        local word, wcol = "no change", C_DIM
-        if v ~= 0 then
-            local len = math.floor(half * math.abs(v) / 3)
-            local col = v < 0 and C_OPT or (axis.moreIsWork and C_BLUE or C_STOCK)
-            local bx = v < 0 and (mid - len) or (mid + 1)
-            self:drawRect(bx, y + 3, len, rowH - 6, 1, col.r, col.g, col.b)
-            word = MAGNITUDE[math.abs(v)] .. (v < 0 and axis.less or axis.more)
-            wcol = col
-        end
-        self:drawRect(mid, y + 1, 1, rowH - 2, 1, 0.55, 0.55, 0.60)
-        self:text(word, barX + barW + 8, y + 3, wcol, self.fontS)
-        y = y + rowH
-    end
-    return y
-end
-
-function PzoptPreview:prerender()
-    ISPanel.prerender(self)
-    self:pick()
-    local row = self.row
-    local pad = self.pad
-    local x, y, w = pad, pad, self.width - 2 * pad
-    if not row then
-        self:text("Point at a setting to see what it does.", x, y, C_GREY, self.fontM)
-        return
-    end
-    local entry = row.entry
-    local p = perf()
-    -- title, key and values
-    y = self:drawWrapped(entry.label, x, y, w, C_TEXT, self.fontM) + 2
-    local pinnedBy = p:getPzoptOptionPinnedBy(entry.key)
-    local values = "Key " .. entry.key .. "   since this boot: " .. p:getPzoptOption(entry.key)
-        .. "   next launch: " .. row.option:pzoptCurrent()
-    if pinnedBy ~= "" then values = values .. "   (pinned by " .. pinnedBy .. ")" end
-    y = self:drawWrapped(values, x, y, w, C_GREY) + 8
-    -- the two clips
-    local gap = pad
-    local iw = math.floor((w - gap) / 2)
-    local ih = math.floor(iw * CLIP_H / CLIP_W)
-    local now = getTimestampMs()
-    self:drawClip(x, y, iw, ih, "STOCK GAME", clipPath(row.clip, "stock"), now, C_STOCK)
-    y = self:drawClip(x + iw + gap, y, iw, ih, "OPTIMIZED (every optimization on)", clipPath(row.clip, "opt"), now, C_OPT) + 4
-    y = self:drawWrapped((CLIP_TITLES[row.clip] or row.clip) .. ". Same save, route and machine; the number is that run's live frame rate.",
-        x, y, w, C_DIM) + 8
-    -- what it does
-    y = self:drawWrapped(entry.tip, x, y, w, C_TEXT) + 8
-    -- the bars
-    self:text("Effect on your hardware", x, y, C_TEXT, self.fontM)
-    y = y + self.hM + 4
-    y = self:drawBars(x, y, w, EFFECTS[entry.key] or {})
-    y = self:drawWrapped("Against the stock game, from the measurements in docs/results.md: green = less work or sooner, "
-        .. "amber = more, blue = idle cores put to work. " .. RESTART_NOTE, x, y + 4, w, C_DIM)
-    -- the panel is as tall as its content, never taller than the page
-    local h = math.min(y + pad, self.maxHeight or (y + pad))
-    if h ~= self.height then self:setHeight(h) end
 end
 
 local function comboLabels(entry, default, saved)
@@ -711,10 +409,6 @@ local function addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
         if pinnedBy ~= "" then return end
         if value == nil then return self:pzoptReset() end
         self.control:setSelected(1, value == "true")
-    end
-    -- what the control says right now (the preview panel's "next launch" value)
-    function option.pzoptCurrent(self)
-        return tostring(self.control:isSelected(1))
     end
     option.pzoptKey = entry.key
     self.gameOptions:add(option)
@@ -774,13 +468,6 @@ local function addIntOption(self, entry, splitpoint, y, comboWidth)
             end
         end
         self.control.selected = index
-    end
-    function option.pzoptCurrent(self)
-        local box = self.control
-        if box.selected > 1 and values[box.selected - 1] then
-            return values[box.selected - 1]
-        end
-        return perf():getPzoptOptionDefault(entry.key) .. " (default)"
     end
     option.pzoptKey = entry.key
     self.gameOptions:add(option)
@@ -878,77 +565,28 @@ local function addAllButtons(self, splitpoint, y)
     end
 end
 
--- A section heading: a rule that stops short of the preview panel and the title above the label column.
-local function addSectionLine(self, y, text, x0, width)
-    local spacing = MainOptions.style.borderSpacing
-    local hM = MainOptions.style:getFontHeight("Medium")
-    local line = ISPanel:new(x0, self.addY + y, width, 2)
-    line.prerender = function() end
-    line.render = function(o) o:drawRect(0, 0, o.width, 1, 1.0, 0.5, 0.5, 0.5) end
-    line:initialise()
-    self.mainPanel:addChild(line)
-    local shown = getTextManager():WrapText(UIFont.Medium, text, width, 1, "...")
-    local label = ISLabel:new(x0, self.addY + y + spacing, hM, shown, 1, 1, 1, 1, UIFont.Medium, true)
-    label:initialise()
-    self.mainPanel:addChild(label)
-    self.addY = self.addY + spacing * 2 + hM
-end
-
--- Layout: the label column (right-aligned labels), the controls, then the fixed preview panel, the whole block
--- centred in the page. The preview takes ~36 % of the width between 600 and 1100 px; on a narrow screen it
--- shrinks so the controls keep their room.
-local function layout(self, comboWidth)
-    local W = self:getWidth()
-    local labelW, gap, margin, sbar = 360, 40, 16, 13
-    local previewW = math.max(600, math.min(1100, math.floor(W * 0.36)))
-    local controlW = comboWidth
-    for _, title in ipairs({ "Enable all (recommended defaults)", "Disable all (stock game)" }) do
-        controlW = math.max(controlW, getTextManager():MeasureStringX(UIFont.Small, title) + 24)
-    end
-    for _, profile in ipairs(PROFILES) do
-        controlW = math.max(controlW, getTextManager():MeasureStringX(UIFont.Small, profile.button) + 24)
-    end
-    local controlsW = labelW + 20 + controlW
-    local avail = W - 2 * margin - sbar
-    if controlsW + gap + previewW > avail then
-        previewW = math.max(360, avail - controlsW - gap)
-    end
-    local blockW = controlsW + gap + previewW
-    local x0 = math.max(margin, math.floor((W - sbar - blockW) / 2))
-    return { x0 = x0, splitpoint = x0 + labelW, previewX = x0 + controlsW + gap, previewW = previewW,
-             lineW = controlsW + gap / 2, margin = margin }
-end
-
 function MainOptions:pzoptAddOptimizationsPanel()
     local style = MainOptions.style
     local BUTTON_HGT = style.buttonHeight
     local y = style.initialY
     self.addY = 0
+    local splitpoint = self:getWidth() / 2
     local comboWidth = 45 * (getCore():getOptionFontSizeReal() + 1) + 60
-    local L = layout(self, comboWidth)
-    local splitpoint = L.splitpoint
 
     self:addPage(TAB)
-    local panel = self.mainPanel
     local p = perf()
     local added, pinned = 0, 0
     self.pzoptOptions = {}
     self.pzoptMaster = nil
-    local rows = {}
-    local function addRow(entry, option, clip)
-        table.insert(rows, { entry = entry, option = option, clip = clip,
-                             y = option.control:getY(), h = math.max(option.control:getHeight(), BUTTON_HGT) })
-    end
     local state = p:isPzoptEnabled() and "on" or "OFF: the game is running stock"
-    addSectionLine(self, y, "All optimizations (since this boot: " .. state .. ")", L.x0, L.lineW)
+    self:addHorizontalLine(y, "All optimizations (since this boot: " .. state .. ")")
     if p:isPzoptOptionKnown(MASTER.key) then
         self.pzoptMaster = addBoolOption(self, MASTER, splitpoint, y, BUTTON_HGT)
-        addRow(MASTER, self.pzoptMaster, "drive")
         if p:getPzoptOptionPinnedBy(MASTER.key) ~= "" then pinned = pinned + 1 end
     end
     addAllButtons(self, splitpoint, y)
     for _, section in ipairs(SECTIONS) do
-        addSectionLine(self, y, section.title, L.x0, L.lineW)
+        self:addHorizontalLine(y, section.title)
         for _, entry in ipairs(section.entries) do
             if p:isPzoptOptionKnown(entry.key) then
                 local option
@@ -958,7 +596,6 @@ function MainOptions:pzoptAddOptimizationsPanel()
                     option = addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
                 end
                 table.insert(self.pzoptOptions, option)
-                addRow(entry, option, KEY_CLIP[entry.key] or section.clip or "drive")
                 added = added + 1
                 if p:getPzoptOptionPinnedBy(entry.key) ~= "" then pinned = pinned + 1 end
             else
@@ -966,23 +603,12 @@ function MainOptions:pzoptAddOptimizationsPanel()
             end
         end
     end
-    addSectionLine(self, y, "Changes take effect on the next launch. File: Zomboid/pzopt/options.ini", L.x0, L.lineW)
+    self:addHorizontalLine(y, "Changes take effect on the next launch. File: Zomboid/pzopt/options.ini")
     -- Same as the stock pages: without a scroll height the panel never scrolls, so the
     -- controls below the window edge are unreachable.
-    panel:setScrollHeight(y + self.addY + 20)
-    -- The preview panel: a child of the page that does not scroll with it, full page height, the master
-    -- switch shown until the mouse points at another row.
-    local preview = PzoptPreview:new(L.previewX, L.margin, L.previewW, panel:getHeight() - 2 * L.margin, panel, rows)
-    preview:initialise()
-    preview:instantiate()
-    preview:setScrollWithParent(false)
-    preview:setAnchorTop(true)
-    preview:setAnchorBottom(true)
-    panel:addChild(preview)
-    if rows[1] then preview:select(rows[1]) end
-    self.pzoptPreview = preview
-    print("[pzopt] options tab: " .. added .. " controls, " .. pinned .. " pinned by pzopt.properties or -D, "
-        .. #rows .. " preview rows, preview " .. L.previewW .. " px at x=" .. L.previewX)
+    self.mainPanel:setScrollHeight(y + self.addY + 20)
+    self:centerTabChildrenX(TAB)
+    print("[pzopt] options tab: " .. added .. " controls, " .. pinned .. " pinned by pzopt.properties or -D")
 end
 
 local function install()
@@ -1000,15 +626,6 @@ local function install()
         local okPanel, err = pcall(MainOptions.pzoptAddOptimizationsPanel, self)
         if not okPanel then
             print("[pzopt] options tab: failed: " .. tostring(err))
-        end
-    end
-    -- Closing the options screen (Back / Accept hide it) frees the preview clips' textures; the next
-    -- visit decodes them again.
-    local stockSetVisible = MainOptions.setVisible
-    function MainOptions:setVisible(bVisible, ...)
-        stockSetVisible(self, bVisible, ...)
-        if not bVisible then
-            pcall(function() getPerformance():releasePzoptGifs() end)
         end
     end
 end
