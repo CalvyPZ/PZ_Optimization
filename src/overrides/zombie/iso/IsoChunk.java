@@ -154,6 +154,9 @@ public final class IsoChunk {
    // chunk-level texture, so a tree removed or turned per-frame here re-bakes the neighbour that holds a copy of it
    // (Config.TREE_BAKE_PASS, pzopt.TreeBake, issue #5)
    public int[] pzoptTreeExportFp;
+   // pzopt: which squares of levels 0 and 1 take fog (exterior and not in a room), packed per diagonal, refreshed
+   // every Config.fogMaskFrames frames (pzopt.FogPass.ChunkFog; the fog row walk reads it instead of the squares)
+   public pzopt.FogPass.ChunkFog pzoptFog;
    // pzopt: marker so the game log shows the loose class was loaded, not the jar's copy
    static {
       pzopt.Overrides.onClassLoaded("zombie.iso.IsoChunk");
@@ -5405,6 +5408,7 @@ public final class IsoChunk {
       loadGridSquare.remove(this);
       this.pzoptOccluderMaskSet = 0L; // pzopt: a reused chunk object starts without stored occluder masks
       this.pzoptTreeExportFp = null; // pzopt: tree export fingerprints belong to the previous chunk
+      this.pzoptFog = null; // pzopt: fog masks belong to the previous chunk
       this.pzoptClearPerFrameLists(); // pzopt: FBORenderCell keeps them across invalidations; a reused chunk starts empty
       this.randomId = 0;
       this.revision = 0L;

@@ -102,6 +102,22 @@ public final class GpuSections {
       }
    }
 
+   /** Render thread, inside a drawer's render(): a section begin/end issued right now in the GL stream. */
+   public static void markNow(String name, boolean isEnd) {
+      if (!enabled()) {
+         return;
+      }
+      Marker m;
+      synchronized (pool) {
+         m = pool.isEmpty() ? new Marker() : pool.remove(pool.size() - 1);
+      }
+      m.name = name;
+      m.isEnd = isEnd;
+      m.id = -1;
+      m.render();
+      m.postRender();
+   }
+
    /** Call once per frame on the game thread (any section site does it) so per-frame averages are right. */
    public static void frame(int frameNo) {
       if (frameNo != lastFrame) {

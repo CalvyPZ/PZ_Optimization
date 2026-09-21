@@ -1323,3 +1323,129 @@ neighbour re-bakes), flicker rig 0.3 px/frame at scale 2560 (stock 3.8).
 A public `int[] pzoptTreeExportFp` (25 slots, allocated by `FBORenderCell.pzoptBakeTrees` on the
 chunk's first tree pass) and its reset to null in `resetForStore()`, so a reused chunk object
 starts without another chunk's fingerprints.
+
+## zombie.iso.weather.fog.ImprovedFog (added 2026-09-21, fog pass)
+
+`endRender()`: when `Config.fogPass` is on (`pzopt.FogPass.enabled()`), the remaining rows of the
+layer are walked by a private `pzoptRenderAllRows` instead of `renderRowsBehind(null)`. It is the
+same loop over the same iterator, `lastRow`, `lastIterPos` and open-rectangle statics, producing
+the same rectangles, but the square lookup is hoisted per chunk: the chunk is fetched from the
+chunk map once per eight squares (`getChunkForGridSquare`, accepted only when loaded and when its
+`wx`/`wy` are the expected ones, the mid-scroll guard of the IsoChunkMap override) and the square
+read straight from the chunk's level array. A missing or unloaded chunk, or a level the chunk has
+no squares for, counts as fog exactly as the stock null square does. Stock resolved the chunk map
+for every one of the ~10k squares per level per frame at max zoom.
+
+With `Config.fogMaskFrames` > 0 (default 20) a second private walk, `pzoptWalkMasks`, replays
+the RectangleIterator's geometry itself (rows of alternating lengths ceil(rowlen/2) and +1, row
+starts stepping (0,0) (0,1) (1,1) (1,2) ..., the last position of the last row never delivered,
+as the stock `next()` returns false before it is used; `startRender` records the `rows` /
+`rowlen` it passed to the iterator) and reads the fog test of up to eight squares of a row from
+one short of the chunk's per-diagonal masks (`pzopt.FogPass.ChunkFog` on `IsoChunk.pzoptFog`:
+bit lx of `diag[level][lx + ly]` = the square takes fog, i.e. no square, or exterior and not in a
+room; levels 0 and 1 only, the ones ImprovedFog draws). A chunk's masks are recomputed when older
+than `fogMaskFrames` frames, the first computation stamped up to `fogMaskFrames - 1` frames in the
+past by a hash of the chunk position so the refreshes spread over the frames; a new room or wall
+therefore reaches the fog within `fogMaskFrames` frames (stock: the next frame). The walk touches
+one chunk object per up to eight squares and no square objects, and runs of up to eight all-fog
+or no-fog squares advance in one step: 215 → 49 µs per level per frame at 1920x1080 max zoom on
+the laptop, with the same 92.7 segments per level. The segments found (start and end square per
+segment, world coordinates) are kept per level with the diamond they were found in (minX, minY,
+maxX, maxY) and the frame; while the diamond is the same and fewer than `fogMaskFrames` frames
+have passed, the next frames replay them through `renderFogSegment` (which recomputes the screen
+rectangle and depths from this frame's camera) instead of walking: on the desktop at max zoom
+(22k squares per level) the walk runs about one frame in four while driving, 59 → 28 µs per level
+per frame averaged. Both walks record their time, segment count and square count for the
+`fog pass:` counters. Everything else in the
+class (`startRender`, `renderRowsBehind`, the segment maths and depths, `startFrame`) is
+untouched.
+
+## zombie.iso.weather.fog.ImprovedFogDrawer (added 2026-09-21, fog pass)
+
+`render()` (render thread): when the fog pass is on, the drawer copies its 28 uniform floats
+into an array and hands them, its rectangle buffer and the noise texture to its
+`pzopt.FogPass.Gl` instance (one per drawer, like the drawers themselves per player and
+sprite-renderer state); when that returns true the stock body is skipped, otherwise the buffer
+is rewound and the stock body runs (the fall-back once the driver refused the depth copy or a
+shader did not compile). `pzopt.FogPass.Gl.render`, per frame:
+
+1. Reads the viewport and the bound draw framebuffer. Keeps a fog buffer (RGBA8 colour texture
+   plus a depth texture) at `fogScalePct` % of the viewport per axis (clamped to 25..100) and,
+   below 100 %, a full-size depth texture for a copy of the scene depth. The depth textures use
+   the scene attachment's own internal format, read from the framebuffer, so the depth blit is
+   format-compatible whether the scene depth is a renderbuffer, a texture or the window's.
+2. Gets the scene depth. When the scene framebuffer's depth attachment is a texture (the
+   `MultiTextureFBO2` edit below makes the offscreen buffer's one a texture) it is read in place:
+   at 100 % that texture is attached to the fog buffer as its depth (the rectangles never write
+   depth), below 100 % a reduction pass writes each fog texel the *nearest* (smallest) scene depth
+   of the block of screen pixels it stands for (up to 4x4, `texelFetch` loop, `gl_FragDepth`, depth
+   func ALWAYS, colour writes off). When the attachment is a renderbuffer (some other FBO, or the
+   swap failed) the depth is first copied with a nearest `glBlitFramebuffer` (the first eight
+   frames after a (re)creation check `glGetError`): at 100 % straight into the fog buffer, below
+   100 % into a full-size depth texture the reduction reads. A nearest-sampled *scaled* blit picked
+   one arbitrary pixel per block, so around a one-pixel power line the fog was decided by the
+   ground behind it in most blocks and the wire came out dotted; with the block's nearest depth
+   every block that holds a thin near object keeps that object's depth.
+3. Clears the fog colour (the clear colour is saved and put back), packs every rectangle as one
+   quad in a 36-byte layout (position; the corner's position in the rectangle, the stock side-fade
+   width as a fraction of the rectangle width, the row noise offset; the rectangle depth and the
+   layer alpha) through a ring of three stream buffers and draws them all with one `glDrawArrays`
+   under its own programs compiled from strings: the vertex shader takes the depth from the
+   attribute into `gl_Position.z` (no `gl_FragDepth`, so early depth rejection works) and the
+   fragment shader is the stock `fog.frag` maths with the per-rectangle uniforms replaced by the
+   interpolated attributes and `gl_FragCoord` mapped from fog-buffer to viewport pixels. Depth
+   test GL_LESS with the depth mask off, `glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE,
+   ONE_MINUS_SRC_ALPHA)` so the buffer accumulates premultiplied colour and correct coverage
+   (identical to sequential "over" because every rectangle covering a pixel has the same colour),
+   scissor and stencil off. The noise texture (`media/textures/weather/fognew/fog_noise.png`,
+   loaded by the game without mipmaps) is sampled through a sampler object with trilinear
+   filtering after a one-time `glGenerateMipmap` on the game's texture object (the levels survive
+   the game's per-bind filter juggling; the sampler never changes the texture's own parameters; if
+   the driver refuses the mipmaps the sampler is not used): in a scaled buffer the seven fetches
+   per fragment are texels apart, so without mipmaps every fetch missed the texture cache and the
+   draw was memory-bound (1.2 ms at 25 % on a Radeon 890M, the same at 50 %) and the noise aliased.
+4. Restores the scene framebuffer and viewport and draws the fog buffer over the scene once as a
+   clip-space quad with `(ONE, ONE_MINUS_SRC_ALPHA)`. At 100 % that is a texel copy. Below 100 %
+   every screen pixel reads the four nearest fog texels and their depths; when those depths
+   straddle an edge (spread > 0.0003) it also reads its own scene depth and weighs the texels by
+   bilinear distance (floored at 0.05 so a neighbour can still win) divided by the distance between
+   the texel's depth and its own: the fog texel that was decided at this pixel's surface dominates,
+   so a wire keeps the fog decided at its depth and the ground next to it its own, instead of a
+   bilinear smear of the two. Away from edges it is a plain bilinear blend.
+5. Puts back the texture units, the buffer binding, the attribute arrays 0..4, the depth test,
+   mask and blend function, runs `GLStateRenderThread.restore()` as in the stock body, and sets
+   the sprite ring buffer's restore flags.
+
+Counters (frames, rectangles, fall-back, the game-thread walk split) in the periodic `[pzopt]
+FBORenderCell` line; the buffer sizes and the noise mipmap result are logged when created. With
+`gpuSections=true` the sub-sections `fog.blit` (copy + reduction), `fog.rects` and
+`fog.composite` are timed from the render thread (`GpuSections.markNow`). Measurement switches
+`devFogNoDraw` (everything but the rectangle draw) and `devFogFlat` (a flat fragment shader).
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-21, fog pass)
+
+`renderFog`: with the fog pass on, the per-level loop over every on-screen chunk, its squares and
+their objects (which only called `ImprovedFog.renderRowsBehind(square)` on the first floor object
+of each square) is replaced by `startRender` / `endRender` per level: the FBO renderer draws all
+rectangles from the drawer at `endFrame` in any case, so the painter's-order interleaving the walk
+provided did nothing. Both paths are bracketed by the GPU section `fog`, and the fog pass counters
+are appended to the periodic log line.
+
+## zombie.iso.IsoChunk (sixth edit, 2026-09-21, fog masks)
+
+A public `pzopt.FogPass.ChunkFog pzoptFog` slot (the per-diagonal masks of the squares of levels
+0 and 1 that take fog, see the ImprovedFog entry) and its reset to null in `resetForStore()`.
+
+## zombie.core.textures.MultiTextureFBO2 (added 2026-09-21, fog pass)
+
+`createTexture` (the real branch): after the stock `new TextureFBO(tex)` it calls
+`pzopt.FogPass.sceneDepthAsTexture(fbo, tex)`, which on the render context (when `fogPass` is on)
+replaces the FBO's DEPTH24_STENCIL8 depth+stencil renderbuffer with a DEPTH24_STENCIL8 texture of
+the texture's hardware size on the `GL_DEPTH_STENCIL_ATTACHMENT`, checks completeness, and either
+deletes the renderbuffer (the later `TextureFBO.destroy` deletes the name again, which GL
+ignores) or, on any failure, re-attaches it and keeps the stock state. Rendering into a depth
+texture is the same as into a renderbuffer (same format, same stencil bits); the point is that the
+fog pass can sample the scene depth where it is instead of copying the whole depth buffer every
+frame (44 MB at 5120x2160). Textures of FBOs that no longer exist (zoom-level or resolution
+changes recreate the offscreen buffer) are deleted at the next call. The FBO's private id is read
+by reflection. Logged as `offscreen buffer WxH (fbo N) depth+stencil is texture T`.

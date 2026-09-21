@@ -17,6 +17,7 @@ classes are described in words.
 | `plan-400fps.md` | 2026-09-20 evening uncapped pass on the spinning route: 273 → ~500 fps, run table, GPU section breakdown, what locking 400 still needs |
 | `plan-500fps.md` | 2026-09-20 night: where the game thread still spends its frame after the 400 pass, untouched hot code, never-profiled areas (render thread, composite), ordered work list |
 | `findings-scene-presets-2026-09-20.md` | the night / torch / thunderstorm presets: night and torch free, storm 83 fps with p99 43 ms and nothing saturated (chunk lighting rebakes ×5); capture rig blind to the player light; next steps |
+| `findings-fog-2026-09-21.md` | heavy fog at no cost: where stock `ImprovedFog` spent 1.5 ms of GPU and a game-thread square walk, the fog pass (one draw call, scaled fog buffer, in-place scene depth, min-depth reduction + depth-aware composite, mipmapped noise, chunk fog masks + segment cache), laptop and desktop run tables, what is left |
 | `plan-diagram.md` | plan at a glance |
 | `proton-run-prep-2026-09-19.md` | command sequence for the pending Proton comparison |
 | `workshop.md` | the Steam Workshop item: layout, validator rules, in-game upload steps; `workshop/description.txt` is the page body (BBCode, placeholders), `workshop/workshop.txt` keeps the item id after the first upload |

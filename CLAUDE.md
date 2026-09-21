@@ -222,6 +222,15 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   command, `--prop treeBakePass=false` (old bake), `--prop treesInChunkTexture=false` (per frame). Found on the
   way: `vboFastQuads=true` draws per-frame FBORenderTrees quads ~40 % darker than the stock element path
   (runs `trees-town-off` vs `trees-town-off-slowvbo`), reported to the VBORenderer session, not fixed here.
+- Fog pass (2026-09-21, `docs/findings-fog-2026-09-21.md`): heavy fog was 447 → 220 fps on the 120 km/h uncapped
+  desktop route (stock draws ~190 screen-wide row rectangles per level, 12 per pixel, `gl_FragDepth`, one draw call
+  each, plus a game-thread square walk that fed nothing). `fogPass` (default on): `pzopt.FogPass` + overrides of
+  `ImprovedFog`, `ImprovedFogDrawer`, `MultiTextureFBO2` (the offscreen depth is a D24S8 texture now, read in place),
+  hook in `FBORenderCell.renderFog`: one draw call into a `fogScalePct` (25) % fog buffer with a min-depth reduction
+  and a depth-aware composite (thin wires stay intact), mipmapped noise sampling, per-chunk fog masks + segment cache
+  on the game thread (`fogMaskFrames`, 20). Now 389 fps / 2.6 ms (clear 447 / 2.2), laptop 98 → 223 (clear 259).
+  A/Bs: `--prop fogPass=false`, `fogScalePct=50|100`, `fogDepthCopy=true`, `devFogNoDraw`, `devFogFlat`; GPU
+  sub-sections `fog.blit/rects/composite` with `gpuSections=true`. Screenshot rig: bench `--flag fog=heavy --shot-at 8`.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-400fps.md` (the locked-400 structural items), `docs/plan-500fps.md` (what is
   still untouched: character update/animation, sprite recording, vispoly, Lua UI, render thread).
