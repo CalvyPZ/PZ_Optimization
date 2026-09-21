@@ -972,3 +972,262 @@ the live thread list (`/proc/<pid>/task/*/comm`) has no `pzopt-overlay-u` thread
 `pzopt-overlay.out` is written; the bench (harness implies sampling) fills all four utilization columns
 (cpu 37 %, gpu 19 %, game 89 %, render 24 %), 81 fps mean on the spinning route warm (73 on the first
 boot after the rebuild while the caches regenerated, p99.9 361 → 92 ms).
+
+## 2026-09-21 (09:15–09:35): "Project Zomboid Optimiser" (Workshop 3787481250) vs our overrides
+
+prop11's *Project Zomboid Optimiser* 1.4.3 (mod id `MPOptimizer`, Workshop item 3787481250, updated
+2026-09-11, 23 k subscribers, 341 ratings; fetched anonymously with `steamcmd +workshop_download_item 108600 3787481250`
+and copied to `~/Zomboid/mods/MPOptimizer`, the directory name `--mod` looks up). It is Lua only: no jar,
+no class overrides. What it changes at its defaults on Build 42 (read from `42/media/lua`, confirmed by the
+console line `[MPOptimizer] Engine Optimizations Applied (Imposters: false, BlendedZombies: 20,
+FalloffCount: 5, LightingFPS: 30)`):
+
+- `DebugOptions` flips on `OnGameStart`: `useNewVisibility=true`, `cheapOcclusionCount=true`,
+  `zombieAnimationDelay=true`, `threadModelSlotInit=true`; `PerformanceSettings.setNewRoofHiding(true)`,
+  `interpolateAnims`, `baseStaticAnimFramerate` 30, `zombieBonusFullspeedFalloff` 4, `modelLighting`,
+  `setPerfReflections(false)`; `numberZombiesBlended` 10 → 4 when zoom ≥ 1.5.
+- Replaces ~40 of the game's GLSL shaders (`media/shaders/*.vert|.frag`, e.g. puddles, door, outline,
+  overlaymask, basiceffect, fogcircle) with its own copies — the only rendering change that is not a toggle.
+- A per-tick Lua heartbeat (`Events.OnTick`) dispatching FPS-limiter / zoom LOD / horde / audio /
+  weather / GC checks on modulo schedules, a second `OnTick` for the vehicle optimizer every 15 ticks,
+  `OnPlayerMove` building culling (only when inside a building above floor 1), a `collectgarbage` hook.
+- Forces `textureCompression=true` into `options.ini` via `Core.saveOptions()` on every game start
+  (the maintainer's is `false`; the runs pass `--option textureCompression=false` so run.sh backs the
+  file up and restores it after the run).
+- No-ops on 42.20: the weather clamp writes `RainManager.maxRainSplashObjects` (no such class field) and
+  `IsoPuddles.isShaderEnable` (private static, unreachable from Kahlua); `Config.SyncToEngine` looks for a
+  `PZOEngineBridge` global that only the author's launcher would provide; the `JVM_*` keys and the
+  `Launcher_Optimizer/*.json` files are heap-size launcher JSONs the user copies by hand (none used here).
+  Corpse / blood / debris sweeps, the GC purge and the rain / fire particle clamps are opt-in (off).
+
+Runs `pzo-<seg>-<side>` (2026-09-21 09:16–09:33): XWayland, NVIDIA GL 615.71, 5120x2160, max zoom,
+Zulu + G1 JSON, uncapped (`uncappedFps=true`), in-game overlay + MangoHud, `--no-dashboard`,
+`uiRenderOffscreen=true` from options.ini on every side. `stock` = our build with every runtime and boot
+key off (the showcase stock property set, so the harness route driver is present), `mod` = the same set
+plus `--mod MPOptimizer` at its defaults (first-launch dialog pre-acknowledged in
+`~/Zomboid/Lua/MPOptim_Settings.ini`), `opt` = build defaults. Numbers from the in-game overlay log
+(`analyze.py` `overlay:` block, route window), utilization from the overlay and sysmon. One run per cell.
+
+| run | route | fps | frame mean / p99 / p99.9 / max ms | >33 ms | stdev / jitter | 1 % low | < 240 fps | GPU busy | game thread | streamer wait mean / p99 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `pzo-drive120-stock` | E:1200 at 122 km/h | 166.7 | 6.0 / 15.5 / 18.8 / 49.7 | 2 | 4.7 / 1.1 | 65 | 42 % | 90 % | 68 % | 138 / 316 ms |
+| `pzo-drive120-mod` | E:1200 at 122 km/h | 159.0 | 6.3 / 15.6 / 18.1 / 23.5 | 0 | 4.7 / 1.2 | 64 | 45 % | 88 % | 67 % | 150 / 321 ms |
+| `pzo-drive120-opt` | E:1200 at 122 km/h | **481.2** | 2.1 / 8.8 / 14.9 / 25.4 | 0 | 1.6 / 1.1 | 113 | 7 % | 97 % | 56 % | 4.7 / 21.7 ms |
+| `pzo-storm120-stock` | same, thunderstorm | 74.6 | 13.4 / 58.7 / 83.8 / 96.9 | 44 | 7.0 / 3.0 | 17 | 100 % | 83 % | 90 % | 153 / 313 ms |
+| `pzo-storm120-mod` | same, thunderstorm | 71.7 | 13.9 / 66.2 / 80.5 / 89.5 | 57 | 8.1 / 2.1 | 15 | 100 % | 85 % | 86 % | 145 / 318 ms |
+| `pzo-storm120-opt` (093136) | same, thunderstorm | **245.6** | 4.1 / 13.8 / 18.8 / 25.5 | 0 | 2.4 / 1.3 | 72 | 26 % | 98 % | 68 % | 5.0 / 18.0 ms |
+| `pzo-spin-stock` | S:450 turn=90, 25 s | 135.4 | 7.4 / 27.2 / 42.1 / 74.6 | 14 | 5.3 / 3.0 | 37 | 72 % | 83 % | 91 % | 151 / 304 ms |
+| `pzo-spin-mod` | S:450 turn=90, 25 s | 127.8 | 7.8 / 29.5 / 40.0 / 63.9 | 19 | 5.4 / 3.3 | 34 | 74 % | 83 % | 92 % | 146 / 305 ms |
+| `pzo-spin-opt` | S:450 turn=90, 25 s | **456.2** | 2.2 / 8.5 / 17.4 / 38.3 | 1 | 1.6 / 0.8 | 118 | 6 % | 96 % | 80 % | 9.0 / 143 ms |
+
+Findings:
+- **The Optimiser is stock within noise on all three routes**, and on the slow side of it each time
+  (−5 % fps, p99 equal or slightly worse, more >33 ms frames in the storm and the spin). Nothing it toggles
+  is on the hot path of these routes: the game thread stays 86–92 % busy on the spin and storm routes and
+  the GPU 83–90 % busy uncapped, exactly like stock; the chunk streamer still queues 140–150 ms per chunk.
+  Its own per-tick Lua work is the likeliest source of the small loss.
+- Our build is 2.9x (drive), 3.3x (storm) and 3.4x (spin) the Optimiser's frame rate with a tail 2–5x
+  tighter (p99 15.6 → 8.8, 66 → 14, 29.5 → 8.5 ms) and no >33 ms frames on the drives; streamer queue
+  wait 150 → 5 ms. On the drives the CPU sits at ~20 % of the machine on every side: the difference is the
+  GPU work per frame (chunk-texture baking and the puddle / rain paths), which is why the mod's toggles
+  cannot reach it.
+- Harness note: at 450+ fps the drive controller's per-frame steering wanders more (lateral up to
+  10–13 tiles vs ≤ 4 at 160 fps) and two of the three `pzo-storm120-opt` attempts clipped roadside
+  objects (speed −18 km/h, ~8 s of recovery, routes of 47 and 45 s; 265 / 260 fps mean, kept in
+  `harness/runs/` but not in the table). The third attempt (093136) drove the 38.6 s route clean.
+  Stock/mod sides never left the road.
+
+### 10:35–10:50 addendum: the full stack — PZO-Launcher engine jar + native lib + its JVM flags
+
+The Workshop mod's "[+] JVM Engine" features come from the author's separate
+[PZO-Launcher](https://github.com/prop11/PZO-Launcher) (release V0.9.7.8, 2026-09-15). On Linux its
+`pzo_optimizer.sh` copies `PZOptimEngine.jar` + `libpzo_native64.so` into the game dir and rewrites
+`ProjectZomboid64.json`: `mainClass` → `com/pzoptimizer/PZOEntrypoint`, the jar first on the classpath,
+`-agentlib:pzo_native64` (JVMTI + JNI: thread priority / affinity, timer, AVX2 distance batches, a
+miniz inflater), `-Xmx8192m` (its tier for 16–31 GB), G1 with `IHOP=45`, `G1ReservePercent=15`,
+`AlwaysPreTouch`, `+UseCompactObjectHeaders`, `+UseSuperWord`, `MaxInlineLevel=15`,
+`InlineSmallCode=2500`, `+UseNUMA`, no `-Xms`. The installer only searches `~/.local/share/Steam`
+paths, so `/tmp/pzo-full.sh` applied the same edits by hand for each run and restored the original JSON
+(diff-identical afterwards) and removed the files; its `ZomboidConfigMigrator` also rewrites the JSON at
+boot when it does not find its own flags. The entrypoint then arms ~60 "governors" (its log
+`~/Zomboid/Lua/pzo_engine.log`): a 12-worker `MultiCoreChunkStreamer` hooked into
+`WorldStreamer.jobQueue`, a frame-budgeted `ChunkIngestionPacer`, `VehicleTravelOptimizer` (replaces the
+`IsoChunkMap` lock, zombie-simulation governor while driving), `EngineThreadGovernor` (renames and
+re-prioritises the game and render threads: `PZO-MainSimulationThread`, `PZO-RenderThread`),
+`PredictiveChunkStreamer`, GL "shadow state", a `HighPrecisionTimer`, plus seven small bytecode patches
+(`IsoChunkMap.calculateZExtentsForChunkMap` loop bound, `IsoGridSquare.splatBlood` early-out,
+`BaseVehicle.addKeyToGloveBox` null guard, `FBORenderLevels` bounds guards, `IsoChunk$SanityCheck.log`
+and `SpriteConfig` warn no-ops, `HumanVisual.skinTexture` default). Only its SQLite WAL toggles failed.
+It also raises the game's `DebugType` log severities to Error, which silences our `[pzopt] harness:`
+console lines (the run files are complete; read `pzopt-bench.out` instead of the console).
+
+Runs `pzo-<seg>-full`: the `mod` cell plus the engine as above (stock code path, Lua mod at defaults,
+engine at defaults; Steam launcher this time — Steam had logged back in — the JSON keeps
+`-Dzomboid.steam=1`). Same settings and windows as the table above.
+
+| run | route | fps | frame mean / p99 / p99.9 / max ms | >33 ms | stdev / jitter | 1 % low | < 240 fps | GPU busy | game thread | streamer wait mean / p99 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `pzo-drive120-full` | E:1200 at 122 km/h | 165.3 | 6.1 / 15.5 / 19.4 / 23.7 | 0 | 4.7 / 1.2 | 65 | 43 % | 89 % | 71 % | 157 / 332 ms |
+| `pzo-storm120-full` | same, thunderstorm | 72.2 | 13.9 / 65.7 / 79.4 / 101.3 | 62 | 8.4 / 2.4 | 15 | 100 % | 83 % | 88 % | 144 / 304 ms |
+| `pzo-spin-full` | S:450 turn=90, 25 s | 128.6 | 7.8 / 28.5 / 42.4 / 60.1 | 14 | 5.5 / 3.3 | 35 | 75 % | 83 % | 92 % | 158 / 306 ms |
+
+- **The full stack is stock within noise too**: 165 vs 167 fps on the drive, 72 vs 75 in the storm,
+  129 vs 135 on the spin; p99 / p99.9 unchanged; the chunk streamer's queue wait is unchanged at
+  ~150 ms mean / ~310 ms p99 despite the "12 parallel chunk streaming workers" (the harness counts
+  every chunk from `World Streamer`, so its dispatcher did not take the work over, or took it over
+  without changing when chunks reach the game thread). The lighting thread runs busier with the mod
+  (21 → 37–48 %; its `EngineFeaturesTuner` sets a 15 fps lighting rate and the Lua side 30).
+- Nothing in either half touches what limits these routes: the render thread's per-frame chunk /
+  tree / translucent work and the game thread's world update. Our build stays 2.9x / 3.4x / 3.5x
+  ahead of the full stack with a 2–5x tighter tail.
+- Cleanup: launcher JSON diff-identical, no `PZO*` / `libpzo*` / `.bak` files in the game dir, the
+  engine's `~/Zomboid/Lua/pzo_engine.log`, `pzo_update.json`, `Logs/pzo_stutter_diagnostics.log`
+  removed. The Lua mod stays at `~/Zomboid/mods/MPOptimizer` (not enabled), the engine release under
+  `/tmp/pzo`.
+
+## 2026-09-21 (09:50–10:30): the Dell laptop (i5-6300HQ / GTX 960M), stock vs optimized, spin and 120 km/h drive
+
+Machine: `diego-dell` (192.168.0.109): Core i5-6300HQ (4 cores, no SMT, 2.3 GHz), GTX 960M via
+PRIME offload (NVIDIA 580.178.04, `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`),
+7.8 GB RAM, SATA SSD, KDE Wayland 1920x1080, on AC; game 42.20.4 `b0bbce05d5` with **its stock
+launcher JSON: `-Xmx3072m -XX:+UseZGC`** (the desktop runs on the tuned G1 JSON with a 4 GB heap).
+Runs over ssh from the desktop, game started directly (never through Steam), `--no-mangohud`
+(in-game overlay log), `--no-dashboard`, `--option frameRate=240`, max zoom = 2.0 on this display
+(the desktop's is 2.5). "Stock" = the build installed with `--prop enabled=false` (every override on
+the build-mismatch stock path, harness plumbing only). One run per cell. Runs `dell-*`.
+
+| run | route | fps | mean | p50 / p90 | p99 | p99.9 / max | >33 ms | cpu | gpu | GC cycles in window | game-thread alloc stalls |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| dell-spin-stock-1 | spin S:450 turn=90 | 6.8 | 147 | 120 / 221 | 492 | 2711 / 3472 | 280 / 283 | 98 % | 20 % | 2 (14 s wall) | 2, 0.7 s |
+| dell-spin-opt-1 | spin S:450 turn=90 | **9.1** | **110** | 86 / 183 | **328** | 1451 / 1548 | 306 / 319 | 98 % | 26 % | 7 (71 s wall) | 2, 0.5 s |
+| dell-drive120-stock-1 | E:1200 kmh=193 | **25.5** | **39** | 30 / 65 | **141** | 346 / 2654 | 454 / 1098 | 99 % | 39 % | 3 (16 s wall) | 2, 1.2 s |
+| dell-drive120-opt-1 | E:1200 kmh=193 | 11.6 | 86 | 62 / 125 | 242 | 3812 / 6730 | 547 / 649 | 100 % | 39 % | 9 (85 s wall) | 10, 6.7 s |
+
+Milliseconds except fps and counts; cpu/gpu from `sysmon.sh` over the route window; GC from
+`gc.log` (ZGC concurrent cycles overlapping the window and `Allocation Stall (MainThread)` lines).
+
+Findings:
+- **This machine is CPU-saturated in every cell** (all four cores at 98–100 %, GPU never above
+  40 %), so the frame rate is the sum of every thread that wants a core, not the game thread's
+  own frame. Stock puts ~330 % of a core into `MainThread` 65 / `World Streamer` 50 / `Lighting`
+  49 / render 22; optimized puts the same ~320 % into `MainThread` 54 / `Lighting` 35 / three
+  `pzopt-recalc` workers 31 / render 12 / streamer 9. The game thread gets **fewer** cycles with
+  the overrides on because the recalc pool and ZGC compete with it for four cores.
+- **The 3 GB ZGC heap is the wall on the drive.** The optimized drive ran 9 GC cycles in a 56 s
+  window and froze the game thread in ten allocation stalls (6.7 s, max 3.2 s: the p99.9 of
+  3.8 s), stock three cycles and two stalls. ZGC needs idle cores to finish its concurrent cycles;
+  with none it falls behind the allocation rate and stalls the allocator. Same mechanism as the
+  laptop's G1 > ZGC finding (2026-09-20 05:05 section), much worse here with half the cores.
+- On the spinning route the overrides still win (6.8 → 9.1 fps, p99 492 → 328 ms) because the
+  route is streamer-bound (1064 chunks in 34–38 s: stock queue wait 419 ms mean, optimized 152 ms).
+  On the drive (3,000 chunks in 40–49 s) the heap/CPU budget dominates and the overrides lose
+  (25.5 → 11.6 fps).
+- Not a launcher/renderer artefact: both sides identical launch (direct, PRIME, same JSON,
+  same options), routes complete, `OpenGL version: 4.6.0 NVIDIA` in every console.
+- The optimized drive run sat **22 min at "Creating display"** (`pzopt-loadtrace.out`: gap
+  between `Creating display` and `closest width=320 freq=58`, one thread at 106 % of a core,
+  GPU 0) before the world loaded and the route ran normally; the route-window numbers are from
+  after that. KDE's idle lock had refused the previous launch attempt (`the desktop session is
+  locked`), `loginctl unlock-session` cleared it and a `SimulateUserActivity` D-Bus poke every 30 s
+  did not keep it away; the journal shows no lock/DPMS event, so what held the window creation is
+  open. `systemd-inhibit` needs polkit over ssh.
+
+Next on this class of machine (not run, maintainer's call): the G1 launcher JSON
+(`config/launcher/ProjectZomboid64.g1.json`) and/or `-Xmx4096m` on the Dell, and `workers=1`
+for the recalc pool when `cores <= 4` (the pool's three threads on four cores starve the game
+thread). Both are one `--gc g1` / `--prop workers=1` run each.
+
+### 10:30–10:58 follow-up: redo of the optimized drive, GC / heap / pool one-at-a-time
+
+Same machine, same route (E:1200, kmh=193, max zoom 2.0, 240 cap, direct launch), one run per
+cell, KDE sleep + lock held off by a D-Bus inhibit holder (`org.freedesktop.ScreenSaver` +
+`PowerManagement.Inhibit` from a long-lived python process; the 22 min hole in `opt-1` was the
+laptop suspending). Boot = launch → Continue, load = Continue → world ready (`loadtime.py`).
+
+| run | GC | heap | recalc workers | fps | mean | p50 | p99 | p99.9 / max | game thread % | boot | load |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| drive120-stock-1 | ZGC | 3 GB | – | 25.5 | 39.3 | 29.8 | 141 | 346 / 2654 | 65 | 24.9 s | 92.0 s |
+| drive120-stock-g1-2 | G1 | 3 GB | – | 22.3 | 44.8 | 32.4 | 176 | 335 / 2306 | 55 | 26.3 s | 79.2 s |
+| drive120-opt-1 | ZGC | 3 GB | 3 | 11.6 | 86.0 | 62.4 | 242 | 3812 / 6730 | 54 | (suspend) | 43.6 s |
+| drive120-opt-2 | ZGC | 3 GB | 3 | 13.0 | 76.8 | 61.4 | 228 | 946 / 2035 | 54 | 26.0 s | 43.3 s |
+| drive120-opt-x4g-1 | ZGC | **4 GB** | 3 | 14.2 | 70.5 | 54.7 | 201 | 1518 / 2830 | 53 | 22.4 s | 50.2 s |
+| drive120-opt-w1-1 | ZGC | 3 GB | **1** | **25.7** | **39.0** | 30.3 | **112** | 437 / 3007 | **72** | 22.3 s | 44.8 s |
+| drive120-opt-g1-1 | **G1** | 3 GB | 3 | 22.9 | 43.7 | 34.4 | 148 | 420 / 1490 | 63 | 23.1 s | **30.4 s** |
+| drive120-opt-g1w1-1 | G1 | 3 GB | 1 | 17.5 | 57.3 | 46.2 | 190 | 561 / 1346 | 54 | 27.4 s | 39.5 s |
+
+Findings:
+- **The optimized defaults halve the drive frame rate on this 4-core machine, reproducibly**
+  (11.6 / 13.0 / 14.2 fps over three runs vs 22–26 stock). Not the heap: 4 GB changes nothing
+  (still 8 game-thread allocation stalls, 4.5 s).
+- **Either fix alone brings it back to stock**: `workers=1` (no `pzopt-recalc` threads; recalc
+  back on the World Streamer) gives the best line of the day, 25.7 fps / p99 112 ms with the game
+  thread at 72 % of a core; `--gc g1` gives 22.9 fps and zero allocation stalls (21 pauses,
+  0.3 s total, max 69–85 ms). Both together read 17.5 fps, inside this box's run-to-run spread
+  (stock ZGC vs G1 differ by 3 fps on identical work; no thermal throttling: counters 0, 52–56 °C).
+- Mechanism: with four cores and every one pegged, the three recalc workers plus ZGC's concurrent
+  threads take cycles straight from the game thread (54 % of a core with the pool vs 65–72 %
+  without). The pool sizing (`workers` = cores − 1) assumes idle cores; on ≤ 4 cores it should
+  default to 1. ZGC additionally stalls the allocator when it cannot keep up (2–10 stalls of up to
+  3.6 s per run in every ZGC cell with the pool on).
+- Load: the pzopt caches take Continue → world from 79–92 s (stock) to 30–45 s (D "animations +
+  file tasks" 32–38 s → 0.2 s once `~/Zomboid/pzopt/` is warm). Boot to the menu is 22–27 s on
+  every row; the desktop's boot gains do not show on this CPU.
+- `stock-g1-1` died at t=34 s with an NVIDIA `Xid 69` class error and SIGABRT in the GL driver
+  (960M, driver 580.178.04): a driver fault, retried as `-2`.
+
+Proposal from this: default `workers` to 1 when `cores <= 4` (one line in `Config`), and note in
+the README that ZGC-shipping launcher JSONs on 4-core machines benefit from `--gc g1` / the G1
+JSON. Not changed yet.
+
+## 2026-09-21 (10:38–11:05): the other Workshop performance mods, same three routes
+
+Workshop text search (Build 42 tag) for optimization / optimizer / fps / performance / lag / stutter /
+smooth / boost, ranked by current subscribers (`/tmp/pzo/workshop-candidates.json`). Taken: every general
+client-side performance mod that targets 42.20. Skipped: BetterFPS_B42 (80 k, deprecated 2025-11, its page
+points to Zed's), HigherFPS (6 k, only removes the 244 cap; every run here is uncapped already), Undying
+Optimizer (11 k, UI/menu only), Horde Optimizer (5 k, horde-only), Lucy's Streaming Cuts (DAMN-library-only),
+RenderLessZombie (2025, manual file copy), Potato textures (18 k, the same idea as ETO with fewer subscribers).
+Downloaded with `steamcmd +login anonymous +workshop_download_item 108600 <id>`, copied to
+`~/Zomboid/mods/<mod id>`, enabled with `--mod`, ZombieBuddy 2.3.3 through `--vmarg -javaagent:...`.
+Runs `wm-<seg>-<side>` (helper `/tmp/pzo-mods.sh`): the `pzo-*-stock` set-up (our build, every key off,
+uncapped, overlay log, no dashboard) plus one mod at a time, one run per cell, direct launcher.
+
+| side | mod (Workshop id, subscribers) | what it is on 42.20 | verified active by |
+|---|---|---|---|
+| `tempo` | Tempo – A Performance & FPS Optimizer 1.2.0 (3736629791, 42 k) | Lua: OnTick/OnRenderTick frame sampler and spike attribution, context-menu `calcWidth` memo, options page; defaults | `[Tempo_PerfKit]` lines, build SHA verified |
+| `tempopatch` | Tempo + its optional class shadows for 42.20.4 (`IsoChunkMap` 2.5 ms/frame chunk-finalize budget, `IsoWorld` 3D-zombie cap at the vanilla 510) | copied over our `IsoChunkMap.class` for the run (nothing else in our tree calls pzopt members on it); its `PerformanceSettings` shadow left out (ours carries the frame limiter / options tab the harness build's Lua needs; the only thing it adds is a `numberZombiesBlended` override) | `[ChunkBudget] engine shadow ACTIVE`, `3D model cap shadow ACTIVE` |
+| `multicpu` | Multi-Cpu Enhance 2.1 (3459875383, 28 k) | its `ProjectZomboid64.json`: `-Xmx8192m`, `+UseParallelGC`, 4 GC threads, `+UseNUMA`, `+AlwaysPreTouch`, `+DisableExplicitGC`, `+ParallelRefProcEnabled`, string dedup; library path set to `natives/` for Linux, `windows` block dropped | `launcher vmArgs` line, `gc.log` |
+| `eto` | Every Texture Optimized: Well Balanced 1.2.1 (3119788162, 616 k) | 6,142 re-encoded PNGs replacing the game's textures (`--mod ETO_B`) | 18,420 `mod "ETO_B" overrides` lines |
+| `lugli` | Lugli – Optimizations 1.0.0 (3790863696, 3 k) | ZombieBuddy jar: wind gate (calm-wind vegetation left in the chunk texture), `calculateZExtentsForChunkMap` 19×19 instead of 361×361, room-square index, UI tick stagger, Lua chunk-event spread | 13 methods patched, `[Lugli/Opt/zextents] active`, `windgate ... CALM (baked)` |
+| `zeds` | Zed's Better FPS – B42.20.2 Fix 1.0.0 (3782613536, 9 k; the 47 k original 3622986450 ships a 42.13 jar we measured on 09-19) | ZombieBuddy jar; every optimization tick box on via `ModOptions.ini` (IndieGL state cache, sprite batching, ring buffer, DefaultShader, 3D models, IsoMovingObject separation), render distance and cap at default | 17 methods patched incl. `IsoMovingObject.separate`, no errors |
+
+Overlay log, route window, fps mean / frame mean, p99, p99.9, max ms / >33 ms frames / 1 %-low / GPU busy.
+
+| route | stock | Tempo | Tempo + shadows | Multi-Cpu | ETO | Lugli | Zed's fix | **ours** |
+|---|---|---|---|---|---|---|---|---|
+| drive 120 km/h | 166.7 / 6.0, 15.5, 18.8, 49.7 / 2 / 65 / 90 % | 160.0 / 6.3, 15.3, 18.2, 24.1 / 0 / 65 / 88 % | 162.1 / 6.2, 15.3, 17.9, 27.0 / 0 / 65 / 88 % | 169.4 / 5.9, 15.2, 17.8, **347** / 1 / 66 / 89 % | 163.1 / 6.1, 15.2, 18.0, 27.8 / 0 / 66 / 88 % | 162.0 / 6.2, 15.3, 18.0, 21.8 / 0 / 65 / 88 % | 161.4 / 6.2, 15.2, 18.2, 27.7 / 0 / 66 / 87 % | **481.2** / 2.1, 8.8, 14.9, 25.4 / 0 / 113 / 97 % |
+| storm 120 km/h | 74.6 / 13.4, 58.7, 83.8, 96.9 / 44 / 17 / 83 % | 70.8 / 14.1, 61.0, 98.2, 118 / 44 / 16 / 80 % | 75.7 / 13.2, 56.9, 85.1, 104 / 45 / 18 / 83 % | 73.8 / 13.5, 61.9, 87.0, **339** / 42 / 16 / 85 % | 72.3 / 13.8, 63.3, 85.9, 98.8 / 46 / 16 / 82 % | 72.8 / 13.7, 60.0, 82.4, 113 / 43 / 17 / 86 % | 74.5 / 13.4, 59.0, 81.7, 91.1 / 44 / 17 / 87 % | **245.6** / 4.1, 13.8, 18.8, 25.5 / 0 / 72 / 98 % |
+| Rosewood spin | 135.4 / 7.4, 27.2, 42.1, 74.6 / 14 / 37 / 83 % | 130.0 / 7.7, 27.9, 39.9, 71.6 / 13 / 36 / 81 % | 130.5 / 7.7, 30.3, 44.9, 67.5 / 18 / 33 / 82 % | 135.9 / 7.4, 28.7, 46.6, **368** / 16 / 35 / 82 % | 134.6 / 7.4, 28.8, 41.0, 67.3 / 14 / 35 / 82 % | 135.2 / 7.4, 28.0, 43.3, 63.1 / 12 / 36 / 81 % | 134.3 / 7.4, 27.7, 39.4, 67.0 / 15 / 36 / 83 % | **456.2** / 2.2, 8.5, 17.4, 38.3 / 1 / 118 / 96 % |
+
+Findings:
+- **Every mod is within run-to-run noise of stock** on all three routes (fps ±4 %, p99 ±3 ms, the same
+  >33 ms frame counts), the Optimiser's 12 "governors" included (section above). None of them touches the
+  per-frame work that sets the frame time here: the render thread's chunk / tree / translucent drawing and the
+  game thread's world update; GPU busy stays 80–90 % and the streamer queue wait ~150 ms on every side.
+- **Multi-Cpu Enhance adds stalls.** Its `-XX:+UseParallelGC` (a stop-the-world collector; the shipped
+  game uses G1 with `MaxGCPauseMillis=25`) produced one 305–350 ms *Pause Full* inside every route
+  window (two on the spin) — the 340–370 ms max frames in the table — where the stock G1 run's longest
+  pause was 21 ms. The 8 GB heap and pre-touch do not change the mean. Its page says "optimized GC +
+  memory = less lag spikes"; measured, the opposite.
+- Tempo's Lua side costs ~4 % (the per-frame sampler on the game thread, as the Optimiser's heartbeat
+  does); its `IsoChunkMap` chunk budget gets it back on the drives (the chunk finalize work is spread
+  the way our `chunkHandoffDivisor` spreads it) but does nothing for p99 at 122 km/h, where the queue
+  wait, not the finalize, is the tail. Lugli's wind gate needs calm wind and zoomed-out vegetation; the
+  bench save's wind is above its threshold on the drives (`windType 1..3 -> CALM (baked)` fires at boot
+  only) and the spin route is town. ETO changes VRAM, not frame time, on a 24 GB card. Zed's 42.20 fix
+  applies cleanly (the 09-19 crash in `IsoMovingObject.separate` is gone) and measures like its 42.13 jar.
+- Our build is 2.8–3.0x (drive), 3.2–3.5x (storm) and 3.4–3.5x (spin) every one of them, with the
+  p99 2–4x tighter and no >33 ms frames on the drives.
+- Cleanup: class files and launcher JSON diff-identical after each run (the `tempopatch` and `multicpu`
+  helpers restore on exit), the mods stay under `~/Zomboid/mods` disabled, `ModOptions.ini` keeps the
+  `ZBBetterFPSB4220Fix` lines.

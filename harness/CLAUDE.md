@@ -150,6 +150,7 @@ real above twice that.
 | `flicker.py <run>/recording.mp4 START END [--scale W] [--heat png]` | `--record` of a `--flag hold=N` run | per-frame appear / disappear metric (pixels that change and revert within 3 frames), busiest screen cells, heat map |
 | `flicker-triple.py <run>/recording.mp4 FRAME` | same | crops of one frame triple with the A-B-A pixels marked (frame-numbered; use `-ss` times for anything compared with flicker.py) |
 | `readme-chart.py` | named runs | `docs/media/drive-results.svg` |
+| `mods-table.py` | numbers typed in from results.md | `docs/media/workshop-mods-comparison.png` (the Workshop mods table image in the README) |
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe); its quad6 captures are SDR H.264, composed in SDR and mapped to PQ/BT.2020 (reference white 203 nits) at the end |
 | `stitch-louisville-sbs.sh <stock-label> <opt-label> [out]` | two `--preset louisville` recordings (in-game overlay on) | side-by-side aligned at the quit-to-black instant (the game quits the moment the route ends: a hard sync point in both captures, unlike the file birth time, which is 0.3-0.6 s off and drifts 6 ms/s) minus the route length; overlay insets at half size; header numbers from `analyze.py`'s overlay line; `docs/media/louisville-horde-spin-stock-vs-optimized.mp4` |
 | `stitch-storm-sbs.sh` | stock + optimized 120 km/h thunderstorm recordings (`sbs-storm120-*`, in-game overlay on) | side-by-side aligned at the car's motion onset, each run's overlay inset at full resolution |
@@ -171,7 +172,8 @@ real above twice that.
 `setparams` + `write_colr` tags), like the gpu-screen-recorder captures; the stitch scripts keep HDR
 sources 10-bit end to end (no tone-map) and map SDR sources to PQ. Text colours in the HDR
 compositions are PQ code values (~60 % = comfortable white). Posters (`.jpg`) and the README GIFs
-are tone-mapped (hable, 200 nits) from the HDR file (2026-09-20 night).**
+are tone-mapped (hable, 200 nits) from the HDR file (2026-09-20 night). Colours, type and layout for
+all of it: `docs/media-style.md`.**
 
 Use `--record` on drive runs and read frames from `recording.mp4` with ffmpeg (tile contact
 sheet) before concluding anything about visuals; it is a monitor capture, so the game window

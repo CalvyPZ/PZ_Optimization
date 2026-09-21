@@ -241,6 +241,38 @@ being ready for the game thread.
 | Wake + 4 recalc workers (default) | 9.3 ms | 84 ms | 517 ms |
 | Wake + 8 workers | 9.1 ms | 87 ms | 503 ms |
 
+### Against the Workshop's performance mods (2026-09-21)
+
+The most-subscribed Build 42 performance mods, each run on the same three routes as
+above (120 km/h drive, the same drive in a thunderstorm, the Rosewood spin), uncapped,
+5120x2160, one mod at a time on the stock game, measured by the in-game overlay log.
+Each mod was checked in the console to be loaded and patching (`docs/results.md`,
+2026-09-21 sections, has the per-mod details and every number).
+
+![Workshop performance mods vs PZ_Optimization on the three routes](docs/media/workshop-mods-comparison.png)
+
+| Mod | Subscribers | What it is | Drive 120 km/h fps / p99 | Storm 120 km/h | Rosewood spin |
+|---|---|---|---|---|---|
+| Stock game | | | 167 / 15.5 ms | 75 / 59 ms | 135 / 27 ms |
+| [Project Zomboid Optimiser](https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250) | 23 k | Lua toggles, F10 control centre | 159 / 15.6 | 72 / 66 | 128 / 30 |
+| … + its [PZO-Launcher](https://github.com/prop11/PZO-Launcher) engine jar and JVM flags | | agent jar, native lib, launcher JSON | 165 / 15.5 | 72 / 66 | 129 / 29 |
+| [Tempo](https://steamcommunity.com/sharedfiles/filedetails/?id=3736629791) | 42 k | Lua sampler and menu memo | 160 / 15.3 | 71 / 61 | 130 / 28 |
+| … + its optional class shadows | | chunk-finalize budget, 3D-zombie cap | 162 / 15.3 | 76 / 57 | 131 / 30 |
+| [Multi-Cpu Enhance](https://steamcommunity.com/sharedfiles/filedetails/?id=3459875383) | 28 k | launcher JSON: ParallelGC, 8 GB heap | 169 / 15.2, **one 320 ms stall** | 74 / 62, **one 320 ms stall** | 136 / 29, **two 300–350 ms stalls** |
+| [Every Texture Optimized](https://steamcommunity.com/sharedfiles/filedetails/?id=3119788162) | 616 k | 6,142 re-encoded textures | 163 / 15.2 | 72 / 63 | 135 / 29 |
+| [Lugli – Optimizations](https://steamcommunity.com/sharedfiles/filedetails/?id=3790863696) | 3 k | ZombieBuddy patches: wind gate, z-extents, room index | 162 / 15.3 | 73 / 60 | 135 / 28 |
+| [Zed's Better FPS](https://steamcommunity.com/sharedfiles/filedetails/?id=3622986450) ([42.20 fix](https://steamcommunity.com/sharedfiles/filedetails/?id=3782613536)) | 47 k | ZombieBuddy patches: GL state cache, sprite batching, ring buffer | 161 / 15.2 | 75 / 59 | 134 / 28 |
+| **PZ_Optimization** | | class overrides | **481 / 8.8** | **246 / 13.8** | **456 / 8.5** |
+
+Every one of them measures within run-to-run noise of the stock game (fps ±4 %, p99
+±3 ms): none touches the per-frame chunk, tree and translucent drawing on the render
+thread or the world update on the game thread that set the frame time. Multi-Cpu
+Enhance's `-XX:+UseParallelGC` is worse than stock: a stop-the-world full collection of
+300–350 ms landed inside every route (the game's own G1 never paused longer than 21 ms).
+Subscriber counts as of 2026-09-21; BetterFPS_B42 (80 k) is deprecated and points to
+Zed's, HigherFPS (6 k) only removes the 244 fps cap (this build has the same option),
+Undying Optimizer (11 k) covers menus only.
+
 ---
 
 ## Install on Windows
