@@ -20,9 +20,11 @@ import zombie.ZomboidFileSystem;
  * ({@code Zomboid/pzopt-gamethread.out}, summed over the route window by harness/analyze.py). The
  * same numbers JFR + harness/gametree.py give after a run, live, on every platform, without JFR.
  *
- * Each sample is one {@link ThreadMXBean#getThreadInfo(long, int)} call for the game thread only,
- * which the JVM serves with a thread-local handshake: the game thread stops at its next safepoint
- * poll for the stack walk (tens of microseconds), nothing else pauses. Safepoint bias applies (a
+ * Each sample is one {@link Thread#getStackTrace()} of the game thread, which the JVM serves with a
+ * thread-local handshake: the game thread stops at its next safepoint poll for the stack walk (tens of
+ * microseconds), nothing else pauses. (Until 2026-09-22 it was {@link ThreadMXBean#getThreadInfo(long, int)},
+ * which Java 25 serves with a global ThreadDump safepoint: at 100 Hz on the 4-core Dell that stopped every
+ * Java thread for 10 % of the wall time, single stops up to 175 ms; {@code profileHandshake=false} restores it.) Safepoint bias applies (a
  * sample lands on the next poll, not exactly where the timer fired), fine for shares of phases.
  * Every sample is counted four ways, prefixes of the bucket keys:
  * <ul>
@@ -214,6 +216,7 @@ public final class GameThreadProfile {
    private static volatile int ringHead; // seconds published so far
    private static Thread sampler;
    private static volatile long gameThreadId = -1L;
+   private static volatile Thread gameThread; // pzopt: sampled by handshake (profileHandshake)
    private static BufferedWriter log;
    private static boolean logFailed;
    private static BufferedWriter stackLog;
@@ -229,6 +232,9 @@ public final class GameThreadProfile {
          return;
       }
       gameThreadId = threadId;
+      if (Thread.currentThread().threadId() == threadId) {
+         gameThread = Thread.currentThread();
+      }
       Thread t = new Thread(GameThreadProfile::loop, "pzopt-overlay-stacks");
       t.setDaemon(true);
       t.setPriority(Thread.MIN_PRIORITY);
@@ -263,12 +269,26 @@ public final class GameThreadProfile {
          boolean wanted = Overlay.isVisible() || Overlay.logging();
          if (wanted) {
             try {
-               ThreadInfo ti = threads.getThreadInfo(gameThreadId, MAX_DEPTH);
-               if (ti != null) {
-                  StackTraceElement[] st = ti.getStackTrace();
-                  classify(st, ti.getThreadState(), counts);
-                  add(stacks, fold(st));
-                  samples++;
+               Thread g = gameThread;
+               if (g != null && Config.PROFILE_HANDSHAKE) {
+                  Thread.State state = g.getState();
+                  StackTraceElement[] st = g.getStackTrace();
+                  if (st.length > MAX_DEPTH) {
+                     st = java.util.Arrays.copyOf(st, MAX_DEPTH);
+                  }
+                  if (st.length > 0) {
+                     classify(st, state, counts);
+                     add(stacks, fold(st));
+                     samples++;
+                  }
+               } else {
+                  ThreadInfo ti = threads.getThreadInfo(gameThreadId, MAX_DEPTH);
+                  if (ti != null) {
+                     StackTraceElement[] st = ti.getStackTrace();
+                     classify(st, ti.getThreadState(), counts);
+                     add(stacks, fold(st));
+                     samples++;
+                  }
                }
             } catch (Throwable t) {
                Log.warn("game-thread profile: sampling stopped: " + t);

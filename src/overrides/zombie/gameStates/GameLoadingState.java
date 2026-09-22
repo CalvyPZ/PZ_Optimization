@@ -414,6 +414,7 @@ public final class GameLoadingState extends GameState {
    }
 
    public void exit() {
+      pzopt.JitGovernor.onWorldStart(); // pzopt: C2 off for play on few-core machines (jitMode)
       boolean useUIFBO = UIManager.useUiFbo;
       UIManager.useUiFbo = false;
       if (!(pzopt.Config.NO_LOAD_FADE && pzopt.Overrides.enabled())) { // pzopt: skip the 350 ms fade to black before the world (docs/plan-instant-load.md L8)

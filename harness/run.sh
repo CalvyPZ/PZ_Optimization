@@ -87,6 +87,7 @@ NATIVE_FLAG_FILE="${NATIVE_ZOMBOID:-$HOME/Zomboid}/Lua/pzopt-harness.txt"
 
 shot_at=""; label=""; quit_after=""; mode="verify"; source_save=""; extra_flags=(); props=(); mangohud_secs=""; mangohud_config=""
 record=0; jfr=0; jfr_period=""; jfr_settings=(); game_profiler=0; gc=""; no_dashboard=0; refresh_template=0; retries=2; renderer="nvidia"; game_env=(); lead=""; route_seconds=""; launcher="auto"; game_options=(); extra_mods=(); vmargs=()
+schedmon=""; asprof=""
 preset=""; mode_set=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -116,6 +117,8 @@ while [[ $# -gt 0 ]]; do
     --env) game_env+=("$2"); shift 2 ;;
     --mod) extra_mods+=("$2"); shift 2 ;;
     --vmarg) vmargs+=("$2"); shift 2 ;;
+    --schedmon) schedmon="$2"; shift 2 ;;                # per-thread run / run-queue wait / page faults + PSI every N s -> <run>/schedmon.txt (harness/schedmon.py)
+    --asprof) asprof="$2"; shift 2 ;;                    # async-profiler agent (harness/asprof/libasyncProfiler.so) with these options, e.g. event=cpu,interval=5ms,threads -> <run>/asprof.jfr
     --record) record=1; shift ;;
     --launcher) launcher="$2"; shift 2 ;;                # auto|steam|direct (see the header)
     --option) game_options+=("$2"); shift 2 ;;           # key=value written into ~/Zomboid/options.ini for the run (restored on exit)                     # screen recording of the run (gpu-screen-recorder, first monitor, native res, AV1 HDR) -> <run>/recording.mp4
@@ -368,6 +371,9 @@ fi
 # Paths inside the JVM are Wine paths: the install dir is S:/common/ProjectZomboid (see the gc.log line).
 LAUNCHER="$PZ_DIR/ProjectZomboid64.json"
 JFR_OUT="$PZ_DIR/pzopt.jfr"
+ASPROF_OUT="$PZ_DIR/pzopt-asprof.jfr"
+rm -f "$ASPROF_OUT"
+[[ -n "$asprof" ]] && vmargs+=("-agentpath:$REPO/harness/asprof/libasyncProfiler.so=start,$asprof,jfr,file=$ASPROF_OUT")
 # The launcher is always edited for a run: a gc log (-Xlog:gc) is added when the
 # JSON has none, so harness/analyze.py can count collector events in the route window.
 {
@@ -431,6 +437,8 @@ while :; do
   # machine-level CPU/GPU utilization for the whole run (harness/sysmon.sh), windowed by the analyzer
   "$REPO/harness/sysmon.sh" "$out/sysmon.csv" 0.5 &
   sysmon_pid=$!
+  schedmon_pid=""
+  if [[ -n "$schedmon" ]]; then python3 "$REPO/harness/schedmon.py" "$out/schedmon.txt" "$schedmon" & schedmon_pid=$!; fi
   rec_pid=""
   if (( record )); then
     # whole monitor through KMS (Wayland session; window capture is X11-only) at the native desktop
@@ -591,6 +599,7 @@ PYC
   [[ -n "$sched_pid" ]] && { kill "$sched_pid" 2>/dev/null || true; wait "$sched_pid" 2>/dev/null || true; }
   [[ -n "$shot_pid" ]] && { kill "$shot_pid" 2>/dev/null || true; wait "$shot_pid" 2>/dev/null || true; }
   kill "$sysmon_pid" 2>/dev/null; wait "$sysmon_pid" 2>/dev/null || true
+  [[ -n "$schedmon_pid" ]] && { kill "$schedmon_pid" 2>/dev/null || true; wait "$schedmon_pid" 2>/dev/null || true; }
   if [[ -n "$rec_pid" ]]; then kill -INT "$rec_pid" 2>/dev/null; wait "$rec_pid" 2>/dev/null || true; echo "recording: $out/recording.mp4 ($(du -h "$out/recording.mp4" 2>/dev/null | cut -f1))"; fi
   sleep 2
   crashed=0
@@ -623,6 +632,7 @@ for g in "$PZ_DIR"/gc.log "$PZ_DIR"/gc.log.[0-9]*; do
   [[ -f "$g" ]] || continue
   if [[ "$(stat -c %Y "$g")" -ge "$launch_epoch" ]]; then cp "$g" "$out/$(basename "$g")"; fi
 done
+if [[ -f "$ASPROF_OUT" ]]; then mv "$ASPROF_OUT" "$out/asprof.jfr"; fi
 if (( jfr )); then
   if [[ -f "$JFR_OUT" ]]; then mv "$JFR_OUT" "$out/pzopt.jfr"; echo "jfr recording: $out/pzopt.jfr ($(du -h "$out/pzopt.jfr" | cut -f1))"; else echo "no JFR recording found at $JFR_OUT" >&2; fi
 fi

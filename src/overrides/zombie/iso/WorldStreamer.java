@@ -46,6 +46,7 @@ public final class WorldStreamer {
    static {
       pzopt.Overrides.onClassLoaded("zombie.iso.WorldStreamer");
       pzopt.Log.info("settings: " + pzopt.Config.describe());
+      pzopt.ThreadNice.start(); // pzopt
    }
 
    static final WorldStreamer.ChunkComparator comp = new WorldStreamer.ChunkComparator();

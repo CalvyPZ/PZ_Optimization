@@ -2540,3 +2540,41 @@ without the fade from black. Multiplayer keeps the stock screen.
 `infoFileNames.get("chunkdata_" + cx + "_" + cy + ".bin")`, one string built and hashed per cell and map folder. The
 chunkdata entries of each map folder are indexed by cell once (only keys in exactly that form); the same path, or
 null, reaches the same native call for every cell in the same order.
+
+## Dell hitching pass (2026-09-22 night; `saveCellAsync`, `jitMode`, `threadNice`, `profileHandshake`)
+
+Profiled on the 4-core Dell (i5-6300HQ / GTX 960M) during the 120 km/h low-end drive with a per-thread scheduler
+monitor (`run.sh --schedmon`) and async-profiler (`run.sh --asprof`). Frames over 100 ms were C2 compile bursts (the
+compiler threads took ~1.6 of the 4 cores in those frames and the game thread got a CPU 38 % of the time) and the
+game-thread sampler's own global safepoints (below).
+
+### zombie.popman.ZombiePopulationManager (new override, `saveCellAsync`)
+
+Every chunk that leaves the world asks for its whole 256x256 cell to be saved again. The request took `saveLock`, which
+the MapCollisionData thread holds through each native cell write, so the game thread waited for file writes while
+driving. With `saveCellAsync` the request builds its zombie snapshot without the lock (the snapshot reads only game-
+thread state; the native population calls stay under the lock on the writer) and keeps one pending write per cell: a
+newer snapshot replaces the queued one, the writer takes the newest. A drive asks ~9 times per written cell
+(1,406 requests, 160 writes). The console counts both (`saveCell:` lines).
+
+### zombie.gameStates.GameLoadingState (`jitMode`)
+
+`exit()` first calls `pzopt.JitGovernor`, which with `jitMode=c1play` (or `auto` on `jitC1Cores` cores or fewer, the
+default) adds a compiler directive excluding every method from C2 through the DiagnosticCommand MBean. HotSpot then
+compiles newly hot methods with C1 at tier 1; code C2 made during loading stays. Loading keeps C2 (load time
+unchanged, unlike `-XX:TieredStopAtLevel=1`, which cost the Dell 16 s of world load).
+
+### zombie.iso.WorldStreamer (`threadNice`)
+
+The static block that logs the settings also starts `pzopt.ThreadNice` (off unless `threadNice` has rules): nice
+values, SCHED_IDLE / SCHED_BATCH or a CPU affinity for this process's threads by name, applied through `setpriority`
+/ `sched_setscheduler` / `sched_setaffinity` over the FFM API. No rule set beat the default on the Dell (pinning the
+game thread alone on a core, a core for the render thread, niced or idle C2 threads all lost).
+
+### pzopt.GameThreadProfile (`profileHandshake`, not a game class)
+
+The overlay's game-thread sampler called `ThreadMXBean.getThreadInfo(id, depth)` 100 times a second. Java 25 serves
+that with a global ThreadDump safepoint, not a handshake: on the Dell it stopped every Java thread for 10 % of the wall
+time, single stops up to 175 ms, in every instrumented run and whenever a player shows the overlay. It now samples with
+`Thread.getStackTrace()` on the game thread, a handshake with that thread only (`-Xlog:safepoint` shows no ThreadDump
+safepoints any more); `profileHandshake=false` restores the old call.
