@@ -2660,8 +2660,9 @@ inside `IngameState.enter`, ~0.65 s before the first world frame (stock runs inc
   it, and a render-thread drawer reads the back buffer; floorOnly is then cleared and the chunks invalidated again. A
   daemon thread scales the image to 1920 px wide and writes `pzopt-resume.jpg` plus `pzopt-resume.properties` (the
   screen position of the player's chunk corner and one chunk step in world x / y) into the save folder.
-- `zombie.iso.fboRenderChunk.FBORenderCell` under `ResumeShot.floorOnly`: only ground-level floors are baked (level
-  loop capped at 0, `renderMinusFloor` for objects, the tree pass, both translucent passes, characters, players,
+- `zombie.iso.fboRenderChunk.FBORenderCell` under `ResumeShot.floorOnly`: only ground-level floors are baked (no floors
+  above level 0, though every level still runs: a chunk's levels share one texture, finished and queued for the screen at
+  its top level, so stopping at level 0 left every multi-storey chunk black; `renderMinusFloor` for objects, the tree pass, both translucent passes, characters, players,
   corpses, items and moving objects skipped) and the bake budget is 0 so every level bakes in that one frame.
   `pzoptSetOcclusion` flips the package-private occlusion switch; `pzoptFrameBakeCounters` logs the capture frame.
 - `zombie.gameStates.GameLoadingState`: `enter` starts decoding the save's shot; `render` draws a black frame plus

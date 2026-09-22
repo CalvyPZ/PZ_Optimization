@@ -1667,9 +1667,7 @@ public final class FBORenderCell {
             renderLevels.prevMinZ = c.minLevel;
             renderLevels.prevMaxZ = c.maxLevel;
 
-            boolean pzoptFloorOnly = pzopt.ResumeShot.floorOnly; // pzopt: resumeShot's exit capture draws ground level only
-            // (levels below 0 still run: a basement shares its texture with ground level and bakes from its lowest level)
-            for (int zza = c.minLevel; zza <= (pzoptFloorOnly ? Math.min(c.maxLevel, 0) : c.maxLevel); zza++) {
+            for (int zza = c.minLevel; zza <= c.maxLevel; zza++) {
                AbstractPerformanceProfileProbe var10 = renderOneChunkLevel.profile();
 
                try {
@@ -2214,6 +2212,11 @@ public final class FBORenderCell {
                      renderObjects = frameNo >= c.renderFrame;
                   }
 
+                  if (pzopt.ResumeShot.floorOnly && level > 0) {
+                     // pzopt: resumeShot's exit capture draws ground-level floors only. The upper levels still run (and draw
+                     // nothing): a chunk's levels share one texture, finished and queued for the screen at its top level.
+                     renderFloor = false;
+                  }
                   if (renderFloor) {
                      ProfileArea var59 = profiler.profile("Floor");
 
