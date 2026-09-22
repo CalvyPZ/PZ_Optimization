@@ -71,6 +71,12 @@ coordinates and pitfalls: `.claude/skills/release-windows` ("Steam Workshop depl
   cached login on this machine; never type the maintainer's password. An in-game upload replaces the
   animated `preview.gif` with `preview.png`; restoring it is the maintainer's steamcmd line
   (`docs/workshop.md`, Images).
+- **No native libraries in a release** (maintainer's decision, 2026-09-22): `scripts/release.sh` defaults
+  `PZOPT_DLSS=0`, so the zip carries no `natives/` (the DLSS shim would add NVIDIA's 58 MB library, Windows cannot
+  use the .so, and `workshop.sh` refuses `*.so` because Steam bans the extension); `upscaler=dlss` without the shim
+  runs as fsr1. Release from a detached worktree of the pushed commit (`git worktree add --detach /tmp/pzopt-release-<x>
+  <sha>`) so peers' uncommitted files never block or leak into the zip; the page must stay ≤ 7,900 substituted
+  characters (a "New!" section is ~150; retire the oldest card's heading or fold its image into a text section).
 
 ## Environment facts
 
