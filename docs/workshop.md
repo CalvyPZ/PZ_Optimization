@@ -97,7 +97,10 @@ section lost its "New!" with it), `17` the "New! Upscaler: FSR 1.0 and DLSS" car
 `harness/upscaler-card.py`: the per-mode table of the 120 km/h drive — off, FSR 1.0 50 %, bicubic 50 %, DLSS 50 % preset F
 and default — from `docs/plan-upscalers.md`; 2026-09-22 night; the zoom section lost its "New!" with it, and the "Better
 profiling" heading went: its image `13` now sits inside the "Performance overlay (F9)" section, which kept the page under
-the limit).
+the limit). Later that day a text section "Upscaling: how it works, when it helps" (how the world frame is scaled, how to
+turn it on, when the GPU is the limit) went under the card; to pay for its ~1,000 characters the `14`, `15` and `16`
+card sections left the page (the images stay in the folder and the item's carousel; the README and the options tab keep
+those features), the tab close-up `08` left the frame-by-frame section, and several captions were shortened.
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes

@@ -568,6 +568,36 @@ scales it back up before the UI, the world text, the cursor and the game's own s
 stay at full resolution (keys `upscaler`, `upscalerQuality`, `upscalerScalePct`, `fsrSharpnessPct`,
 `dlssPreset`, `upscalerObjectMv`; off by default, applied on the next launch).
 
+**How it works.** The game draws the whole world (chunk textures, characters, vehicles, weather,
+lighting) into an offscreen frame and then draws the interface over it. With an upscaler on, that
+world frame is rendered into a smaller viewport of the same buffer, a fraction of the screen per
+axis (`quality` 67 %, `balanced` 58 %, `performance` 50 % = a quarter of the pixels, `ultra` 33 %),
+and resolved back to the screen size right before the game's own screen shader runs, so the UI,
+the world text, the cursor, the map and the screen effects keep every pixel. Nothing changes on the
+game thread: culling, chunk loading, mouse picking and the chunk-texture bakes are the same as
+before. `fsr1` rebuilds the edges (EASU) and re-sharpens (RCAS) in ~0.1 ms at 4K on any GPU; `dlss`
+draws the world with a sub-pixel jitter and feeds the camera's and each character's and vehicle's
+motion to NVIDIA's network, which accumulates detail across frames (1-px power lines and car
+lettering come back at 50 %); `bicubic` is the plain stretch the stock screen shader already does.
+
+**Turning it on.** Options > Optimizations > Upscaling: set **Upscaler** to `fsr1` (or `dlss` on an
+RTX card with the shim under `natives/`), pick **Upscaler quality** (`quality` keeps most of the
+detail, `performance` halves both axes), optionally an explicit percentage, the FSR sharpening
+and the DLSS preset, then restart the game — the tab shows the stock "restart required" dialog.
+`console.txt` confirms it with one line, `[pzopt] upscaler: fsr1 at 50 % (performance)`; a mode
+that cannot run says why and continues as `fsr1` (`upscaler: dlss unavailable (...)`). The same
+keys work as `-Dpzopt.upscaler=fsr1` or in `pzopt.properties`.
+
+**When it helps.** Whenever the GPU is the limit: the F9 overlay's verdict line reads `GPU bound`
+(GPU busy ≥ 90 %) and the frame rate is under the cap. That is the usual state at 4K and 5K, on
+laptops and integrated GPUs, in heavy fog and thunderstorms, and in downtown Louisville, where the
+world pass is most of the GPU's frame; the gain is roughly the pixel ratio of that pass (this 4090
+at 5120x2160: 509 → 619 fps at 50 %, and the spinning Rosewood walk 592 → 802). It does nothing
+when the verdict says `game thread bound` (a horde, chunk streaming, the zombie simulation) or
+`at the cap`, and DLSS's own cost is per output pixel (~2.5 ms a frame at 5120x2160 on a 4090),
+so at 4K and above prefer `fsr1` or `dlssPreset=f`; DLSS pays off at 1440p and below, or whenever
+its reconstructed detail matters more than the frame rate.
+
 | `upscaler` | What runs | Where |
 |---|---|---|
 | `fsr1` | AMD FidelityFX Super Resolution 1.0 (EASU + RCAS, MIT) as GLSL passes on the low-res frame | every GPU, Linux / Windows / macOS |
