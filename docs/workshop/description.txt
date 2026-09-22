@@ -1,12 +1,16 @@
 [b]This is not a Lua mod. Subscribing downloads the files; you still install them by hand (or with the included script).[/b] Enabling it in the Mods list does nothing.
 
-Class overrides for Project Zomboid Build @VERSION@ (game revision @REV@) that shorten chunk-streaming stalls and tighten the frame time, plus a full options tab (Options > Optimizations) and an in-game frame-time overlay (F9). Single player and multiplayer, client side only; nothing to install on a server. Works with the Steam version on Windows, Linux and macOS (the depots ship the same jar).
+Class overrides for Project Zomboid Build @VERSION@ (game revision @REV@) that shorten chunk-streaming stalls and tighten the frame time, plus a full options tab (Options > Optimizations) and an in-game frame-time overlay (F9). Single player and multiplayer, client side only. Steam version on Windows, Linux and macOS (the depots ship the same jar).
 
 Source, measurements, videos and the same files as a GitHub release:
 https://github.com/xD3I/PZ_Optimization
 
 [url=https://github.com/xD3I/PZ_Optimization#readme][img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.gif[/img][/url]
 [i]Uncapped at 5120x2160 with the overrides on; the strip at the bottom is the in-game overlay (F9), live. The video is on the repository page.[/i]
+
+[h1]New! In-game updater[/h1]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/15-updater.jpg[/img]
+UPDATE PZ OPTIMIZATION in the main menu, greyed out while your build is current: when a newer build for your game revision is out it downloads and installs it, then asks to restart.
 
 [h1]New! See what every setting does[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/14-options-preview.jpg[/img]
@@ -15,7 +19,7 @@ https://github.com/xD3I/PZ_Optimization
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/13-profiler.jpg[/img]
 
 [h1]What it does[/h1]
-Project Zomboid loads and bakes the map in chunks; on stock, the loading, baking and lighting work of a busy screen lands in the same frame and shows as stutter while driving or turning. These overrides move that work off the game thread, spread it over frames, and cache what stock recomputes every frame (puddles, rain, cutaways, light info, sound zones). Bench numbers on the repository page; the short version at 5120x2160 on an RTX 4090: driving p99 frame time 19 -> 8 ms, uncapped ~270 -> ~500 fps, thunderstorms 83 -> 188 fps.
+Project Zomboid loads and bakes the map in chunks; on stock, the loading, baking and lighting work of a busy screen lands in the same frame and shows as stutter while driving or turning. These overrides move that work off the game thread, spread it over frames, and cache what stock recomputes every frame (puddles, rain, cutaways, light info, sound zones). At 5120x2160 on an RTX 4090: driving p99 frame time 19 -> 8 ms, uncapped ~270 -> ~500 fps, thunderstorms 83 -> 188 fps.
 
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/07-results.jpg[/img]
 
@@ -23,11 +27,11 @@ Project Zomboid loads and bakes the map in chunks; on stock, the loading, baking
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/11-low-end-hardware.jpg[/img]
 
 [h1]Boot and load times[/h1]
-Launch to main menu and Continue to world ready, same save: stock 7.55 s + 7.67 s, optimized 4.88 s + 3.47 s. FMOD and the animation sets initialise on boot threads, the file pool is pumped during the logo, Lua is precompiled and the animation clip and pack indexes are cached under Zomboid/pzopt/ (the first boot after installing is a few seconds slower, every later one faster than stock).
+Launch to main menu and Continue to world ready, same save: stock 7.55 s + 7.67 s, optimized 4.88 s + 3.47 s. FMOD and the animation sets initialise on boot threads, Lua is precompiled and the animation clip and pack indexes are cached under Zomboid/pzopt/ (the first boot after installing is slower, every later one faster than stock).
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/01-boot-load.jpg[/img]
 
 [h1]How it works[/h1]
-The launcher (ProjectZomboid64.json) searches the game folder before projectzomboid.jar, so a loose .class file with the same name as one in the jar replaces it. The item holds those files (@NFILES@ entries: @NOVERRIDES@ shadowed game classes, the pzopt helper package, three Lua files for the options tab, its preview clips and a manifest) under [b]pzopt-classes[/b]. projectzomboid.jar is never modified. A guard checks the game revision and the sha256 of every shadowed stock class at start-up; on any difference (another game build) it logs one line and the game runs as stock.
+The launcher (ProjectZomboid64.json) searches the game folder before projectzomboid.jar, so a loose .class file with the same name as one in the jar replaces it. The item holds those files (@NFILES@ entries: @NOVERRIDES@ shadowed game classes, the pzopt helper package, four Lua files, the preview clips and a manifest) under [b]pzopt-classes[/b]; projectzomboid.jar is never modified. A guard checks the game revision and the sha256 of every shadowed stock class at start-up; on any difference it logs one line and the game runs as stock.
 
 [h1]Install on Windows[/h1]
 1. Subscribe, let Steam download the item, close the game.
@@ -48,13 +52,13 @@ macOS (Terminal; the files go into Project Zomboid.app/Contents/Java):
 (Workshop items cannot contain .sh files, hence .bash.) Same flags: --status, --uninstall, --dir <game folder>.
 
 [h1]Performance overlay (F9)[/h1]
-Off by default: tick "Sample frame times and utilization" in Options > Optimizations > Performance overlay and restart, then F9 toggles it. Frame time and its tail (p99 / p99.9 / max, 1 %-low, jitter, spikes), GPU busy, game- and render-thread load, a verdict line, the game-thread tree and flame graph shown above, and the frame graph; every element is a dropdown there. Same numbers on every platform, no MangoHud or RivaTuner needed; every run also logs it to Zomboid/pzopt-overlay.out.
+Off by default: tick "Sample frame times and utilization" in Options > Optimizations > Performance overlay and restart, then F9 toggles it. Frame time and its tail (p99 / p99.9 / max, 1 %-low, jitter, spikes), GPU busy, game- and render-thread load, a verdict line, the game-thread tree and flame graph shown above, and the frame graph; every element is a dropdown there. Same numbers on every platform, no MangoHud or RivaTuner needed.
 
 [h1]Settings[/h1]
-Options > Optimizations in the game (saved to Zomboid/pzopt/options.ini, applied on the next launch) has every key with a tick box, plus "Disable all (stock game)" / "Enable all". Options > Display gains an "Uncapped" framerate entry and a separate menu framerate. F9 toggles the performance overlay.
+Options > Optimizations (saved to Zomboid/pzopt/options.ini, applied on the next launch) has every key with a tick box, plus "Disable all (stock game)" / "Enable all". Options > Display gains an "Uncapped" framerate entry and a separate menu framerate. F9 toggles the performance overlay.
 
 [h1]Updates[/h1]
-The files are built for one game revision. When the game updates, the guard turns them off (stock game, one console line) until a build for the new revision is published here; then run the installer with -Uninstall / --uninstall and again without.
+After the first install the menu item does the rest (one request to GitHub per boot; off in Options > Optimizations > Updates). The files are built for one game revision: after a game update the guard runs the game as stock (one console line) until the build for the new revision is out.
 
 [h1]Stock vs optimized, frame by frame[/h1]
 Left: stock, cap removed. Right: the overrides, uncapped. Big number = 1 s average, small block = whole route.
@@ -67,7 +71,7 @@ Left: stock, cap removed. Right: the overrides, uncapped. Big number = 1 s avera
 [h1]Compared with the other performance mods[/h1]
 The most-subscribed Build 42 performance mods on the same three routes (120 km/h drive, the same drive in a thunderstorm, a spin through Rosewood), uncapped, one mod at a time. fps mean / p99 frame time:
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/10-workshop-mods-comparison.jpg[/img]
-All of them measure within noise of stock: [b]Project Zomboid Optimiser[/b] flips engine debug toggles from Lua and swaps shaders for copies; [b]Tempo[/b] budgets chunk finalizing, not the chunk queue wait that is the tail; [b]Multi-Cpu Enhance[/b] is a launcher JSON whose ParallelGC adds a 300 ms pause per route (worse than stock); [b]Every Texture Optimized[/b] saves VRAM, not frame time; [b]Lugli[/b] and [b]Zed's Better FPS[/b] are ZombieBuddy patches that sit off the per-frame chunk, tree and translucent drawing. This item: 481 / 246 / 456 fps, p99 8.8 / 13.8 / 8.5 ms. Details: docs/results.md.
+All of them measure within noise of stock: [b]Project Zomboid Optimiser[/b] flips engine debug toggles from Lua and swaps shaders for copies; [b]Tempo[/b] budgets chunk finalizing, not the chunk queue wait that is the tail; [b]Multi-Cpu Enhance[/b] is a launcher JSON whose ParallelGC adds a 300 ms pause per route (worse than stock); [b]Every Texture Optimized[/b] saves VRAM, not frame time; [b]Lugli[/b] and [b]Zed's Better FPS[/b] are ZombieBuddy patches that sit off the per-frame chunk, tree and translucent drawing. This item: 481 / 246 / 456 fps, p99 8.8 / 13.8 / 8.5 ms.
 
 [h1]This build[/h1]
 Game revision @REV@ (Build @VERSION@), repository commit @COMMIT@, @NFILES@ files, zip sha256 @SHA@ (same bytes as the GitHub release pzopt-@REV@-classes.zip).
