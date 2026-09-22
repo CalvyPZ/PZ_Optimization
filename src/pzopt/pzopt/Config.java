@@ -422,7 +422,7 @@ public final class Config {
    public static final int OVERLAY_FLAME_DEPTH = integer("overlayFlameDepth", 24); // rows of the flame graph (frames from GameWindow.frameStep up)
    public static final int GAME_THREAD_PROFILE_HZ = integer("gameThreadProfileHz", 100); // game-thread stack samples per second (10..1000); sampling runs when the tree, the flame graph, the detailed verdict or the frame log wants it
    public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent
-   public static final String OVERLAY_FONT = string("overlayFont", "CodeMedium");
+   public static final String OVERLAY_FONT = string("overlayFont", "auto"); // auto = CodeSmall / CodeMedium / CodeLarge by screen height (Overlay.font), or a UIFont name
    public static final String OVERLAY_CORNER = string("overlayCorner", "tl");
    public static final boolean OVERLAY_FPS_COLOR = bool("overlayFpsColor", true); // colour the fps number (see Overlay.fpsColor)
    public static final boolean OVERLAY_FPS_FOLLOW_CAP = bool("overlayFpsFollowCap", true); // thresholds are % of the cap when one is set; else the fixed fps ones

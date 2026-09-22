@@ -324,8 +324,8 @@ local SECTIONS = {
               choices = { "tl", "tr", "bl", "br" },
               tip = "Where the overlay sits: top-left, top-right, bottom-left, bottom-right." },
             { key = "overlayFont", label = "Overlay font",
-              choices = { "CodeMedium", "CodeSmall", "CodeLarge", "Small", "Medium", "Large" },
-              tip = "The UI font the overlay text uses." },
+              choices = { "auto", "CodeMedium", "CodeSmall", "CodeLarge", "Small", "Medium", "Large" },
+              tip = "The UI font the overlay text uses. auto follows the screen height: CodeSmall under 1000 px, CodeMedium under 1800, CodeLarge above. Whatever the font, the panel fits the screen: the frame graph shows fewer frames, the flame graph keeps up to a third of the width (hints and legend are cut to the rest) or moves under the frame graph and long lines are cut when it would not." },
         },
     },
     {

@@ -719,6 +719,13 @@ Every element is a dropdown in the tab's Performance overlay group, off or one o
 `overlayFlameDepth` rows, and `gameThreadProfileHz`. Stack sampling only runs while the tree,
 the flame graph, the detailed verdict or the frame log wants it.
 
+The panel fits the screen it is on. `overlayFont=auto` (the default) picks CodeSmall under 1000 px
+of screen height, CodeMedium under 1800 and CodeLarge above; on a narrow screen the frame graph shows
+fewer frames, the flame column keeps up to a third of the width (the left column's hints and legend are
+cut to the rest; under 360 px it moves under the frame graph), and on a
+short one the flame graph loses rows, then the frame graph flattens or goes, then the tree loses rows.
+Lines that still do not fit end in "...".
+
 "Show the overlay from boot" and "Log every presented frame" in the same group turn sampling
 on too; the log is `Zomboid/pzopt-overlay.out`, one CSV row per presented frame in MangoHud's
 column names plus `gpu_ms`, `game_load`, `render_load`, `epoch_ms`. Every harness run writes
@@ -815,7 +822,7 @@ Full list with comments: [`src/pzopt/pzopt/Config.java`](src/pzopt/pzopt/Config.
 | **Overlay** | | |
 | `overlaySampling` | `false` | measure at all (frame ring, GL timer queries, a sampler thread) |
 | `overlay` / `overlayLog` | `false` / `false` | show the overlay from boot; write `pzopt-overlay.out` (both imply sampling) |
-| `overlayCorner` / `overlayFont` / `overlayKey` | | placement, font and key binding; `overlayFps*` the colour thresholds |
+| `overlayCorner` / `overlayFont` / `overlayKey` | `tl` / `auto` / F9 | placement, font and key binding; `overlayFps*` the colour thresholds |
 | `overlayStats` / `overlayTree` / `overlayVerdict` / `overlayGraph` / `overlayFlame` | `full` / `5` / `detailed` / `240` / `right` | each overlay element, `off` or its size ([Performance overlay](#performance-overlay-f9)) |
 | `overlayFlameDepth` / `gameThreadProfileHz` | `24` / `100` | flame-graph rows above `GameWindow.frameStep`; game-thread stack samples per second (10..1000) |
 

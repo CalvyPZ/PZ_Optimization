@@ -53,7 +53,8 @@ import zombie.ui.UIFont;
  * {@code Zomboid/pzopt-overlay.out}: one CSV row per presented frame in MangoHud's column names
  * (fps, frametime in ms, cpu_load, gpu_load, plus game_load, render_load, gpu_ms, elapsed in ns,
  * epoch_ms), which harness/analyze.py reads like a MangoHud log. {@code overlayFont} picks the
- * UIFont (CodeMedium by default); {@code overlayCorner} one of tl, tr, bl, br.
+ * UIFont ({@code auto} by default: by screen height, see {@link #font}); {@code overlayCorner} one of tl, tr, bl, br.
+ * The panel is fitted to the screen every frame (see {@link #render}): nothing is drawn past its edges.
  *
  * Cost: one nanoTime and a ring write per frame on the render thread, two GL query calls per
  * frame, a stats pass every {@link #REFRESH_NS} on the game thread (sorting at most a few
@@ -679,16 +680,33 @@ public final class Overlay {
       return sorted[Math.max(0, Math.min(sorted.length - 1, i))];
    }
 
+   /**
+    * The overlay font. {@code overlayFont=auto} (the default) follows the screen height: CodeSmall under
+    * 1000 px, CodeMedium under 1800, CodeLarge from there (4K and up), re-picked when the window changes size.
+    */
    private static UIFont font() {
-      if (font == null) {
-         try {
-            font = UIFont.valueOf(Config.OVERLAY_FONT);
-         } catch (IllegalArgumentException e) {
-            font = UIFont.CodeMedium;
+      int screenH = Core.getInstance().getScreenHeight();
+      if (font == null || (fontAuto && screenH != fontScreenH)) {
+         fontScreenH = screenH;
+         String name = Config.OVERLAY_FONT.trim();
+         fontAuto = name.equalsIgnoreCase("auto");
+         if (fontAuto) {
+            font = screenH < 1000 ? UIFont.CodeSmall : screenH < 1800 ? UIFont.CodeMedium : UIFont.CodeLarge;
+         } else {
+            try {
+               font = UIFont.valueOf(name);
+            } catch (IllegalArgumentException e) {
+               font = UIFont.CodeMedium;
+            }
          }
+         labelWidths.clear(); // measured in the previous font
+         steadyLeftW = 0;
       }
       return font;
    }
+
+   private static boolean fontAuto;
+   private static int fontScreenH;
 
    /** The toggle key with sampling off: {@link #NOTICE} in the overlay's corner for {@link #NOTICE_NS}. */
    private static void renderNotice() {
@@ -778,6 +796,8 @@ public final class Overlay {
 
    /** The widest left column drawn since the overlay was shown (see render). */
    private static int steadyLeftW;
+   /** The screen size the layout was last fitted to: a change (window resize, fullscreen toggle) forgets steadyLeftW. */
+   private static int layoutScreenW, layoutScreenH;
 
    /** The stats lines with every number at its widest, so the width does not follow the live digits. */
    private static int statsTemplateWidth(TextManager tm, UIFont font, int fpsW) {
@@ -808,7 +828,7 @@ public final class Overlay {
             + labelWidth(tm, font, "  waiting 88 %") + indent + labelWidth(tm, font, "VisibilityPolygon2$Drawer.calculateVisibilityPolygonNew 88 %");
    }
 
-   /** {@code text} cut with an ellipsis so it measures at most {@code maxW}; empty when even a few characters do not fit. */
+   /** {@code text} cut with "..." so it measures at most {@code maxW}; empty when even a few characters do not fit. */
    private static String fit(TextManager tm, UIFont font, String text, int maxW) {
       if (maxW <= 0) {
          return "";
@@ -819,13 +839,13 @@ public final class Overlay {
       int lo = 0, hi = text.length();
       while (lo < hi) {
          int mid = (lo + hi + 1) / 2;
-         if (tm.MeasureStringX(font, text.substring(0, mid) + "\u2026") <= maxW) {
+         if (tm.MeasureStringX(font, text.substring(0, mid) + "...") <= maxW) {
             lo = mid;
          } else {
             hi = mid - 1;
          }
       }
-      return lo < 4 ? "" : text.substring(0, lo) + "\u2026";
+      return lo < 4 ? "" : text.substring(0, lo) + "...";
    }
 
    /** A section divider across the panel: a gap, a faint 1 px line, a gap; returns the y below it. */
@@ -851,8 +871,37 @@ public final class Overlay {
       UIFont font = font();
       int lineH = tm.getFontHeight(font);
       int pad = 8;
+      // responsive: the panel keeps inside the screen (10 px margin); a new screen size forgets the steady width
+      int screenW = Core.getInstance().getScreenWidth();
+      int screenH = Core.getInstance().getScreenHeight();
+      if (screenW != layoutScreenW || screenH != layoutScreenH) {
+         layoutScreenW = screenW;
+         layoutScreenH = screenH;
+         steadyLeftW = 0;
+      }
+      int availW = Math.max(200, screenW - 20);
+      int availH = Math.max(100, screenH - 20);
+      int maxTextW = availW - pad * 2;
+      int div = pad * 2 + 1; // a divider: a gap, the 1 px line, a gap
+      // the flame graph sits in a column to the right of everything (overlayFlame=right / right-wide, 900 / 1400 px)
+      // or under the frame graph across the panel (below). The column is reserved first, up to a third of the
+      // screen, and the left column's hints and legend are cut to the rest; under 360 px it goes below instead
+      java.util.List<FlameBox> flame = flameBoxes;
+      String fTitle = flameTitle;
+      int flameRows = flame.isEmpty() ? 0 : flameDepth;
+      int flameRowH = lineH;
+      String flamePos = Config.OVERLAY_FLAME.trim().toLowerCase(java.util.Locale.ROOT);
+      boolean flameRight = flameRows > 0 && !flamePos.equals("below");
+      int flameWant = flamePos.equals("right-wide") ? 1400 : 900;
+      if (flameRight) {
+         int reserve = Math.min(flameWant, availW / 3);
+         if (reserve < 360) {
+            flameRight = false;
+         } else {
+            maxTextW = availW - div - pad - reserve - pad * 2;
+         }
+      }
       int graphH = lineH * 4;
-      int graphW = GRAPH_BARS * 2;
       int textW = 0;
       int fpsW = fpsText.isEmpty() ? 0 : tm.MeasureStringX(font, fpsText);
       for (int i = 0; i < lines.length; i++) {
@@ -864,7 +913,7 @@ public final class Overlay {
       java.util.List<GameThreadProfile.Row> tree = profileRows;
       int indent = tm.MeasureStringX(font, "    ");
       int pctW = tm.MeasureStringX(font, "100 %  ");
-      int barW = Math.min(graphW, 140);
+      int barW = Math.min(GRAPH_BARS * 2, 140);
       String[] treeName = new String[tree.size()];
       String[] treePct = new String[tree.size()];
       String[] treeWait = new String[tree.size()];
@@ -874,7 +923,7 @@ public final class Overlay {
          textW = Math.max(textW, tm.MeasureStringX(font, header));
       }
       // a tree row never grows past this: the hint is cut to fit, so the panel width does not follow the names
-      int treeRowMax = treeRowWidth(tm, font, indent, barW, pctW, pad);
+      int treeRowMax = Math.min(treeRowWidth(tm, font, indent, barW, pctW, pad), maxTextW);
       for (int i = 0; i < tree.size(); i++) {
          GameThreadProfile.Row r = tree.get(i);
          treeName[i] = r.name;
@@ -893,8 +942,14 @@ public final class Overlay {
          yTicks[i] = i == 0 ? "0" : String.format(java.util.Locale.ROOT, i == 3 ? "%.1f ms" : "%.1f", budgetMs * i);
       }
       int axisW = tm.MeasureStringX(font, yTicks[3]) + pad;
+      // a narrow screen shows fewer frames (2 px each) rather than a graph past the screen edge; under 60 none
+      int graphBars = Math.min(GRAPH_BARS, (maxTextW - axisW) / 2);
+      if (graphBars < 60) {
+         graphBars = 0;
+      }
+      int graphW = graphBars * 2;
       int hd = head;
-      int bars = Math.min(GRAPH_BARS, Math.min(hd, RING - 64));
+      int bars = Math.min(graphBars, Math.min(hd, RING - 64));
       float spanMs = 0f;
       for (int i = 0; i < bars; i++) {
          spanMs += frameMs[(hd - bars + i) & (RING - 1)];
@@ -904,10 +959,10 @@ public final class Overlay {
       String xLabel = String.format(java.util.Locale.ROOT, "last %d frames (%.2f s), oldest to newest", bars, spanMs / 1000f);
       String legend1 = String.format(java.util.Locale.ROOT, "bars: frame ms, green under 1.1x the %.2f ms budget, amber under 2x, red above; blue: GPU ms; line: the budget", budgetMs);
       String legend2 = "";
-      boolean graphOn = GRAPH_BARS > 0;
+      boolean graphOn = graphBars > 0;
       int legendW = graphOn ? tm.MeasureStringX(font, legend1) : 0;
       int graphBlockW = axisW + graphW;
-      if (graphOn && legendW > Math.max(graphBlockW, textW)) {
+      if (graphOn && legendW > Math.min(Math.max(graphBlockW, textW), maxTextW)) {
          int cut = legend1.indexOf("; blue");
          legend2 = legend1.substring(cut + 2);
          legend1 = legend1.substring(0, cut);
@@ -916,47 +971,71 @@ public final class Overlay {
       if (graphOn) {
          textW = Math.max(textW, Math.max(graphBlockW, Math.max(axisW + tm.MeasureStringX(font, "last 9999 frames (99.99 s), oldest to newest"), legendW)));
       }
-      java.util.List<FlameBox> flame = flameBoxes;
-      String fTitle = flameTitle;
-      int flameRows = flame.isEmpty() ? 0 : flameDepth;
-      int flameRowH = lineH;
-      // the flame graph sits in a column to the right of everything (overlayFlame=right / right-wide, 900 / 1400 px)
-      // or under the frame graph across the panel (below)
-      String flamePos = Config.OVERLAY_FLAME.trim().toLowerCase(java.util.Locale.ROOT);
-      boolean flameRight = flameRows > 0 && !flamePos.equals("below");
-      int flameH = flameRows > 0 ? lineH + flameRows * flameRowH : 0; // title + rows
-      int flameColW = 0;
-      if (flameRight) {
-         flameColW = Math.max(flamePos.equals("right-wide") ? 1400 : 900, tm.MeasureStringX(font, fTitle));
-      } else if (flameRows > 0) {
+      if (flameRows > 0 && !flameRight) {
          textW = Math.max(textW, tm.MeasureStringX(font, fTitle));
       }
       // the stats lines vary by a digit or two between refreshes: measure them against widest-digit templates,
       // and keep the widest left column seen while the overlay is visible (reset when it is toggled) so
-      // nothing shifts frame to frame
-      textW = Math.max(textW, statsTemplateWidth(tm, font, fpsW));
+      // nothing shifts frame to frame; never wider than the screen (the lines are cut to fit when drawn)
+      textW = Math.min(maxTextW, Math.max(textW, statsTemplateWidth(tm, font, fpsW)));
       int leftW = Math.max(textW, graphOn ? graphW : 0) + pad * 2;
       if (leftW < steadyLeftW) {
          leftW = steadyLeftW;
       } else {
          steadyLeftW = leftW;
       }
-      // sections separated by dividers: frame stats | game-thread tree | verdict | frame graph | flame graph (below)
-      int div = pad * 2 + 1; // a divider: a gap, the 1 px line, a gap
-      int treeRowsReserved = header.isEmpty() ? 0 : 1 + treeRowsReserved(); // fixed once a save is loaded
-      int leftH = pad + lines.length * lineH
-            + (header.isEmpty() ? 0 : div + treeRowsReserved * lineH)
-            + (verdict.isEmpty() ? 0 : div + lineH)
-            + (graphOn ? div + lineH / 2 + graphH + 2 + lineH * (legend2.isEmpty() ? 2 : 3) : 0)
-            + (flameRows > 0 && !flameRight ? div + flameH : 0)
-            + pad;
+      leftW = Math.min(leftW, maxTextW + pad * 2);
+      // the flame column: what the screen has left beside the left column (at least the reserve), up to 900 / 1400 px
+      int flameColW = 0;
+      if (flameRight) {
+         flameColW = Math.min(flameWant, availW - leftW - div - pad);
+         if (flameColW < 300) {
+            flameRight = false;
+            flameColW = 0;
+         }
+      }
+      // sections separated by dividers: frame stats | game-thread tree | verdict | frame graph | flame graph (below).
+      // Too tall for the screen: fewer flame rows (down to 6), a flatter frame graph, no flame graph, no frame
+      // graph, then fewer tree rows, in that order
+      int treeRows = header.isEmpty() ? 0 : 1 + treeRowsReserved(); // header + rows, fixed once a save is loaded
+      int legendLines = legend2.isEmpty() ? 2 : 3;
+      int leftH, h;
+      while (true) {
+         leftH = pad + lines.length * lineH
+               + (treeRows == 0 ? 0 : div + treeRows * lineH)
+               + (verdict.isEmpty() ? 0 : div + lineH)
+               + (graphOn ? div + lineH / 2 + graphH + 2 + lineH * legendLines : 0)
+               + (flameRows > 0 && !flameRight ? div + lineH + flameRows * flameRowH : 0)
+               + pad;
+         int flameColH = flameRight && flameRows > 0 ? pad + lineH + flameRows * flameRowH + pad : 0;
+         h = Math.max(leftH, flameColH);
+         if (h <= availH) {
+            break;
+         }
+         boolean flameTooTall = flameRows > 0 && (!flameRight || flameColH > availH);
+         if (flameTooTall && flameRows > 6) {
+            flameRows--;
+         } else if (flameTooTall) {
+            flameRows = 0;
+         } else if (graphOn && graphH > lineH * 2) {
+            graphH = lineH * 2;
+         } else if (graphOn) {
+            graphOn = false;
+         } else if (treeRows > 1) {
+            treeRows--;
+         } else {
+            break; // the stats alone: draw what fits
+         }
+      }
       if (leftH <= pad * 2 && flameRows == 0) {
          return; // every element off: nothing to draw
       }
+      if (flameRows == 0) {
+         flameRight = false;
+         flameColW = 0;
+      }
+      int flameH = flameRows > 0 ? lineH + flameRows * flameRowH : 0; // title + rows
       int w = leftW + (flameRight ? div + flameColW + pad : 0);
-      int h = flameRight ? Math.max(leftH, pad + flameH + pad) : leftH;
-      int screenW = Core.getInstance().getScreenWidth();
-      int screenH = Core.getInstance().getScreenHeight();
       String corner = Config.OVERLAY_CORNER;
       int x = corner.endsWith("r") ? screenW - w - 10 : 10;
       int y = corner.startsWith("b") ? screenH - h - 10 : 10;
@@ -969,15 +1048,15 @@ public final class Overlay {
             tm.DrawString(font, tx, ty, fpsText, fpsColor[0], fpsColor[1], fpsColor[2], 1.0);
             tx += fpsW;
          }
-         tm.DrawString(font, tx, ty, lines[i], 1.0, 1.0, 1.0, 1.0);
+         tm.DrawString(font, tx, ty, fit(tm, font, lines[i], leftW - pad * 2 - (tx - x - pad)), 1.0, 1.0, 1.0, 1.0);
          ty += lineH;
       }
       if (!header.isEmpty()) {
          ty = divider(sr, x, ty, leftW, pad);
-         tm.DrawString(font, x + pad, ty, header, 1.0, 1.0, 1.0, 1.0);
+         tm.DrawString(font, x + pad, ty, fit(tm, font, header, leftW - pad * 2), 1.0, 1.0, 1.0, 1.0);
          ty += lineH;
       }
-      for (int i = 0; i < tree.size(); i++) {
+      for (int i = 0; i < Math.min(tree.size(), treeRows - 1); i++) {
          GameThreadProfile.Row r = tree.get(i);
          float[] c = r.color;
          int bx = x + pad + indent * (r.depth + 1);
@@ -1004,7 +1083,7 @@ public final class Overlay {
       }
       if (!verdict.isEmpty()) {
          ty = divider(sr, x, ty, leftW, pad);
-         tm.DrawString(font, x + pad, ty, verdict, verdictColor[0], verdictColor[1], verdictColor[2], 1.0);
+         tm.DrawString(font, x + pad, ty, fit(tm, font, verdict, leftW - pad * 2), verdictColor[0], verdictColor[1], verdictColor[2], 1.0);
          ty += lineH;
       }
       // frame-time bars: newest on the right, budget line at one third, 3x budget at the top;
@@ -1038,12 +1117,12 @@ public final class Overlay {
          }
       }
       sr.renderi(null, gx, gy + graphH, graphW, 1, 1f, 1f, 1f, 0.5f, null); // x axis
-      tm.DrawString(font, gx, gy + graphH + 2, xLabel, 0.8, 0.8, 0.8, 1.0);
+      tm.DrawString(font, gx, gy + graphH + 2, fit(tm, font, xLabel, leftW - pad * 2 - axisW), 0.8, 0.8, 0.8, 1.0);
       ty = gy + graphH + 2 + lineH;
-      tm.DrawString(font, x + pad, ty, legend1, 0.7, 0.7, 0.7, 1.0);
+      tm.DrawString(font, x + pad, ty, fit(tm, font, legend1, leftW - pad * 2), 0.7, 0.7, 0.7, 1.0);
       ty += lineH;
       if (!legend2.isEmpty()) {
-         tm.DrawString(font, x + pad, ty, legend2, 0.7, 0.7, 0.7, 1.0);
+         tm.DrawString(font, x + pad, ty, fit(tm, font, legend2, leftW - pad * 2), 0.7, 0.7, 0.7, 1.0);
          ty += lineH;
       }
       }
@@ -1062,14 +1141,14 @@ public final class Overlay {
             fx = x + pad;
             fw = leftW - pad * 2;
          }
-         tm.DrawString(font, fx, ty, fTitle, 1.0, 1.0, 1.0, 1.0);
+         tm.DrawString(font, fx, ty, fit(tm, font, fTitle, fw), 1.0, 1.0, 1.0, 1.0);
          ty += lineH;
          int bottom = ty + flameRows * flameRowH;
          sr.renderi(null, fx, ty, fw, flameRows * flameRowH, 0f, 0f, 0f, 0.6f, null); // darker backing: the boxes read against the world
          for (FlameBox b : flame) {
             int bx = fx + Math.round(b.x0 * fw);
             int bw = Math.round(b.x1 * fw) - Math.round(b.x0 * fw);
-            if (bw < 3) {
+            if (bw < 3 || b.depth >= flameRows) {
                continue; // one quad per box every frame: the overlay's own cost shows up as "overlay" in the tree
             }
             int by = bottom - (b.depth + 1) * flameRowH;
