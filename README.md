@@ -58,6 +58,7 @@ machine you play on.
 4. [Settings](#settings)
    - [Options > Optimizations](#options--optimizations)
    - [Frame cap: Uncapped, 300 to 500 fps, menu framerate](#frame-cap-uncapped-300-to-500-fps-menu-framerate)
+   - [Upscaling: FSR 1.0 and DLSS](#upscaling-fsr-10-and-dlss)
    - [Performance overlay (F9)](#performance-overlay-f9)
    - [`pzopt.properties` and the key table](#pzoptproperties-and-the-key-table)
 5. [How the optimizations work](#how-the-optimizations-work)
@@ -522,9 +523,11 @@ page lighting updates 10/s and the UI redrawn 30/s — 120 km/h drive 44 → 68 
 (`config/launcher/ProjectZomboid64.g1.json`): the stock ZGC stalls the game for seconds on
 four cores.
 Below come titled groups: chunk textures (what bakes, bake budgets), cutaways / lighting /
-weather, sprite buffers, chunk streaming, boot, world load, performance overlay. Tick boxes
-are on/off switches; combos hold the numeric budgets and thread counts, with the default on
-your machine as the first entry. Hover a control for what it does and its key name. Changes
+weather, sprite buffers, multiplayer, performance overlay (one dropdown per overlay element:
+statistics, game-thread tree, verdict, frame graph, flame graph, plus the sampler rate and the
+fps-colour thresholds), chunk streaming, boot (threads and caches, parsers), world load (file
+system and decoding, loading screen). Tick boxes are on/off switches; combos hold the numeric
+budgets, thread counts and element sizes, with the default on your machine as the first entry. Hover a control for what it does and its key name. Changes
 apply on the next launch (the game shows its usual restart dialog) and are kept in
 `Zomboid/pzopt/options.ini`; "Default" removes the key again. A key pinned in
 `pzopt.properties` shows as a disabled control whose tooltip names the file.
@@ -558,6 +561,38 @@ about 40 % uncapped on the desktop.
 
 ![Options > Display & Performance with the extended Lock Framerate combo and the Menu framerate combo](docs/media/options-display-tab.jpg)
 
+### Upscaling: FSR 1.0 and DLSS
+
+Options > Optimizations > **Upscaling** renders the world at a fraction of the screen size and
+scales it back up before the UI, the world text, the cursor and the game's own screen shader, which
+stay at full resolution (keys `upscaler`, `upscalerQuality`, `upscalerScalePct`, `fsrSharpnessPct`,
+`dlssPreset`, `upscalerObjectMv`; off by default, applied on the next launch).
+
+| `upscaler` | What runs | Where |
+|---|---|---|
+| `fsr1` | AMD FidelityFX Super Resolution 1.0 (EASU + RCAS, MIT) as GLSL passes on the low-res frame | every GPU, Linux / Windows / macOS |
+| `dlss` | NVIDIA DLSS Super Resolution: a Vulkan device runs NGX on the GPU the game's GL context uses, sharing the colour / depth / motion-vector images and the output through `GL_EXT_memory_object` + `GL_EXT_semaphore`; the world is drawn with a sub-pixel jitter (a float viewport offset), the camera's motion and each character's and vehicle's own motion (stencil ids) go in as motion vectors | RTX cards; Linux now (`natives/libpzopt_ngx64.so` + the DLSS library from NVIDIA's SDK), Windows once the shim DLL is built with MSVC (`src/native/README.md`). The release zip and the Workshop item ship no natives (decided 2026-09-22: 58 MB of NVIDIA's library, Windows cannot use the .so, the Workshop bans the extension): build them yourself with `scripts/build.sh` and the SDK checkout; anything that cannot run continues as `fsr1` |
+| `bicubic` | the stock screen shader's bicubic filter stretches the low-res frame | every GPU (the plain baseline) |
+| `xess` | Intel XeSS: not written yet (Windows-only SDK); runs as `fsr1` | – |
+
+`upscalerQuality`: quality 67 % per axis, balanced 58 %, performance 50 %, ultra 33 %, native 100 %
+(dlss: DLAA). The 120 km/h drive at 5120x2160, uncapped, one build (runs `ups-*-p-3/4`, `ups-dlss-f-1`,
+2026-09-22):
+
+| Mode | fps, mean | Frame time p50 / p99 | Notes |
+|---|---|---|---|
+| off | 509 | 1.5 / 7.7 ms | the GPU is the wall (96-98 % busy) |
+| bicubic 50 % | 676 | 1.1 / 6.2 ms | soft |
+| fsr1 50 % | 619 | 1.2 / 6.4 ms | EASU + RCAS ≈ 0.14 ms a frame at 4K |
+| dlss 50 %, transformer (default) | 232 | 3.7 / 12.2 ms | the DLSS 4 model costs ~2.5 ms a frame at 5120x2160 output on a 4090; the best image (1-px power lines and car lettering come back) |
+| dlss 50 %, `dlssPreset=f` (convolutional) | 377 | 2.2 / 9.2 ms | a third of the cost at 1440p and below |
+
+The visual-parity watch (recorded pairs against an `upscaler=off` twin, `harness/parity-judge.py` +
+`colorshift.py`) passed all four: a steady softening at 50 % and nothing that flickers, ghosts or
+shifts colour; the DLSS pair on the spinning bench route (zombies, spinning player) had transients at
+0.98x the control. The GPU stays saturated at 50 %: the chunk bakes and the composite are not
+screen-pixel work, so the gain is the world pass's share. Plan and seam: `docs/plan-upscalers.md`.
+
 ### Performance overlay (F9)
 
 Tick **"Sample frame times and utilization"** in the Performance overlay group of the tab,
@@ -576,14 +611,36 @@ in the menus, on the loading screen and in the world, with no MangoHud or RivaTu
 - **Utilization**: GPU busy share (a GL timer query around the frame's draw commands),
   game-thread and render-thread load as a share of one core, the process's and the machine's
   share of all cores, the heap.
+- **Game-thread tree**: *what* the game thread is doing, from its call stack sampled 100 times
+  a second on a background thread (`pzopt.GameThreadProfile`; a sample stops the thread for tens
+  of microseconds): the phases (update / render / lighting) with their share of the time, under
+  each the biggest sub-phases and hot methods (chunk bakes, lighting JNI, player, zombies, the
+  frame hand-off wait to the render thread), biggest first, a bar per row, waits in red.
 - **Verdict**: "at the cap", "below cap: game thread / render thread / GPU bound", or "below
-  cap, nothing saturated: waits or sync" — the case worth reporting.
-- **Graph**: the last 240 frames as bars, the cap's budget as a line, the GPU time in blue.
+  cap, nothing saturated: waits or sync" — the case worth reporting. When it is the game thread
+  the detailed verdict names the two biggest sub-phases from the tree.
+- **Graph**: the last 240 frames as bars with ms ticks, the cap's budget as a line, the GPU time
+  in blue.
+- **Flame graph**: the last 5 s of the same stack samples, root (`GameWindow.frameStep`) at the
+  bottom, callees above, width = share of the time, siblings biggest first from the left; update
+  green, render blue, lighting amber, pzopt frames magenta.
+
+Every element is a dropdown in the tab's Performance overlay group, off or one of its sizes:
+`overlayStats` (fps / tails / full), `overlayTree` (0 to 8 sub-phases per phase),
+`overlayVerdict` (short / detailed), `overlayGraph` (240 / 480 / 960 frames), `overlayFlame`
+(a 900 or 1400 px column beside the statistics, or below the frame graph) with
+`overlayFlameDepth` rows, and `gameThreadProfileHz`. Stack sampling only runs while the tree,
+the flame graph, the detailed verdict or the frame log wants it.
 
 "Show the overlay from boot" and "Log every presented frame" in the same group turn sampling
 on too; the log is `Zomboid/pzopt-overlay.out`, one CSV row per presented frame in MangoHud's
 column names plus `gpu_ms`, `game_load`, `render_load`, `epoch_ms`. Every harness run writes
-it and `harness/analyze.py` reports it as `overlay:`.
+it and `harness/analyze.py` reports it as `overlay:`. The game-thread profile is logged next to
+it: `pzopt-gamethread.out` (per-second phase, sub-phase, hot-method and wait shares; `analyze.py`
+prints the route's as `game thread:`) and `pzopt-stacks.out` (the folded stacks), from which
+`harness/flamegraph.py <run>` renders the whole route as a self-contained SVG flame graph
+(hover for the share, click to zoom, a search box; `--folded` writes the classic `a;b;c count`
+format for other tools).
 
 ### `pzopt.properties` and the key table
 
@@ -646,6 +703,11 @@ Full list with comments: [`src/pzopt/pzopt/Config.java`](src/pzopt/pzopt/Config.
 | `weatherFxScalePct` | `100` | weather mask and particle buffers at this share of the screen size (a wash at 50) |
 | `fogPass` | `true` | heavy fog in one draw call into a scaled fog buffer, depth-aware composite (experimental) |
 | `fogScalePct` / `fogMaskFrames` | `25` / `20` | fog buffer size per axis in % of the screen (100 = per-pixel depth); refresh period of the per-chunk fog masks (`0` = stock walk every frame) |
+| `upscaler` | `off` | `bicubic` / `fsr1` / `dlss` / `xess`: the world renders at `upscalerQuality`'s fraction of the screen and is resolved back before the UI and the screen shader (dlss / xess that cannot run continue as fsr1) |
+| `upscalerQuality` / `upscalerScalePct` | `quality` / `0` | quality 67 %, balanced 58 %, performance 50 %, ultra 33 %, native 100 % per axis; or an explicit percentage (10-100) |
+| `fsrSharpnessPct` | `80` | FSR 1.0 RCAS sharpening, 100 = the sharpest |
+| `dlssPreset` / `upscalerObjectMv` | `default` / `true` | the DLSS model (default = NVIDIA's transformer presets, `f` / `e` the older convolutional ones); characters and vehicles write their own motion vectors |
+| `dlssJitter` / `dlssJitterSign` / `dlssMvSign` / `dlssDepthInverted` | `true` / `1` / `1` / `false` | dlss A/Bs: the sub-pixel jitter, its sign, the motion-vector sign, the depth convention |
 | **Game thread** | | |
 | `lightSwitchCheckFrames` | `15` | a light switch reuses its has-electricity answer this many frames (`0` = stock) |
 | `soundZoneCache` | `true` | ambient zone parameters reuse their zone scan while the listener's square is unchanged |
@@ -667,6 +729,8 @@ Full list with comments: [`src/pzopt/pzopt/Config.java`](src/pzopt/pzopt/Config.
 | `overlaySampling` | `false` | measure at all (frame ring, GL timer queries, a sampler thread) |
 | `overlay` / `overlayLog` | `false` / `false` | show the overlay from boot; write `pzopt-overlay.out` (both imply sampling) |
 | `overlayCorner` / `overlayFont` / `overlayKey` | | placement, font and key binding; `overlayFps*` the colour thresholds |
+| `overlayStats` / `overlayTree` / `overlayVerdict` / `overlayGraph` / `overlayFlame` | `full` / `5` / `detailed` / `240` / `right` | each overlay element, `off` or its size ([Performance overlay](#performance-overlay-f9)) |
+| `overlayFlameDepth` / `gameThreadProfileHz` | `24` / `100` | flame-graph rows above `GameWindow.frameStep`; game-thread stack samples per second (10..1000) |
 
 ---
 
@@ -1022,6 +1086,7 @@ python3 harness/analyze.py harness/runs/spin-*            # frame tail + utiliza
 python3 harness/compare.py harness/runs/spin-stock-* harness/runs/spin-opt-*
 python3 harness/loadtime.py harness/runs/<run>            # boot and load phases
 python3 harness/gametree.py harness/runs/<jfr-run>        # game-thread call tree (--jfr --jfr-period 1)
+python3 harness/flamegraph.py harness/runs/<run>          # the route as an SVG flame graph (pzopt-stacks.out)
 python3 harness/dashboard.py                              # docs/benchmark-progress.html
 ```
 
@@ -1029,6 +1094,41 @@ python3 harness/dashboard.py                              # docs/benchmark-progr
 and triple videos above; `--prop gpuSections=true` logs GPU time per frame section. Steam
 launches need the launch options set to `<repo>/harness/steam-launch.sh %command%`;
 `--launcher direct` starts the native game itself.
+
+**Run queue** (`harness/queue.sh`). The game folder, the display and the Steam client are one
+shared resource per machine, so runs are submitted to a FIFO instead of launched by hand: one
+worker per machine (`desktop`, and the laptops `flip`, `dell`, `mac` over a monitored ssh
+connection, `harness/queue/machines.conf`) waits for a game, a `run.sh` or an encode started
+outside the queue and for the desktop to be unlocked, installs the build the job asks for
+(`--install opt|stock`), runs it, syncs a laptop's run folder back to
+`harness/runs/<machine>-<label>-<ts>/` and analyses it here. Media jobs (encodes, stitches, GIF
+renders) share the desktop FIFO, so an encode never overlaps a measurement. `watch` and `events`
+report a laptop dropping off or a job ending; every job ends in a `result.txt` with the exit code,
+route completion, resolution and OpenGL lines, `analyze.py`'s card, console errors and a verdict.
+
+```sh
+harness/queue.sh submit run --goal "spin: p99 under 8 ms with the GPU saturated" \
+  --against harness/runs/spin-stock-* --wait -- --label spin-opt --mode bench --flag route=S:450 \
+  --flag turn=90 --route-seconds 25 --flag zoom=max --prop uncappedFps=true --no-mangohud --no-dashboard --launcher direct
+harness/queue.sh submit run --machine flip --install opt -- --label drive-flip --mode drive --flag zoom=max ...
+harness/queue.sh submit media --wait --label sbs -- harness/stitch-sbs.sh ...      # encodes queue behind the runs
+harness/queue.sh list | status | wait | result | log -f | cancel <id|label> | machines | events
+```
+
+**Verdicts by Jev.** The arithmetic is code, the judgement is a TypeSafe (Jev) classifier, so a
+script can gate on it. `harness/judge.py <run> --goal "..." --against <run|baseline.json>` builds
+the run's frame-tail / utilization card and its deltas against each reference with `compare.py`'s
+per-metric noise floors (a delta is real past twice the floor); Jev answers typed questions over
+that card and the goal text — `verdict=achieved|partial|no_change|regressed|invalid`, `goal_met`,
+`tail_regressed`, `setup_matches_goal`, `headroom_finding` (the objective's "below the cap and
+nothing saturated") — into `<run>/judge.json`, exit 0 only for `achieved`. `harness/parity-judge.py
+<A> <B>` does the same for visual parity between two recordings (transient px/frame, black
+squares, luma pops, per screen cell with the HUD corners named): `parity=parity|hud_only|flicker|
+black_tiles|lighting_pops|...` and whether a person should look. `harness/ui-drive.py` drives the
+game's own menus the same way (screenshot → OCR → Jev picks the control; the Workshop upload runs
+through it as a `workshop` queue job). Jev never sees pixels or raw logs, only the numbers the
+scripts computed. The key comes from `$TYPESAFE_API_KEY` or `~/.config/pzopt/typesafe.key`; without
+one the queue still runs and the result carries the card without a verdict.
 
 **Windows** (`harness/run-win.ps1`): runs the bench through Steam, samples CPU and GPU load
 with `Get-Counter` and `nvidia-smi`; the frame-time tail comes from the overlay log and the
@@ -1053,7 +1153,7 @@ python harness\analyze.py harness\runs\bench-opt-*
 | `src/lua/` | The Optimizations tab and frame-cap options Lua, installed under `media/lua/client/pzopt/` |
 | `install.sh`, `install.ps1` | Standalone installers (Linux, Windows); attached to every release and shipped in the Workshop item |
 | `scripts/` | `build.sh`, `pzopt.sh`, `release.sh` (release zip + GitHub release), `workshop.sh` (Workshop staging), `test.sh`, `accept.sh`, `regen-overrides.sh`, `decompile.sh`, `pz-env.sh` |
-| `harness/` | `run.sh` (Linux) and `run-win.ps1` (Windows), analysis and stitch scripts, `parity-gate.sh`, the `pzopt-harness` Lua mod, bench save template, `baseline/` captures |
+| `harness/` | `run.sh` (Linux) and `run-win.ps1` (Windows), `queue.sh` (the per-machine run queue, `queue/machines.conf`), analysis and stitch scripts, `flamegraph.py`, the Jev judges (`judge.py`, `parity-judge.py`, `ui-drive.py`, `typesafe_client.py`), `parity-gate.sh`, the `pzopt-harness` Lua mod, bench save template, `baseline/` captures |
 | `config/` | MangoHud profiles, the tuned G1 launcher JSON |
 | `tools/` | Standalone Java probes (JFR sample dump, GLFW swap probe, static audit) |
 | `tests/` | JVM-only unit tests (`scripts/test.sh`) |

@@ -3,7 +3,7 @@
 #
 #   scripts/pzopt.sh install     copy build/classes/ into the game directory
 #   scripts/pzopt.sh uninstall   remove exactly the files install wrote
-#   scripts/pzopt.sh reinstall   uninstall then install (after a rebuild)
+#   scripts/pzopt.sh reinstall   uninstall then install (after a rebuild); refuses before touching anything when nothing is built
 #   scripts/pzopt.sh status      report installed/not, file list, target build
 #   scripts/pzopt.sh check       run the preflight checks only
 #
@@ -162,7 +162,7 @@ status() {
 case "${1:-}" in
   install)   install_overrides ;;
   uninstall) uninstall_overrides ;;
-  reinstall) uninstall_overrides; install_overrides ;;
+  reinstall) check >/dev/null; uninstall_overrides; install_overrides ;;  # check first: a failed check must leave the old install in place
   status)    status ;;
   check)     check ;;
   *) echo "usage: $0 install|uninstall|reinstall|status|check" >&2; exit 2 ;;

@@ -128,6 +128,7 @@ public final class GameThreadProfile {
       {"zombie.iso.fboRenderChunk.FBORenderCell", "renderMovingObjects", "characters draw"},
       {"zombie.iso.fboRenderChunk.FBORenderCell", "renderMovingObject", "characters draw"},
       {"zombie.iso.fboRenderChunk.FBORenderCell", "renderPlayer", "characters draw"},
+      {"pzopt.CharDraw", null, "characters draw"}, // the pre-pass: walk hand-off, the visibility test, the join wait
       {"zombie.iso.fboRenderChunk.FBORenderChunkManager", "endFrame", "chunk composite"},
       {"zombie.iso.fboRenderChunk.FBORenderChunk", "renderInWorldMainThread", "chunk composite"},
       {"zombie.iso.fboRenderChunk.FBORenderCell", "prepareChunksForUpdating", "prepare chunks"},

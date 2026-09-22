@@ -44,7 +44,21 @@ import zombie.iso.weather.ClimateManager;
  *       ignore the player, is what {@code LightingJNI.playerSet} receives as ghost mode). Not needed for the
  *       torch: the beam draws with the invisible player too (seen live on every night-torch run of
  *       2026-09-20); it only never shows in the {@code --shot-at} captures, which hold the player still for
- *       2 s first.</li>
+ *       2 s first;</li>
+ *   <li>{@code helicopter=true} — the stock helicopter meta event ({@code IsoWorld.helicopter.setTarget(player)}) at the
+ *       route start, moved next to the player at once (stock spawns it 1000 tiles out and it takes ~60 s to arrive),
+ *       so it hovers / searches over the route for its 60 s and adds its 500-radius world sound at the stock random
+ *       cadence (~every 10 s) from wherever it is, a moving big source. A state line every 5 s;
+ *       {@code helicopter=} in pzopt-bench.out with the {@code devWorldSoundTiming} big-sound bucket, which on the
+ *       bench route (no vehicles) is exactly the helicopter's calls;</li>
+ *   <li>{@code sound=R} — a stock world sound of radius R (volume R, no source) every {@code sound_every}
+ *       frames (default 1: what {@code zombie.iso.Alarm.update} does for the ~49 s a house alarm rings, at 600)
+ *       from the player's square, or from the square of the first call with {@code sound_fixed=true} (a
+ *       ringing alarm sits still; the memo in the FishSchoolManager override only helps a still source).
+ *       {@code addSound} is timed on the game thread; {@code sound_parts=true} also times its two public
+ *       sub-steps with an extra call each (the fish-scaring walk, the native population scan). A summary line
+ *       every 5 s in the console and {@code sound_stats=} in pzopt-bench.out. Rig of 2026-09-22, runs
+ *       {@code sound-*}.</li>
  * </ul>
  * Unset keys leave the save as it is. Nothing here is written back: runs use the bench save copy.
  */
@@ -64,6 +78,17 @@ public final class Scene {
    private static InventoryItem torchItem;
    private static long lastTorchLogNs;
    private static java.lang.reflect.Field jniActiveTorches;
+   // sound=R: a world sound of radius R (volume R) at the player's square every sound_every frames (default 1,
+   // the stock house-alarm pattern: Alarm.update() adds a 600-radius sound each frame for ~49 s), timed per call;
+   // sound_parts=true also times the two public sub-steps on their own (extra calls, only for the breakdown)
+   private static int soundRadius;
+   private static int soundEvery = 1;
+   private static boolean soundParts;
+   private static boolean soundFixed;
+   private static boolean helicopter;
+   private static long lastHeliLogNs; // sound_fixed=true: every call from the square of the first one (a house alarm), not the moving player
+   private static int soundX = Integer.MIN_VALUE, soundY;
+   private static long soundFrames, soundCalls, soundTotalNs, soundMaxNs, soundFishNs, soundPopNs, soundFishMaxNs, soundPopMaxNs, lastSoundLogNs;
 
    private Scene() {
    }
@@ -82,6 +107,15 @@ public final class Scene {
          population = 0f;
       }
       seeAll = Boolean.parseBoolean(HarnessFlags.get("see_all", "false"));
+      soundRadius = Integer.parseInt(HarnessFlags.get("sound", "0").trim());
+      soundEvery = Math.max(1, Integer.parseInt(HarnessFlags.get("sound_every", "1").trim()));
+      soundParts = Boolean.parseBoolean(HarnessFlags.get("sound_parts", "false"));
+      soundFixed = Boolean.parseBoolean(HarnessFlags.get("sound_fixed", "false"));
+      helicopter = Boolean.parseBoolean(HarnessFlags.get("helicopter", "false"));
+      if (soundRadius > 0) {
+         Log.info("harness: sound=" + soundRadius + " every " + soundEvery + " frame(s) from the player's square, hearing="
+               + zombie.SandboxOptions.instance.lore.hearing.getValue() + " (1=pinpoint x3, 2=normal x1, 3=poor x0.45)" + (soundParts ? ", parts timed" : "") + (soundFixed ? ", fixed square" : ""));
+      }
       if (!requested()) {
          return;
       }
@@ -195,6 +229,13 @@ public final class Scene {
       if (zombiesOff) {
          removeZombies();
       }
+      if (soundRadius > 0) {
+         fireSound(p, nowNs);
+      }
+      if (helicopter && nowNs - lastHeliLogNs >= 5_000_000_000L) {
+         lastHeliLogNs = nowNs;
+         Log.info("harness: helicopter " + helicopterState());
+      }
       if (!torch.isEmpty() && nowNs - lastTorchLogNs >= 5_000_000_000L) {
          lastTorchLogNs = nowNs;
          Log.info("harness: torch check: player strength " + p.getTorchStrength() + " dist " + p.getLightDistance() + " cone " + p.isTorchCone()
@@ -224,6 +265,58 @@ public final class Scene {
             cm.getThunderStorm().triggerThunderEvent((int)p.getX() + 60, (int)p.getY() - 60, true, true, true);
          }
       }
+   }
+
+   /** sound=R: one stock addSound call from the player's square, timed; a summary line every 5 s. */
+   private static void fireSound(IsoPlayer p, long nowNs) {
+      if (soundFrames++ % soundEvery != 0) {
+         return;
+      }
+      int x = (int) p.getX(), y = (int) p.getY();
+      if (soundFixed) {
+         if (soundX == Integer.MIN_VALUE) {
+            soundX = x;
+            soundY = y;
+         }
+         x = soundX;
+         y = soundY;
+      }
+      long t0 = System.nanoTime();
+      zombie.WorldSoundManager.WorldSound s = zombie.WorldSoundManager.instance.addSound(null, x, y, 0, soundRadius, soundRadius);
+      long dt = System.nanoTime() - t0;
+      soundCalls++;
+      soundTotalNs += dt;
+      if (dt > soundMaxNs) soundMaxNs = dt;
+      if (soundParts && s != null) {
+         long t1 = System.nanoTime();
+         zombie.iso.FishSchoolManager.getInstance().addSoundNoise(x, y, soundRadius / 6); // what WorldSound.init does (single player)
+         long fish = System.nanoTime() - t1;
+         long t2 = System.nanoTime();
+         zombie.popman.ZombiePopulationManager.instance.addWorldSound(s, false); // the native popman scan
+         long pop = System.nanoTime() - t2;
+         soundFishNs += fish;
+         soundPopNs += pop;
+         if (fish > soundFishMaxNs) soundFishMaxNs = fish;
+         if (pop > soundPopMaxNs) soundPopMaxNs = pop;
+      }
+      if (nowNs - lastSoundLogNs >= 5_000_000_000L) {
+         lastSoundLogNs = nowNs;
+         Log.info("harness: sound=" + soundRadius + ": " + soundStats());
+      }
+   }
+
+   private static String soundStats() {
+      if (soundCalls == 0) return "no calls";
+      String out = String.format(java.util.Locale.ROOT, "%d calls, addSound mean %.3f ms max %.3f ms", soundCalls, soundTotalNs / 1e6 / soundCalls, soundMaxNs / 1e6);
+      if (soundParts) {
+         out += String.format(java.util.Locale.ROOT, "; parts: FishSchoolManager.addSoundNoise mean %.3f max %.3f ms, ZombiePopulationManager.addWorldSound mean %.3f max %.3f ms",
+               soundFishNs / 1e6 / soundCalls, soundFishMaxNs / 1e6, soundPopNs / 1e6 / soundCalls, soundPopMaxNs / 1e6);
+      }
+      out += "; world sounds live=" + zombie.WorldSoundManager.instance.soundList.size();
+      if (Config.DEV_WORLD_SOUND_TIMING) {
+         out += "; sections: " + zombie.WorldSoundManager.pzoptTiming();
+      }
+      return out;
    }
 
    /** The JNI lighting of the square n tiles along the player's facing: canSee/darkMulti/target/rgb. */
@@ -258,6 +351,37 @@ public final class Scene {
    static void routeStart(long nowNs) {
       lastThunderNs = nowNs;
       thunderCount = 0;
+      if (helicopter) {
+         startHelicopter();
+      }
+   }
+
+   /** helicopter=true: the stock event, started at the route start and placed 40 tiles from the player. */
+   private static void startHelicopter() {
+      try {
+         IsoPlayer p = IsoPlayer.getInstance();
+         zombie.iso.Helicopter h = zombie.iso.IsoWorld.instance.helicopter;
+         h.setTarget(p); // stock: 1000 tiles out, State.Arriving, "chopper: activated" in the log
+         h.x = p.getX() + 40f; // pzopt rig: within the loaded grid at once; Arriving reaches the target in a few ticks
+         h.y = p.getY() - 40f;
+         Log.info("harness: helicopter started at " + (int) h.x + "," + (int) h.y + " (player " + (int) p.getX() + "," + (int) p.getY()
+               + "); stock 500-radius world sound about every 10 s from its position");
+      } catch (Exception e) {
+         Log.warn("harness: helicopter start failed: " + e);
+      }
+   }
+
+   private static String helicopterState() {
+      zombie.iso.Helicopter h = zombie.iso.IsoWorld.instance.helicopter;
+      IsoPlayer p = IsoPlayer.getInstance();
+      String out = "active=" + h.isActive() + " at " + (int) h.x + "," + (int) h.y;
+      if (p != null) {
+         out += " dist=" + (int) Math.sqrt((h.x - p.getX()) * (h.x - p.getX()) + (h.y - p.getY()) * (h.y - p.getY()));
+      }
+      if (Config.DEV_WORLD_SOUND_TIMING) {
+         out += "; " + zombie.WorldSoundManager.pzoptTiming();
+      }
+      return out;
    }
 
    private static void assertWeather(ClimateManager cm) {
@@ -305,7 +429,7 @@ public final class Scene {
    }
 
    static boolean requested() {
-      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible || population >= 0f || seeAll || zombiesOff;
+      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible || population >= 0f || seeAll || zombiesOff || soundRadius > 0 || helicopter;
    }
 
    /** Flag see_all=true: read by the LightingJNI override on every player update (false until apply() ran). */
@@ -445,6 +569,8 @@ public final class Scene {
             + "\nnight_strength=" + night + "\nprecipitation=" + precip + "\nfog_intensity=" + fogNow + "\nfog_fx=" + fogFx
             + "\nfog_quality=" + zombie.core.PerformanceSettings.fogQuality + "\nlightning_strikes=" + thunderCount
             + "\npopulation=" + (population >= 0f ? Float.toString(population) : "save") + "\nzombies_loaded=" + zombiesLoaded() + "\nzombies_removed=" + zombiesRemoved
-            + "\nsee_all=" + seeAll;
+            + "\nsee_all=" + seeAll
+            + (soundRadius > 0 ? "\nsound_radius=" + soundRadius + "\nsound_every=" + soundEvery + "\nsound_stats=" + soundStats() : "")
+            + (helicopter ? "\nhelicopter=" + helicopterState() : "");
    }
 }

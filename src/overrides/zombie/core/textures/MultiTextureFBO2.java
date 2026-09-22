@@ -299,6 +299,7 @@ public final class MultiTextureFBO2 {
          }
 
          max = Math.max(max, IsoPlayer.numPlayers - 1);
+         pzopt.Upscaler.queueResolve(); // pzopt: upscaler, the low-res world image is resolved to the screen size on the render thread before the quads below
 
          for (int playerIndex = 0; playerIndex <= max; playerIndex++) {
             if (SceneShaderStore.weatherShader != null && DebugOptions.instance.fboRenderChunk.useWeatherShader.getValue()) {
@@ -310,7 +311,18 @@ public final class MultiTextureFBO2 {
             int sw = IsoCamera.getScreenWidth(playerIndex);
             int sh = IsoCamera.getScreenHeight(playerIndex);
             if (IsoPlayer.players[playerIndex] != null || GameServer.server && ServerGUI.isCreated()) {
-               ((Texture)this.current.getTexture()).rendershader2(sx, sy, sw, sh, sx, sy, sw, sh, 1.0F, 1.0F, 1.0F, 1.0F);
+               if (pzopt.RenderScale.active()) {
+                  // pzopt: upscaler. fsr1 / dlss: the resolved screen-size texture; bicubic: the stock screen shader's
+                  // bicubic filter samples the low-res region of the offscreen buffer straight into the screen rect
+                  if (pzopt.Upscaler.drawsOutput() && pzopt.Upscaler.output().hasTexture()) {
+                     pzopt.Upscaler.output().rendershader2(sx, sy, sw, sh, sx, sy, sw, sh, 1.0F, 1.0F, 1.0F, 1.0F);
+                  } else {
+                     int[] r = pzopt.RenderScale.scaledRect(playerIndex);
+                     ((Texture)this.current.getTexture()).rendershader2(sx, sy, sw, sh, r[0], r[1], r[2], r[3], 1.0F, 1.0F, 1.0F, 1.0F);
+                  }
+               } else {
+                  ((Texture)this.current.getTexture()).rendershader2(sx, sy, sw, sh, sx, sy, sw, sh, 1.0F, 1.0F, 1.0F, 1.0F);
+               }
             } else {
                SpriteRenderer.instance.renderi(null, sx, sy, sw, sh, 0.0F, 0.0F, 0.0F, 1.0F, null);
             }

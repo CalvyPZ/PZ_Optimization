@@ -371,14 +371,14 @@ public class ImprovedFog {
          zLayer = z;
          playerIndex = nPlayer;
          PlayerCamera camera = IsoCamera.cameras[nPlayer];
-         screenWidth = IsoCamera.getOffscreenWidth(nPlayer);
-         screenHeight = IsoCamera.getOffscreenHeight(nPlayer);
+         screenWidth = pzopt.RenderScale.scaledPx(IsoCamera.getOffscreenWidth(nPlayer)); // pzopt: upscaler, the shaders map gl_FragCoord of the scaled viewport through these
+         screenHeight = pzopt.RenderScale.scaledPx(IsoCamera.getOffscreenHeight(nPlayer));
          worldOffsetX = camera.getOffX() - IsoCamera.getOffscreenLeft(playerIndex) * zoom;
          worldOffsetY = camera.getOffY() + IsoCamera.getOffscreenTop(playerIndex) * zoom;
          rightClickOffX = camera.rightClickX + IsoUtils.XToScreen(camera.deferedX, camera.deferedY, 0.0F, 0);
          rightClickOffY = camera.rightClickY + IsoUtils.YToScreen(camera.deferedX, camera.deferedY, 0.0F, 0);
-         cameraOffscreenLeft = IsoCamera.getOffscreenLeft(nPlayer);
-         cameraOffscreenTop = IsoCamera.getOffscreenTop(nPlayer);
+         cameraOffscreenLeft = pzopt.RenderScale.scaledPx(IsoCamera.getOffscreenLeft(nPlayer)); // pzopt: upscaler
+         cameraOffscreenTop = pzopt.RenderScale.scaledPx(IsoCamera.getOffscreenTop(nPlayer));
          cameraZoom = zoom;
          if (!enableEditing) {
             if (player.getVehicle() != null) {

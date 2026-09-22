@@ -1321,7 +1321,9 @@ public final class LightingJNI {
       private static int notDirty;
       private static int dirty;
       private static final int RESULT_LIGHTS_PER_SQUARE = 6;
-      private static final int[] lightInts = new int[49];
+      // pzopt: lightingReadParallel. The array getSquareLighting fills is per thread: the per-level reads of a pass run on the
+      // frame workers (pzopt.LightingBatch); the game thread keeps its own copy for the serial paths.
+      private static final ThreadLocal<int[]> pzoptLightInts = ThreadLocal.withInitial(() -> new int[49]);
       private static final byte VIS_SEEN = 1;
       private static final byte VIS_CAN_SEE = 2;
       private static final byte VIS_COULD_SEE = 4;
@@ -1456,6 +1458,7 @@ public final class LightingJNI {
          if (this.playerIndex != -1 && PerformanceSettings.fboRenderChunk) {
             this.updateFBORenderChunk();
          } else if (this.playerIndex == -1 || LightingJNI.updateCounter[this.playerIndex] != -1) {
+            int[] lightInts = pzoptLightInts.get(); // pzopt: lightingReadParallel, thread-local scratch
             if (this.playerIndex == -1
                || this.updateTick != LightingJNI.updateCounter[this.playerIndex]
                   && LightingJNI.getSquareDirty(this.playerIndex, this.square.x, this.square.y, this.square.z + 32)
@@ -1613,6 +1616,7 @@ public final class LightingJNI {
                      notDirty++;
                   } else {
                      dirty++;
+                     int[] lightInts = pzoptLightInts.get(); // pzopt: lightingReadParallel, thread-local scratch
                      if (LightingJNI.getSquareLighting(this.playerIndex, this.square.x, this.square.y, this.square.z + 32, lightInts)) {
                         IsoPlayer player = IsoPlayer.players[this.playerIndex];
                         boolean wasCanSee = (this.vis & 2) != 0;
@@ -1743,11 +1747,18 @@ public final class LightingJNI {
 
                         this.updateTick = LightingJNI.updateCounter[this.playerIndex];
                         if ((this.vis & 1) != 0) {
-                           this.square.checkRoomSeen(this.playerIndex);
-                           if (!wasSeen) {
-                              assert !GameServer.server;
-                              if (!GameClient.client) {
-                                 Meta.instance.dealWithSquareSeen(this.square);
+                           // pzopt: lightingReadParallel. On a frame worker the room / meta hooks are recorded for the game thread
+                           // (pzopt.LightingBatch.Effects); on the game thread they run here as stock.
+                           pzopt.LightingBatch.Effects pzoptEffects = pzopt.LightingBatch.current();
+                           if (pzoptEffects != null) {
+                              pzoptEffects.seen(this.square, wasSeen);
+                           } else {
+                              this.square.checkRoomSeen(this.playerIndex);
+                              if (!wasSeen) {
+                                 assert !GameServer.server;
+                                 if (!GameClient.client) {
+                                    Meta.instance.dealWithSquareSeen(this.square);
+                                 }
                               }
                            }
                         }
@@ -1756,6 +1767,46 @@ public final class LightingJNI {
                }
             }
          }
+      }
+
+      /**
+       * pzopt: devLightingReadCheck. Asks the native again for this square's lighting and compares with what the last
+       * read stored (the visibility bits, the light colour, the dark multipliers, the light level, the vertex lights);
+       * true when everything matches. Game thread, after a parallel batch, for a sample of its squares.
+       */
+      public boolean pzoptRecheck() {
+         if (this.square.chunk == null || this.updateTick != LightingJNI.updateCounter[this.playerIndex]) {
+            return true;
+         }
+
+         int[] ints = pzoptLightInts.get();
+         if (!LightingJNI.getSquareLighting(this.playerIndex, this.square.x, this.square.y, this.square.z + 32, ints)) {
+            return true;
+         }
+
+         int kk = 0;
+         byte vis = (byte)(ints[kk++] & 7);
+         int rgb = ints[kk++];
+         float darkMulti = ints[kk++] / 100000.0F;
+         float targetDarkMulti = ints[kk++] / 100000.0F;
+         int lightLevel = ints[kk++];
+         if ((this.vis & 5) != (vis & 5) // bit 2 (can see) may have been forced on by the facing rule
+            || this.lightInfo.r != (rgb & 0xFF) / 255.0F
+            || this.lightInfo.g != (rgb >> 8 & 0xFF) / 255.0F
+            || this.lightInfo.b != (rgb >> 16 & 0xFF) / 255.0F
+            || this.cacheDarkMulti != darkMulti
+            || this.cacheTargetDarkMulti != targetDarkMulti
+            || this.lightLevel != lightLevel) {
+            return false;
+         }
+
+         for (int i = 0; i < 8; i++) {
+            if (this.cacheVertLight[i] != ints[kk++]) {
+               return false;
+            }
+         }
+
+         return true;
       }
    }
 

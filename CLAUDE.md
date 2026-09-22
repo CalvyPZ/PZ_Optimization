@@ -24,7 +24,7 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
   SendMessage) before reinstalling or starting a batch. See `.claude/skills/bench-run`.
   **Preferred since 2026-09-21: submit through the run queue** (`harness/queue.sh submit run|mp|workshop|cmd
   [--machine desktop|flip|dell|mac] ... -- <args>`, `harness/CLAUDE.md` "Run queue"): one worker per machine
-  runs its jobs FIFO, waits for a game or run.sh outside the queue, routes laptop jobs over a monitored ssh
+  runs its jobs media-first, then each session's first job FIFO, then the rest shortest-first (`next` shows the order), waits for a game or run.sh outside the queue, routes laptop jobs over a monitored ssh
   connection, keeps a session on the machine it first used, notifies sessions (`watch`, `events`) when a
   machine drops or a job ends, and writes each job's `result.txt` with Jev's verdict; `--wait` blocks on it.
   No pgrep dance, no peer messages, no hand-rolled ssh wrappers for a run.
@@ -268,6 +268,15 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   neighbour textures instead of re-baking them; half the neighbour re-bakes while driving). Storm with lightning
   232 → 390 fps (2.6 ms, p99 8.6), clear 420 → 454 fps; the flashes cost ~0.1 ms mean. Laptop numbers pending
   (it was shut down mid-pass). A reduced-resolution puddle layer and a two-texture flash blend were rejected.
+- World-sound hitch (2026-09-22, `docs/findings-world-sound-2026-09-22.md`): `WorldSoundManager.addSound` walks
+  `(radius/3)²` squares to scare fish and asks the cell for `(2·radius·hearing/8)²` chunks per call, and
+  `Alarm.update` makes that call every frame while a house alarm rings: 0.4 ms per call at 600 (620 → 533 fps
+  uncapped), 4.4 ms at 2000 (→ 170 fps). `worldSoundFast` (default on; `WorldSoundManager` + `FishSchoolManager`
+  overrides: chunk walk clamped to the loaded grid, identical-call memo per game minute for walks of radius ≥ 8)
+  → 0.007 ms. Rig: `--flag sound=R [sound_fixed=true sound_every=N sound_parts=true]`, `--prop devWorldSoundTiming=true`;
+  the game itself adds ~12k tiny sounds/s on the bench route (0.7 % of the game thread), which is why the memo ignores small walks.
+  `--preset helicopter` (flag `helicopter=true`) runs the stock chopper event over the route: its moving 500-radius sound is
+  not a hitch (14–18 calls / 25 s, 0.3 ms stock → 0.08 ms with the exact fast fish walk, `FishNoiseWalkTest`).
 - Louisville horde pass (2026-09-22 night, runs `lou-*`): the baseline had collapsed to 10.8 fps / GPU 97 % — the
   09-21 `LightDirt` strong re-bake path had no per-frame cap and turning marks ~every exterior level strong
   (`darkMulti` fade), a fps feedback loop near the scene's ~27 fps tipping point; `lightingStrongBudget=8` caps it,
@@ -279,6 +288,16 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   26.4 → 32.2 fps (p50 30 ms), GPU 46 %, batch flush 1 % of the game thread, zombie postupdate 19 → 14.5 %.
   Runs right after a peer's `update-*` / `release-updater` cmd job showed GPU 75-80 % with the game's own gpu_ms
   tripled (a leftover game / Steam UI client; a game at the main menu alone is ~40 % GPU here) — re-run those.
+- Player LOS pass (2026-09-22 early morning, runs `lou-los*`): the player was 16 % of the game thread on the Louisville
+  preset, 12 of it `IsoPlayer.updateLOS` walking the `lastSpotted` Stack once per spotted object per frame (it never
+  empties in a horde: spotted × remembered compares). `playerLosFast` (new `IsoPlayer` override + `pzopt.PlayerLos`:
+  identity set beside the stack, one addAll instead of 2.4k synchronized adds, per-frame `getSneakSpotMod` memo) and
+  `zombieSpotFast` (`spottedNew` zero-chance early-out, look-vector trig skipped when already zero, `isVehicleBetween`
+  over a per-frame list of the vehicles near the player) → player 3.7 %, +3 fps on the same tree. Dead ends, both
+  recorded in `docs/override-edits.md`: a per-frame "not dirty" memo in `JNILighting` (sound, 0 misses, but the native
+  says dirty for 99 % of the visible squares every frame — that is what the 8 % "lighting jni" is), and `getChunkDirty`
+  outside `LightingJNI.update` (throws; zombies vanish). Builds go through `queue.sh submit cmd -- scripts/build.sh`
+  when peers are running. The peer session's §3.1 losParallel plan is dropped (nothing left to parallelise).
 - Camera zoom (2026-09-22, `docs/results.md` "Camera zoom changes", `docs/override-edits.md`): stock frees a chunk level's
   textures the frame it leaves the screen and bakes every level a zoom-out reveals in the frame it appears (the bake budget
   never caught them: DIRTY_CREATE is set after the deferral decision); a 0.25 → 2.5 wheel spin was an 80-375 ms frame, a
@@ -290,6 +309,51 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   zoom_cycle=S [zoom_span=9] [zoom_jump=true]`, `harness/zoomsteps.py`, `attribute.py`/`sections.py --after-mark zoom-:1`.
   Other sessions' forced `uncappedFps=` runs leave `framecap.ini restore=` that the next boot applies: pass `--prop uncappedFps=true`
   for a deterministic cap in an optimized run; stock runs need `--option frameRate=240 --option uncappedFPS=false`.
+- Zombie simulation on all cores (2026-09-22 04:00-06:30, `docs/plan-zombie-multithread.md` §6, runs `lou-zm-*`,
+  `spin-zm-*`): the zombie side of the game thread now runs through `pzopt.FrameBatch` (`frameThreads`, 8 workers +
+  the game thread, one batch at a time). Keys, all default on: `ecsLookupFast` (the component lookup behind every
+  `getStateMachine` / `getActionContext` / `getVariable` memoised; `ECSComponent` + `ECSEntity` overrides, cached
+  field on `IsoZombie`), `actionConditionFast` (bool / int rule operands read typed, `CharacterVariableCondition`
+  override), `actionEvalParallel` (each zombie's action-state transitions evaluated on the workers between the
+  postupdate loop and the animator: `IsoGameCharacter` override splits `postUpdateAnimating` at
+  `pzoptPostUpdateAnimatingRest`, `ActionContext` override evaluates / applies; the game thread first snapshots every
+  callback variable not in `ActionEval.PURE_CALLBACKS` — `blunge` runs a pathfind line test through a plain
+  ArrayDeque pool, `bHasTarget` / `bthump` / `beatbodytarget` have side effects — rig `devActionEvalCheck`: 860k
+  contexts, 0 mismatches), `skinTransformsPrecompute` + `skinPalettePrecompute` + `shadowPrep` + `boneIndexCache`
+  (the bone worker also fills the skin sets, the shader palette and the shadow ellipse; `AnimatedModel` override,
+  `pzopt.ShadowPrep`), `lightingReadParallel` (the pre-pass lighting drain reads its chunk levels one per worker —
+  libLighting64's getters are pure reads, the room / meta hooks are deferred to the game thread;
+  `pzopt.LightingBatch`, rig `devLightingReadCheck`: 425k squares, 0 mismatches), `zombieCullSortFast` (`IsoWorld`
+  override, `pzopt.SortKeys`), `lightingStrongFrameMs` (A/B key, default 0: halving the strong re-bake
+  budget after a slow frame only held stale light on a steadily slow scene; the "GPU-doubled" Louisville regime of
+  ~30 % of the day's runs was `see_all=true` marking the whole grid every pass — a preset artefact, ~2/3 of recorded
+  runs tip into it; its deferral flood was the zoom session's stale pending bits, `build-zoom-leak-fix`).
+  Same build (06:00), keys off → on: Louisville 46.4 → 57.5 fps (lou-zm-final-off4 vs cd4-on; p50 21.6 → 15.8 ms;
+  32.2 at lou-final2 in the morning),
+  Rosewood spin uncapped 336 → 472 fps (p99 11.5 → 7.3 ms). §3.1 losParallel dropped (the player session's
+  `playerLosFast` took `updateLOS` 16 → 3.7 %); the per-frame simulation checksum (`devSimChecksum`, `pzopt-sim.out`,
+  `harness/simdiff.py`) cannot compare two runs (never frame-aligned) — per-phase in-run dual evaluation is the rig.
+  Pitfalls: an override the JVM touches before the logger (IsoWorld) must use `Overrides.onClassLoadedQuiet`
+  (the loud marker killed every launch for 25 minutes); Vineflower's `IsoWorld.init` needs 7 typing fixes;
+  `GameThreadProfile` is safepoint-biased (hot-method self time lands on loop back-edges). The harness summary now
+  carries `zombie_batches=` and `bake_counters=` (`pzopt-bench.out`) so short runs still report the batch and
+  bake / re-bake counters.
+- Characters draw pass (2026-09-22 morning, `docs/findings-characters-draw-2026-09-22.md`, runs `cd*-*`): the game-thread
+  render sub-phase `characters draw` (renderMovingObjects) on the Louisville horde 13.2 % → 4.4-4.8 % (~3.0 → ~0.75 ms a
+  frame; 11.3 % with the keys off on the same tree). Stock already ran `ModelSlotRenderData.init` on its eight-thread
+  executor (`Threading.ModelSlotInit`); the game-thread cost was `initModel`, one submit per zombie, the culled zombies'
+  shadow ellipse and the HashSet walk. `charDrawPrep` (`pzopt.CharDraw`): the object walk on a worker from the top of the
+  cell render; before the chunk bakes the game thread does the visibility test, `checkUpdateModelTextures` and the lazy
+  per-square lighting refresh (the only part that must stay on the game thread: `JNILighting.update` behind
+  `lighting[p].lightInfo()`), then `updateLights` + `initModel` + `init` + the camera record run per zombie on the pass's
+  own pool (`charDrawThreads`); the stock loop runs over the on-screen list, `TextureDraw.drawModel` takes the prepared
+  data. `zombieAtlasFast`: `IsoZombie.pzoptRenderFlat`, a flat copy of the render chain for the ~1,100 atlas zombies and
+  the prepared model zombies. Overrides: TextureDraw, ModelInstance (thread-local light scratch, frame stamp). Analysis:
+  `harness/subtree.py <run> [--frame pzopt.CharDraw.start]` (analyze.py rounds the sub-phase to whole percents). The
+  preset is bistable (`see_all=true`, the parity session's finding): a run with settle-phase gpu_ms ~13 / bakes ~30k per
+  period is in the GPU-bound re-bake regime and not comparable. A startup death with a 0-byte console that day was an
+  override marker calling `onClassLoaded` from a class the logger touches first (use `onClassLoadedQuiet`); diagnose with
+  `--env JAVA_TOOL_OPTIONS=-Xlog:exceptions=info:file=/tmp/x.log`.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-zombie-multithread.md` (2026-09-22: the rest of the zombie simulation on all cores, phased).
   The game-thread optimization plans were dropped on 2026-09-21 at the maintainer's request.

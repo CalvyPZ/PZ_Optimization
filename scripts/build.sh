@@ -25,7 +25,7 @@ RELEASE="${RELEASE:-25}"   # java.class.version 69 in the shipped jar
 # The edited decompiled copies live in src/overrides/ (not committed); the two org.lwjglx classes are
 # The Indie Stone's LWJGL 2 compatibility shim (HiDPI/Wayland fix, see docs/override-edits.md);
 # TISLogoState is a from-scratch replacement in src/shims/ (committed).
-OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState org/lwjglx/opengl/Display org/lwjglx/input/Mouse zombie/fileSystem/FileSystemImpl zombie/tileDepth/TileDepthTextures zombie/core/textures/TextureIDAssetManager zombie/MapCollisionData zombie/iso/IsoMetaGrid zombie/scripting/ScriptParser zombie/iso/IsoMetaCell zombie/buildingRooms/BuildingRoomsEditor zombie/gameStates/GameLoadingState se/krka/kahlua/luaj/compiler/LuaCompiler zombie/core/skinnedmodel/advancedanimation/AnimationSet zombie/core/skinnedmodel/model/AnimationAssetManager zombie/fileSystem/TexturePackDevice zombie/scripting/objects/Item zombie/core/PerformanceSettings zombie/core/skinnedmodel/model/Model zombie/core/textures/ImageData zombie/iso/weather/fx/WeatherFxMask zombie/iso/objects/IsoLightSwitch se/krka/kahlua/j2se/KahluaTableImpl zombie/core/opengl/RenderThread zombie/iso/fboRenderChunk/FBORenderCutaways zombie/audio/parameters/ParameterZone zombie/iso/IsoChunkMap zombie/core/opengl/VBORenderer zombie/iso/IsoPuddles zombie/iso/weather/fx/ParticleRectangle zombie/iso/weather/fx/WeatherParticleDrawer zombie/iso/LightingJNI zombie/iso/weather/fog/ImprovedFog zombie/iso/weather/fog/ImprovedFogDrawer zombie/core/textures/MultiTextureFBO2 zombie/network/NetChecksum zombie/characters/IsoZombie zombie/core/skinnedmodel/animation/AnimationPlayer zombie/MovingObjectUpdateScheduler)
+OVERRIDES=(zombie/iso/IsoChunk zombie/iso/WorldStreamer zombie/iso/ChunkSaveWorker zombie/core/VBO/GLVertexBufferObject zombie/iso/fboRenderChunk/FBORenderCell zombie/GameWindow zombie/gameStates/TISLogoState org/lwjglx/opengl/Display org/lwjglx/input/Mouse zombie/fileSystem/FileSystemImpl zombie/tileDepth/TileDepthTextures zombie/core/textures/TextureIDAssetManager zombie/MapCollisionData zombie/iso/IsoMetaGrid zombie/scripting/ScriptParser zombie/iso/IsoMetaCell zombie/buildingRooms/BuildingRoomsEditor zombie/gameStates/GameLoadingState se/krka/kahlua/luaj/compiler/LuaCompiler zombie/core/skinnedmodel/advancedanimation/AnimationSet zombie/core/skinnedmodel/model/AnimationAssetManager zombie/fileSystem/TexturePackDevice zombie/scripting/objects/Item zombie/core/PerformanceSettings zombie/core/skinnedmodel/model/Model zombie/core/textures/ImageData zombie/iso/weather/fx/WeatherFxMask zombie/iso/objects/IsoLightSwitch se/krka/kahlua/j2se/KahluaTableImpl zombie/core/opengl/RenderThread zombie/iso/fboRenderChunk/FBORenderCutaways zombie/audio/parameters/ParameterZone zombie/iso/IsoChunkMap zombie/core/opengl/VBORenderer zombie/iso/IsoPuddles zombie/iso/weather/fx/ParticleRectangle zombie/iso/weather/fx/WeatherParticleDrawer zombie/iso/LightingJNI zombie/iso/weather/fog/ImprovedFog zombie/iso/weather/fog/ImprovedFogDrawer zombie/core/textures/MultiTextureFBO2 zombie/network/NetChecksum zombie/WorldSoundManager zombie/iso/FishSchoolManager zombie/characters/IsoZombie zombie/core/skinnedmodel/animation/AnimationPlayer zombie/MovingObjectUpdateScheduler zombie/characters/IsoPlayer zombie/characters/ecs/ECSComponent zombie/characters/ecs/ECSEntity zombie/characters/action/conditions/CharacterVariableCondition zombie/core/skinnedmodel/advancedanimation/AnimatedModel zombie/characters/IsoGameCharacter zombie/characters/action/ActionContext zombie/iso/IsoWorld zombie/core/textures/TextureDraw zombie/core/skinnedmodel/model/ModelInstance zombie/iso/IsoCamera zombie/iso/weather/WeatherShader zombie/iso/WaterShader zombie/iso/PuddlesShader zombie/core/skinnedmodel/ModelManager zombie/savefile/SavefileThumbnail)
 
 [[ -f "$JAR" ]] || { echo "jar not found: $JAR" >&2; exit 1; }
 command -v javac >/dev/null || { echo "javac not on PATH" >&2; exit 1; }
@@ -37,6 +37,40 @@ echo "compiling src/ against $JAR (--release $RELEASE)"
 mapfile -t sources < <(find "$SRC/overrides" "$SRC/shims" "$SRC/pzopt" -name '*.java' | sort)
 javac --release "$RELEASE" -nowarn -Xlint:-options -parameters -g \
   -cp "$JAR" -d "$OUT" "${sources[@]}"
+
+# Experiment: the C++ LOS pass (Config playerLosNative). Only with PZOPT_NATIVE=1, so the shipped build never
+# carries a native library; lands under natives/ like the game's own .so files.
+if [[ "${PZOPT_NATIVE:-0}" == "1" && -f "$SRC/native/pzopt_los.cpp" ]]; then
+  command -v g++ >/dev/null || { echo "PZOPT_NATIVE=1 but no g++" >&2; exit 1; }
+  mkdir -p "$OUT/natives" "$BUILD/native"
+  g++ -O2 -shared -fPIC -o "$BUILD/native/libpzopt_los64.so" "$SRC/native/pzopt_los.cpp"
+  cp "$BUILD/native/libpzopt_los64.so" "$OUT/natives/"
+  echo "built natives/libpzopt_los64.so (playerLosNative experiment; copy kept in build/native/)"
+fi
+
+# The DLSS shim (Config upscaler=dlss; src/native/pzopt_ngx.cpp, docs/plan-upscalers.md): Vulkan + NGX on the GL
+# context's GPU, images shared with GL. Built when the DLSS SDK checkout is present (PZOPT_DLSS_SDK, default
+# ~/.local/share/nvidia-dlss-sdk: git clone --depth 1 https://github.com/NVIDIA/DLSS) and g++ + the Vulkan headers
+# are installed; PZOPT_DLSS=0 skips it. The DLSS library itself (lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.*) is
+# copied next to the shim under natives/, where the shim tells NGX to look. Without either the key falls back to fsr1.
+DLSS_SDK="${PZOPT_DLSS_SDK:-$HOME/.local/share/nvidia-dlss-sdk}"
+if [[ "${PZOPT_DLSS:-1}" == "1" && -f "$SRC/native/pzopt_ngx.cpp" && -f "$DLSS_SDK/lib/Linux_x86_64/libnvsdk_ngx.a" ]] \
+   && command -v g++ >/dev/null && [[ -f /usr/include/vulkan/vulkan.h ]]; then
+  mkdir -p "$OUT/natives" "$BUILD/native"
+  if [[ ! -f "$BUILD/native/libpzopt_ngx64.so" || "$SRC/native/pzopt_ngx.cpp" -nt "$BUILD/native/libpzopt_ngx64.so" ]]; then
+    g++ -O2 -shared -fPIC -std=c++17 -fvisibility=hidden -I"$DLSS_SDK/include" -o "$BUILD/native/libpzopt_ngx64.so" \
+      "$SRC/native/pzopt_ngx.cpp" "$DLSS_SDK/lib/Linux_x86_64/libnvsdk_ngx.a" -ldl -lpthread 2>&1 | grep -v -i "deprecated\|SR_DEPRECATED\|note:\|^\s*[0-9]* |\|^\s*|" || true
+    [[ -f "$BUILD/native/libpzopt_ngx64.so" ]] || { echo "the DLSS shim did not build" >&2; exit 1; }
+  fi
+  cp "$BUILD/native/libpzopt_ngx64.so" "$OUT/natives/"
+  dlss_lib=$(ls "$DLSS_SDK"/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.* 2>/dev/null | head -1)
+  if [[ -n "$dlss_lib" ]]; then
+    cp "$dlss_lib" "$OUT/natives/"
+    echo "built natives/libpzopt_ngx64.so with $(basename "$dlss_lib") (upscaler=dlss)"
+  else
+    echo "built natives/libpzopt_ngx64.so; no DLSS library in $DLSS_SDK/lib/Linux_x86_64/rel (upscaler=dlss needs it under natives/)"
+  fi
+fi
 
 # Loose Lua under src/lua/ ships next to the classes: install copies build/classes/ onto the
 # game dir, so build/classes/media/lua/client/pzopt/*.lua lands in media/lua/client/pzopt/.

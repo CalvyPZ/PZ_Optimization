@@ -7,7 +7,7 @@
 #                  [--jfr] [--jfr-period ms] [--game-profiler] [--gc g1|zgc] [--no-dashboard]
 #                  [--refresh-template] [--retries N] [--renderer nvidia|zink] [--env K=V]... [--mod ID]... [--vmarg ARG]...
 #                  [--lead secs] [--route-seconds secs] [--launcher auto|steam|direct] [--option key=value]...
-#                  [--preset night-torch|night-dark|storm|fog|storm-fog|louisville]
+#                  [--preset night-torch|night-dark|storm|fog|storm-fog|louisville|helicopter]
 #
 # --preset NAME    scene preset: bench mode on the spinning game-thread route (route=S:450 turn=90 zoom=max,
 #                  --route-seconds 25) plus the scene flags pzopt.Scene reads (time_of_day, torch, weather).
@@ -131,7 +131,8 @@ if [[ -n "$preset" ]]; then
     fog)         preset_flags=(fog=heavy) ;;
     storm-fog)   preset_flags=(weather=storm fog=heavy) ;;
     louisville)  preset_flags=(start=12450,1280 population=max settle=20 route=S:150 speed=6 see_all=true) ;;
-    *) echo "unknown preset: $preset (night-torch|night-dark|storm|fog|storm-fog|louisville)" >&2; exit 2 ;;
+    helicopter)  preset_flags=(helicopter=true) ;;   # the stock chopper event hovering over the route, its 500-radius world sound every ~10 s (2026-09-22)
+    *) echo "unknown preset: $preset (night-torch|night-dark|storm|fog|storm-fog|louisville|helicopter)" >&2; exit 2 ;;
   esac
   extra_flags=(route=S:450 turn=90 zoom=max "${preset_flags[@]}" "${extra_flags[@]}")   # later duplicates win (Properties.load)
   [[ $mode_set -eq 1 ]] || mode=bench

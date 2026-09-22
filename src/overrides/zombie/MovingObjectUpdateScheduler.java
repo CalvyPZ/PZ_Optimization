@@ -154,11 +154,14 @@ public final class MovingObjectUpdateScheduler {
          ZombieCountOptimiser.deleteZombies();
       }
 
-      // pzopt: the eligible zombies' animation bone math is queued during the loop and run on the worker threads after it
-      // (pzopt.AnimBatch, Config.animBonesParallel); the join is here, before anything reads a bone
+      // pzopt: two batches ride on this loop (Config.actionEvalParallel, Config.animBonesParallel). The eligible zombies stop
+      // their postUpdateAnimating after the turning flags and queue in pzopt.ActionEval; after the loop their transition
+      // evaluation runs on the frame workers and the rest of their postUpdateAnimating runs here in loop order, which
+      // queues their bone math in pzopt.AnimBatch; that batch runs last, joined before anything reads a bone.
       boolean pzoptBatch = !GameServer.server && pzopt.Overrides.enabled();
       if (pzoptBatch) {
          pzopt.AnimBatch.begin();
+         pzopt.ActionEval.begin();
       }
       try {
          for (MovingObjectUpdateSchedulerUpdateBucket simulation : this.simulationLevels) {
@@ -166,8 +169,16 @@ public final class MovingObjectUpdateScheduler {
          }
       } finally {
          if (pzoptBatch) {
-            pzopt.AnimBatch.flush();
+            try {
+               pzopt.ActionEval.flush();
+            } finally {
+               pzopt.AnimBatch.flush();
+            }
          }
+      }
+
+      if (pzopt.SimChecksum.ENABLED) {
+         pzopt.SimChecksum.frameDone(); // pzopt: devSimChecksum, the per-frame hash of every zombie's state
       }
    }
 

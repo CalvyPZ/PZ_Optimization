@@ -43,6 +43,9 @@ if [[ $publish -eq 1 ]]; then
   fi
 fi
 
+# No native libraries in a release (2026-09-22, the maintainer's call): the DLSS shim would add NVIDIA's 58 MB
+# library, Windows cannot use the .so, and the Workshop uploader bans the extension. PZOPT_DLSS=1 overrides.
+export PZOPT_DLSS="${PZOPT_DLSS:-0}"
 scripts/build.sh
 scripts/test.sh
 

@@ -314,7 +314,53 @@ public final class AnimationPlayer extends PooledObject {
       return this.skinningData != null ? this.skinningData.boneIndices : null;
    }
 
+   // pzopt: boneIndexCache. calculateShadowParams asks for the head and both feet of every drawn character every frame,
+   // two HashMap<String, Integer> probes each (1.6 % of the game thread on the Louisville horde); the answer per skinning
+   // data never changes, so the last few (name, index) pairs are kept beside it and matched by string identity first
+   // (the callers pass literals). A name that is not a bone is not cached and takes the stock path.
+   private SkinningData pzoptBoneIndexData;
+   private final String[] pzoptBoneIndexNames = new String[8];
+   private final int[] pzoptBoneIndexValues = new int[8];
+   private int pzoptBoneIndexCount;
+
    public int getSkinningBoneIndex(String boneName, int defaultVal) {
+      if (pzopt.Overrides.enabled() && pzopt.Config.BONE_INDEX_CACHE && boneName != null) {
+         SkinningData skinningData = this.getSkinningData();
+         if (skinningData != this.pzoptBoneIndexData) {
+            this.pzoptBoneIndexData = skinningData;
+            this.pzoptBoneIndexCount = 0;
+         }
+
+         String[] names = this.pzoptBoneIndexNames;
+         int count = this.pzoptBoneIndexCount;
+
+         for (int k = 0; k < count; k++) {
+            if (names[k] == boneName) {
+               return this.pzoptBoneIndexValues[k];
+            }
+         }
+
+         for (int k = 0; k < count; k++) {
+            if (names[k].equals(boneName)) {
+               return this.pzoptBoneIndexValues[k];
+            }
+         }
+
+         HashMap<String, Integer> boneIndices = this.getSkinningBoneIndices();
+         Integer found = boneIndices == null ? null : boneIndices.get(boneName);
+         if (found == null) {
+            return defaultVal;
+         }
+
+         if (count < names.length) {
+            names[count] = boneName;
+            this.pzoptBoneIndexValues[count] = found;
+            this.pzoptBoneIndexCount = count + 1;
+         }
+
+         return found;
+      }
+
       HashMap<String, Integer> boneIndices = this.getSkinningBoneIndices();
       return boneIndices != null && boneIndices.containsKey(boneName) ? boneIndices.get(boneName) : defaultVal;
    }
@@ -550,6 +596,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    private void updateInternal(float deltaT) {
+      this.pzoptShadowValid = false; // pzopt: shadowPrep, the bones are about to move
       if (this.isReady()) {
          this.updateRagdoll(deltaT);
          this.multiTrack.Update(deltaT);
@@ -572,7 +619,125 @@ public final class AnimationPlayer extends PooledObject {
    public void pzoptRunDeferred(float deltaT) {
       this.updateAnimation_StandardAnimation(deltaT);
       this.postUpdateRagdoll(deltaT);
+      if (pzopt.Config.SKIN_TRANSFORMS_PRECOMPUTE) {
+         this.pzoptPrecomputeSkinTransforms();
+      }
+
+      if (pzopt.Config.SHADOW_PREP && this.hasSkinningData()) {
+         this.pzoptPrecomputeShadow();
+      }
    }
+
+   // pzopt: shadowPrep. The shadow ellipse of a drawn character (IsoGameCharacter.calculateShadowParams: head and feet
+   // projected to the ground, extents along the facing) reads only this player's model transforms and angle, which the
+   // deferred update just wrote, so the worker computes it here (pzopt.ShadowPrep, stock's arithmetic with thread-local
+   // scratch) and the IsoZombie override of calculateShadowParams serves the pair until the next update clears it.
+   private volatile boolean pzoptShadowValid;
+   private long pzoptShadowPacked;
+
+   private void pzoptPrecomputeShadow() {
+      int head = this.getSkinningBoneIndex("Bip01_Head", -1);
+      int leftFoot = this.getSkinningBoneIndex("Bip01_L_Foot", -1);
+      int rightFoot = this.getSkinningBoneIndex("Bip01_R_Foot", -1);
+      int bones = this.modelTransforms == null ? 0 : this.modelTransforms.length;
+      if (head < 0 || leftFoot < 0 || rightFoot < 0 || head >= bones || leftFoot >= bones || rightFoot >= bones) {
+         return; // stock would read out of range too; leave it to the game thread's own call
+      }
+
+      this.pzoptShadowPacked = pzopt.ShadowPrep.compute(this, head, leftFoot, rightFoot);
+      this.pzoptShadowValid = true;
+   }
+
+   /** pzopt: shadowPrep, the pair computed by the last deferred update, or 0 when the game thread must compute it. */
+   public long pzoptShadowParams() {
+      return this.pzoptShadowValid ? this.pzoptShadowPacked : 0L;
+   }
+
+   /**
+    * pzopt: skinTransformsPrecompute. The standard-animation update ends by handing this frame's skin-transform sets
+    * (one per model skinned to this player: body, hair, every clothing item) back to the pool, and the render phase asks
+    * for each again while it builds the draw data, which multiplies every bone by the model's bone offsets on the game
+    * thread (3 % of it on the Louisville horde). The sets in the pool are exactly the models drawn last frame, so the
+    * worker that just updated the bones asks for the same sets now: each comes back out of the pool computed, and the
+    * render phase finds them clean. A model that is new this frame computes as before, an entry that is not drawn
+    * is only a few wasted multiplies on a worker. Reads only this player's arrays and the read-only skinning data.
+    */
+   private void pzoptPrecomputeSkinTransforms() {
+      SkinningData[] wanted = pzoptSkinnedTo.get();
+      int n = 0;
+      synchronized (this) {
+         for (AnimationPlayer.SkinTransformData data = this.skinTransformDataPool; data != null && n < wanted.length; data = data.next) {
+            if (data.skinnedTo != null) {
+               wanted[n++] = data.skinnedTo;
+            }
+         }
+      }
+
+      for (int i = 0; i < n; i++) {
+         Matrix4f[] transforms = this.getSkinTransforms(wanted[i]);
+         if (pzopt.Config.SKIN_PALETTE_PRECOMPUTE) {
+            this.pzoptStorePalette(wanted[i], transforms);
+         }
+
+         wanted[i] = null;
+      }
+   }
+
+   // pzopt: skinPalettePrecompute. AnimatedModelInstanceRenderData.initMatrixPalette stores every skin matrix of every
+   // drawn sub-model into the draw data's FloatBuffer on the game thread, sixteen puts per matrix (3 % of it on the
+   // Louisville horde). The worker that computed the set stores it once into a buffer kept on the set, and the render
+   // phase copies that buffer in one bulk put (AnimatedModel override, pzoptSkinPalette). Same column order (Matrix4f.store).
+   private void pzoptStorePalette(SkinningData skinnedTo, Matrix4f[] transforms) {
+      AnimationPlayer.SkinTransformData data = this.getSkinTransformData(skinnedTo);
+      if (data.transforms != transforms) {
+         return;
+      }
+
+      int floats = transforms.length * 16;
+      java.nio.FloatBuffer palette = data.pzoptPalette;
+      if (palette == null || palette.capacity() < floats) {
+         palette = org.lwjgl.BufferUtils.createFloatBuffer(floats);
+         data.pzoptPalette = palette;
+      }
+
+      palette.clear();
+
+      for (int i = 0; i < transforms.length; i++) {
+         transforms[i].store(palette);
+      }
+
+      palette.flip();
+      data.pzoptPaletteValid = true;
+   }
+
+   /**
+    * pzopt: skinPalettePrecompute. The palette buffer of the skin-transform set for {@code skinnedTo} when the worker
+    * filled it for the current transforms (flipped: position 0, limit = bones x 16), else null (the caller stores the
+    * matrices itself). Game thread; the set is the one getSkinTransforms would return.
+    */
+   public java.nio.FloatBuffer pzoptSkinPalette(SkinningData skinnedTo) {
+      if (skinnedTo == null) {
+         return null;
+      }
+
+      AnimationPlayer.SkinTransformData data;
+      synchronized (this) {
+         for (data = this.skinTransformData; data != null; data = data.next) {
+            if (data.skinnedTo == skinnedTo) {
+               break;
+            }
+         }
+      }
+
+      if (data == null || data.dirty || !data.pzoptPaletteValid) {
+         return null;
+      }
+
+      data.pzoptPalette.rewind();
+      return data.pzoptPalette;
+   }
+
+   private static final ThreadLocal<SkinningData[]> pzoptSkinnedTo = ThreadLocal.withInitial(() -> new SkinningData[16]);
 
    /** pzopt: pzopt.AnimBatch eligibility: no parent player to copy from, no ragdoll, no recorder. */
    public boolean pzoptBatchable() {
@@ -1745,6 +1910,7 @@ public final class AnimationPlayer extends PooledObject {
       AnimationPlayer.SkinTransformData data = this.getSkinTransformData(skinnedTo);
       Matrix4f[] skinTransforms = data.transforms;
       if (data.dirty) {
+         data.pzoptPaletteValid = false; // pzopt: skinPalettePrecompute, the palette below is for the old transforms
          data.checkBoneMap(this.getSkinningData());
 
          for (int bone = 0; bone < this.modelTransforms.length; bone++) {
@@ -1979,6 +2145,10 @@ public final class AnimationPlayer extends PooledObject {
       public Matrix4f[] transforms;
       private SkinningData skinnedTo;
       public boolean dirty;
+      // pzopt: skinPalettePrecompute. The transforms stored column by column as the shader palette, filled by the worker
+      // right after the transforms (pzoptPrecomputeSkinTransforms), valid until the transforms are recomputed.
+      java.nio.FloatBuffer pzoptPalette;
+      boolean pzoptPaletteValid;
       private SkinningData animPlayerSkinningData;
       private int[] boneMap;
       private AnimationPlayer.SkinTransformData next;

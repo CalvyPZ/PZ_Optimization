@@ -190,6 +190,97 @@ per frame tripled (a leftover instance or the Steam UI on the GPU). Before a run
 queue should wait for `nvidia-smi` utilization < 15 % for 3 s (a preflight in `queue.sh`, not written yet) —
 until then, re-run any Louisville result with GPU > 60 %.
 
+## 6. Progress (2026-09-22, 04:00-05:00)
+
+What was found once the work started, and what each phase became. Numbers are the 100 Hz game-thread profile over
+the Louisville route; the A/B pairs are `lou-zm-off*` (every zombie key `--prop k=false`, same build) vs
+`lou-zm-on*`.
+
+- **Safepoint bias.** `GameThreadProfile` samples through `ThreadMXBean`, so "hot method" self time lands on the
+  nearest safepoint poll (a loop back-edge, a method return): the 5.7 % attributed to `ECSComponent.getECSClass`
+  was the whole inlined `getStateMachineComponent` chain, the 4.3 % in `AnimationVariableSlotCallbackBool.
+  getValueString` was the condition evaluation around it. Attributions locate the region, not the line; only an A/B
+  run measures a change.
+- **§3.1 losParallel: dropped.** The player session found the 12 % of `updateLOS` was `lastSpotted.contains` (a
+  Stack walked per spotted object per frame, never emptied in a horde); `playerLosFast` + `zombieSpotFast` took
+  the player from 16 % to 3.7 %, leaving 0.5 % in the loop itself — nothing left to parallelise.
+- **§3.2 step 1 (skip unchanged evaluations): not possible as planned.** Most zombie variables are callback slots
+  (`this::isMoving` and the like), so a version stamp on the variable table cannot tell when they change. What
+  applied instead: `ecsLookupFast` (the component lookup behind every `getStateMachine` / `getActionContext` /
+  `getVariable` is a memoised class walk + a lean map probe, and `IsoZombie` caches its `StateMachineComponent` in
+  a field) and `actionConditionFast` (bool / int operands read typed instead of printed-and-parsed).
+- **§3.2 step 2 (`actionEvalParallel`): done.** It needed the `IsoGameCharacter` override (16 k lines,
+  Vineflower output compiles as is): `postUpdateAnimating` is split after the turning flags into
+  `pzoptPostUpdateAnimatingRest`; `pzopt.ActionEval` queues the eligible zombies, evaluates their transitions on
+  the `FrameBatch` workers after the loop and runs the rest in loop order. Excluded: states with a `LuaCall`
+  condition (cached per state), grappled / grappling / reanimated zombies, multiplayer. `IsoZombie.isFacingTarget`
+  used the inherited static `tempo` vectors: thread-local now. Rig: `devActionEvalCheck=true` re-evaluates on the
+  game thread at apply time and counts mismatches (the run-to-run checksum of §4.2 cannot work: two runs are never
+  frame-aligned, the zombie count differs from frame 5).
+- **§3.3 (`charRenderPrepParallel`): done as three keys on the existing bone batch** instead of a new pass:
+  `skinTransformsPrecompute` (the worker that updated the bones also multiplies them into the skin sets the
+  models used last frame), `skinPalettePrecompute` (and stores each set as the shader palette buffer, so
+  `initMatrixPalette` is one bulk copy; `AnimatedModel` override), `shadowPrep` (the shadow ellipse computed on
+  the worker, `pzopt.ShadowPrep`, served by `IsoZombie.calculateShadowParams`), plus `boneIndexCache`. Stock's
+  `getSkinTransforms` went 3.1 → 0.7 %, `initMatrixPalette` 6.4 → 3.5 % after the first two.
+- **§3.4 (`lightingReadParallel`): done without the race test being needed.** The disassembly of
+  libLighting64.so shows `getSquareDirty` (index + byte load) and `getSquareLighting` (array reads copied into the
+  Java array) are pure reads, so concurrent readers are safe by construction; the Java side is per square / per
+  level except the room-seen and meta hooks, which are deferred (`pzopt.LightingBatch.Effects`). Only the pre-pass
+  drain (`pzoptFlushPendingLighting`, 11 % of the game thread) runs in parallel; the `lightingBudget` path stays
+  serial. Rig: `devLightingReadCheck=true` re-reads one square in sixteen after each batch.
+- **§4.1: done** — `pzopt.FrameBatch` (`frameThreads`, default 8 = the old `animBonesThreads`) is the pool of
+  `AnimBatch`, `ActionEval` and `LightingBatch`.
+- **First A/B** (before shadow / palette / eval / lighting, same build 04:24): 40.2 → 43.4 fps, p50 24.1 → 21.9 ms.
+  Baseline moved from 32.2 (lou-final2) to 40.2 with the player session's keys and the zoom-retain fix.
+- **Final A/B** (06:00 build, healthy GPU 13 ms, every key off vs on): Louisville 46.4 → 57.5 fps (p50 21.6 →
+  15.8 ms, p99 44 → 39 ms; `lou-zm-final-off4` vs `cd4-on`), Rosewood spin uncapped 336 → 472 fps (p99 11.5 →
+  7.3 ms, p99.9 22.5 → 14.4; `spin-zm-off` vs `spin-zm-on2`). Game thread on Louisville: update 54 → 63 % of a
+  17.5 ms frame (the batches' game-thread share and joins included), render 33 %, the lighting phase gone from the
+  top level (its reads run inside the pre-pass drain on the workers). What is left on the zombie side is the AI
+  update itself (§3.5, ~9 %), the animator (~4 %, fires Lua events), the callback snapshot (~5 %: the impure
+  variables read on the game thread before the batch) and the batches' own joins.
+- **§3.6 `zombieCullSortFast`: done** (`IsoWorld` override, one score per zombie + a primitive key sort with the
+  order of stock's stable sort, `tests/pzopt/SortKeysTest`). §3.5 (`separate`, `updateEmitter`) left as is: the
+  reductions there change behaviour (a reused separation result, a skipped emitter tick) for ~3 % of the frame.
+- **Not done, with reasons:** overlapping the bone batch with the game thread's work after `postupdate` (the game
+  thread contributes ~0.5 ms/frame to the batch and waits ~0.1 ms; the first bone reader is hard to pin with Lua
+  hooks and the characters-draw pass now running its own batch at the render), `AdvancedAnimator.update` on
+  workers (fires animation events into Lua), and the zombie `update` itself (§3.5, as planned).
+- **The GPU-doubled regime:** the parity session's per-process GPU log showed no other client and the game's own
+  SM time doubling, always at 27-30 fps; `lightingStrongFrameMs` (halve the strong re-bake budget after a slow
+  frame) was tried against it and defaulted off again: on a steadily slow scene it only holds stale light (the held
+  squares are re-marked every pass, strong marks 25x in the slow recorded runs). The deferral flood seen in the
+  06:18-06:25 installs was the zoom session's stale pending bits (`build-zoom-leak-fix`). `bake_counters=` in
+  `pzopt-bench.out` is what settled both.
+- **Next lead on the slow regime (from the parity session's vp5-trio, 07:40):** the 25x strong marks appear with
+  `lightingStrongFrameMs=0` too, so they are a property of the regime, not of the adaptive budget. Reading of the
+  mechanism: every bake budget (`bakeBudget`, `rebakeBudget`, `lightingRebakeBudget`, `lightingStrongBudget`,
+  `zoomRebakeBudget`) is per frame, and the pending work grows with the frame time (the fade moves further, more
+  levels cross `lightingStrongDelta`, held levels stay marked), so at ~30 fps every budget fills every frame and the
+  bake GPU time per frame reaches its ceiling (~30 tall-chunk textures at 5120x2160 ≈ the 15 ms of extra gpu_ms
+  seen), which slows the frame further — positive feedback with two stable points (57 fps / 30 fps). A cap on bakes
+  per unit of wall time (one bake budget shared by all classes, refilled at N bakes/s, so a long frame does not buy
+  more bake GPU per frame than a short one) or a bake budget in GPU milliseconds (`gpuSections` measures them)
+  removes the feedback; a time-normalised strong delta only changes who gets marked. Lighting-budget work, not
+  zombie work: left for the lighting keys' owner. Recorded Louisville runs tip into the regime ~2/3 of the time
+  (the recorder's GPU load is the push), unrecorded ~1/4: check gpu_ms before reading fps.
+- **Regime, final word (parity + characters-draw sessions, 08:00):** it is `see_all=true` of the Louisville preset
+  (the harness's whole-grid visibility: every level marked, the ambient fade crossing `lightingStrongDelta` on all
+  of them; a bound run bakes ~30k per period vs ~4k) — a harness artefact of that preset, not a key. The per-second
+  bake budget above still applies to any scene that sits near the tipping point.
+- **Leads left on the character side** (after `charDrawPrep`, characters draw 11.3 → 4.5 % of the game thread):
+  the model zombies' shadows 0.4-0.7 % (`FBORenderShadows.addShadow` → `calculateSlopeAngles` → `getGridSquare`,
+  `GameTime.getThirtyFPSMultiplier` → `allPlayersAsleep` twice per shadow — memoise per frame); the palette is
+  copied three times (worker buffer → draw data buffer → 60 `Matrix4f.load` in `init()` → the shader upload), a
+  `ModelSlotRenderData` / `AnimatedModelInstanceRenderData` override that keeps the buffer down to the upload would
+  halve the draw-prep batch (its wall time is the pooled render-data allocs, six synchronized `ObjectPool.alloc` per
+  zombie, not threads); the game thread waits ~0.15 ms a frame at that join.
+- **Measurement hazard found on the way:** ~7 of 25 Louisville runs today ran in a "GPU-doubled" regime (the
+  game's own gpu_ms 30 instead of 13-14 ms per frame, GPU load 82 %, 22 % of the game thread in the frame
+  hand-off wait, 28 fps): not tied to the keys, not to what ran before (the parity session checked). Check
+  `pzopt-overlay.out` gpu_ms over the route before believing any Louisville number.
+
 ## 5. Order, cost, exit criteria
 
 | # | Phase | Est. work | Gain (frame) | Exit criterion |

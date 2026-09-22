@@ -22,6 +22,12 @@ import zombie.WorldSoundManager;
 import zombie.Lua.LuaEventManager;
 import zombie.SharedDescriptors.Descriptor;
 import zombie.ai.State;
+import zombie.ai.StateMachine; // pzopt: ecsLookupFast
+import zombie.iso.objects.ShadowParams; // pzopt: shadowPrep
+import zombie.characters.component.StateMachineComponent; // pzopt: ecsLookupFast
+import zombie.core.skinnedmodel.advancedanimation.AdvancedAnimator; // pzopt: ecsLookupFast
+import zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandle; // pzopt: ecsLookupFast
+import zombie.core.skinnedmodel.advancedanimation.IAnimationVariableSlot; // pzopt: ecsLookupFast
 import zombie.ai.ZombieGroupManager;
 import zombie.ai.astar.Mover;
 import zombie.ai.astar.AStarPathFinder.PathFindProgress;
@@ -1554,6 +1560,121 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       return true;
    }
 
+   /**
+    * pzopt: zombieAtlasFast. The draw of a zombie without the virtual chain IsoZombie.render -> IsoGameCharacter.render
+    * for the two cases that make up a horde: a culled zombie (no active model, drawn as an atlas sprite) and a zombie
+    * whose model draw data the pre-pass built (pzopt.CharDraw.isPrepared). The same tests in the same order, the same
+    * writes (the alpha rule when the camera is not on the player, the depth-mask state, the static light scratch, the
+    * default facing, the last-rendered statics, the texture-creator check, the sprite scale, the item updaters, the
+    * debug renders) and the same middle: renderTextureInsteadOfModel for the culled one, IsoSprite.renderActiveModel's
+    * body (the lights call, which the frame stamp skips, the camera record, the model enqueue that takes the prepared
+    * data) for the other. Returns false, having done nothing, for anything else (fire sprites, a non-parts sprite, the
+    * non-fbo path, a debug mode, a fake-dead zombie, a model without prepared data): the caller then runs the stock
+    * render. ~1,100 + ~480 of the 1,600 on-screen objects of the Louisville horde take this path.
+    */
+   public boolean pzoptRenderFlat(float x, float y, float z, ColorInfo col) {
+      if (!pzopt.Overrides.enabled() || !pzopt.Config.ZOMBIE_ATLAS_FAST || Core.debug || !PerformanceSettings.fboRenderChunk) {
+         return false;
+      }
+      if (this.attachedAnimSprite != null || !this.useParts || this.sprite == null || this.legsSprite == null) {
+         return false;
+      }
+      boolean model = this.legsSprite.hasActiveModel();
+      if (model && !pzopt.CharDraw.isPrepared(this.legsSprite.modelSlot)) {
+         return false; // the stock chain builds its draw data
+      }
+      if (this.getCurrentState() == FakeDeadZombieState.instance()) {
+         return false;
+      }
+
+      // IsoZombie.render, the non-fake-dead branch
+      if (this.atlasTex != null) {
+         this.atlasTex = null;
+      }
+
+      if (IsoCamera.getCameraCharacter() != IsoPlayer.getInstance()) {
+         this.setAlphaAndTarget(1.0F);
+      }
+
+      // IsoGameCharacter.render
+      if (!this.getDoRender() || this.isAlphaAndTargetZero()) {
+         return true;
+      }
+
+      if (this.isSeatedInVehicle() && !this.getVehicle().showPassenger(this)) {
+         return true;
+      }
+
+      if (this.isSpriteInvisible() || this.isAlphaZero()) {
+         return true;
+      }
+
+      IndieGL.glDepthMask(true);
+      IsoGridSquare currentSquare = this.getCurrentSquare();
+      if (currentSquare != null) {
+         currentSquare.interpolateLight(inf, x - currentSquare.getX(), y - currentSquare.getY());
+      } else {
+         inf.r = col.r;
+         inf.g = col.g;
+         inf.b = col.b;
+         inf.a = col.a;
+      }
+
+      if (this.getForwardIsoDirection() == null) {
+         this.setForwardIsoDirection(IsoDirections.N);
+      }
+
+      lastRenderedRendered = lastRendered;
+      lastRendered = this;
+      this.checkUpdateModelTextures();
+      float scale = Core.tileScale;
+      this.def.setScale(scale, scale);
+      if (model) {
+         // IsoSprite.renderActiveModel
+         zombie.core.skinnedmodel.ModelManager.ModelSlot modelSlot = this.legsSprite.modelSlot;
+         if (modelSlot.model.object != null && DebugOptions.instance.isoSprite.renderModels.getValue()) {
+            try (zombie.GameProfiler.ProfileArea ignored = zombie.GameProfiler.getInstance().profile("Render Active Model")) {
+               if (!zombie.iso.fboRenderChunk.FBORenderCell.instance.renderDebugChunkState) {
+                  modelSlot.model.updateLights(); // returns at the frame stamp: the pre-pass ran it
+               }
+
+               zombie.core.skinnedmodel.ModelCameraRenderData cameraRenderData = pzopt.CharDraw.takeCamera(modelSlot); // built with the draw data
+               if (cameraRenderData == null) {
+                  cameraRenderData = zombie.core.skinnedmodel.ModelCameraRenderData.s_pool.alloc();
+                  cameraRenderData.init(zombie.core.opengl.CharacterModelCamera.instance, modelSlot);
+               }
+
+               zombie.core.SpriteRenderer.instance.drawGeneric(cameraRenderData);
+               zombie.core.SpriteRenderer.instance.drawModel(modelSlot);
+            }
+         }
+      } else {
+         this.renderTextureInsteadOfModel(x, y);
+      }
+
+      java.util.ArrayList<InventoryItem> items = this.inventory.items;
+      for (int n = 0; n < items.size(); n++) {
+         InventoryItem item = items.get(n);
+         if (item instanceof zombie.interfaces.IUpdater iUpdater) {
+            iUpdater.render();
+         }
+      }
+
+      if (this.getRagdollController() != null && this.canRagdoll()) {
+         this.getRagdollController().debugRender();
+      }
+
+      if (this.getBallisticsController() != null) {
+         this.getBallisticsController().debugRender();
+      }
+
+      if (this.getBallisticsTarget() != null) {
+         this.getBallisticsTarget().debugRender();
+      }
+
+      return true;
+   }
+
    private void renderTextureOverHead(String textureName) {
       float renderX = this.getX();
       float renderY = this.getY();
@@ -2125,14 +2246,18 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
                            }
 
                            thisToOther.normalize();
-                           Vector2 thisForward = this.getLookVector(tempo2);
-                           float cosAngle = thisForward.dot(thisToOther);
                            this.updateVisionRadius();
                            if (this.DistTo(other) > this.visionRadiusResult) {
                               chance = 0.0F;
                            }
 
-                           if (viewDist > 0.5F) {
+                           // pzopt: zombieSpotFast. The facing test below only scales the chance, so a chance already zero (the
+                           // player beyond this zombie's vision radius, or standing in the dark) skips the look-vector trig; the
+                           // vision-radius update moved above it (no dependence either way) so that is known first.
+                           boolean pzoptSkipFacing = chance == 0.0F && !bForced && pzopt.Overrides.enabled() && pzopt.Config.ZOMBIE_SPOT_FAST;
+                           if (viewDist > 0.5F && !pzoptSkipFacing) {
+                              Vector2 thisForward = this.getLookVector(tempo2);
+                              float cosAngle = thisForward.dot(thisToOther);
                               if (cosAngle < -0.4F) {
                                  chance = 0.0F;
                               } else if (cosAngle < -0.2F) {
@@ -2152,121 +2277,137 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
                               }
                            }
 
-                           if (chance > 0.0F
-                              && this.target instanceof IsoPlayer player
-                              && !GameServer.server
-                              && player.remoteId == -1
-                              && this.current.isCanSee(player.playerIndex)) {
-                              player.targetedByZombie = true;
-                              player.lastTargeted = 0.0F;
-                           }
-
-                           float movementData = other.getMovementLastFrame().getLength();
-                           float movementMod = 0.8F;
-                           if (movementData == 0.5F) {
-                              movementMod = 1.0F;
-                           } else if (movementData == 1.0F) {
-                              movementMod = 1.5F;
-                           } else if (movementData == 1.5F) {
-                              movementMod = 2.0F;
-                           }
-
-                           chance *= movementMod;
-                           if (viewDist < 5.0F
-                              && (!otherCharacter.isRunning() && !otherCharacter.isSneaking() && !otherCharacter.isAiming() || otherCharacter.isRunning())) {
-                              chance *= 3.0F;
-                           }
-
-                           float sneakingMod = otherCharacter.getSneakSpotMod();
-                           if (otherPlayer != null && !otherPlayer.isSneaking()) {
-                              sneakingMod = 1.0F;
-                           }
-
-                           chance *= sneakingMod;
-                           if (this.spottedLast == other && this.timeSinceSeenFlesh < 120.0F) {
-                           }
-
-                           if (this.target != other && this.target != null) {
-                              float distOther = IsoUtils.DistanceManhatten(this.getX(), this.getY(), other.getX(), other.getY());
-                              float distCurrent = IsoUtils.DistanceManhatten(this.getX(), this.getY(), this.target.getX(), this.target.getY());
-                              if (distOther > distCurrent) {
-                                 return;
-                              }
-                           }
-
-                           if (bForced) {
-                              chance = 1000000.0F;
-                           }
-
-                           if (this.bonusSpotTime > 0.0F) {
-                              chance *= 5.0F;
-                           }
-
-                           if (this.sight == 1) {
-                              chance *= 2.5F;
-                           }
-
-                           if (this.sight == 3) {
-                              chance *= 0.45F;
-                           }
-
-                           if (this.inactive) {
-                              chance *= 0.25F;
-                           }
-
-                           float traitMod = 1.0F;
-                           if (otherPlayer != null && otherPlayer.hasTrait(CharacterTrait.INCONSPICUOUS)) {
-                              traitMod = 0.8F;
-                           }
-
-                           if (otherPlayer != null && otherPlayer.hasTrait(CharacterTrait.CONSPICUOUS)) {
-                              traitMod = 1.2F;
-                           }
-
-                           chance *= traitMod;
-                           float shelterMod = 1.0F;
-                           if (this.getCurrentSquare() != other.getCurrentSquare() && otherPlayer != null && otherPlayer.isSneaking()) {
-                              int xDiff = Math.abs(this.getCurrentSquare().getX() - other.getCurrentSquare().getX());
-                              int yDiff = Math.abs(this.getCurrentSquare().getY() - other.getCurrentSquare().getY());
-                              if (xDiff > yDiff) {
-                                 if (this.getCurrentSquare().getX() - other.getCurrentSquare().getX() > 0) {
-                                    shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.E);
-                                 } else {
-                                    shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.W);
-                                 }
-                              } else if (this.getCurrentSquare().getY() - other.getCurrentSquare().getY() > 0) {
-                                 shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.S);
-                              } else {
-                                 shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.N);
-                              }
-                           }
-
-                           chance *= shelterMod;
-                           boolean intersectVision = this.isVehicleBetween(otherCharacter.getX(), otherCharacter.getY(), otherCharacter.getZ());
-                           thisToOther.x = other.getX();
-                           thisToOther.y = other.getY();
-                           thisToOther.x = thisToOther.x - this.getX();
-                           thisToOther.y = thisToOther.y - this.getY();
-                           float carObstacleMod = intersectVision && otherCharacter.getVehicle() == null
-                              ? (thisToOther.getLength() < 1.5F ? 0.5F : 0.0F)
-                              : 1.0F;
-                           chance *= carObstacleMod;
-                           chance /= this.getWornItemsVisionModifier();
-                           if (this.getEatBodyTarget() != null && chance > 0.0F) {
-                              chance *= 0.5F;
-                           }
-
-                           chance = PZMath.fastfloor(chance);
+                           // pzopt: zombieSpotFast. A chance of zero here (the zombie faces away, or the player is beyond its vision
+                           // radius) stays zero through every modifier below (each one multiplies or divides it) and the roll cannot
+                           // succeed, so the zombie skips straight to the one early exit a zero chance still takes and to the
+                           // failed-roll bookkeeping: the could-be-seen flag needs a chance above 20 and the sneak / lightfoot XP rolls
+                           // do not read the chance. Saves the perk walk, two trait lookups, the vehicle test and the pow per zombie.
                            boolean success = false;
-                           chance = Math.min(chance, 400.0F);
-                           chance /= 400.0F;
-                           chance = Math.max(0.0F, chance);
-                           chance = Math.min(1.0F, chance);
-                           float mp = GameTime.instance.getMultiplier();
-                           chance = (float)(1.0 - Math.pow(1.0F - chance, mp));
-                           chance *= 100.0F;
-                           if (Rand.Next(10000) / 100.0F < chance) {
-                              success = true;
+                           boolean pzoptZero = chance == 0.0F && !bForced && pzopt.Overrides.enabled() && pzopt.Config.ZOMBIE_SPOT_FAST;
+                           if (pzoptZero) {
+                              if (this.target != other && this.target != null) {
+                                 float distOther = IsoUtils.DistanceManhatten(this.getX(), this.getY(), other.getX(), other.getY());
+                                 float distCurrent = IsoUtils.DistanceManhatten(this.getX(), this.getY(), this.target.getX(), this.target.getY());
+                                 if (distOther > distCurrent) {
+                                    return;
+                                 }
+                              }
+                           } else {
+                              if (chance > 0.0F
+                                 && this.target instanceof IsoPlayer player
+                                 && !GameServer.server
+                                 && player.remoteId == -1
+                                 && this.current.isCanSee(player.playerIndex)) {
+                                 player.targetedByZombie = true;
+                                 player.lastTargeted = 0.0F;
+                              }
+
+                              float movementData = other.getMovementLastFrame().getLength();
+                              float movementMod = 0.8F;
+                              if (movementData == 0.5F) {
+                                 movementMod = 1.0F;
+                              } else if (movementData == 1.0F) {
+                                 movementMod = 1.5F;
+                              } else if (movementData == 1.5F) {
+                                 movementMod = 2.0F;
+                              }
+
+                              chance *= movementMod;
+                              if (viewDist < 5.0F
+                                 && (!otherCharacter.isRunning() && !otherCharacter.isSneaking() && !otherCharacter.isAiming() || otherCharacter.isRunning())) {
+                                 chance *= 3.0F;
+                              }
+
+                              float sneakingMod = otherCharacter.getSneakSpotMod();
+                              if (otherPlayer != null && !otherPlayer.isSneaking()) {
+                                 sneakingMod = 1.0F;
+                              }
+
+                              chance *= sneakingMod;
+                              if (this.spottedLast == other && this.timeSinceSeenFlesh < 120.0F) {
+                              }
+
+                              if (this.target != other && this.target != null) {
+                                 float distOther = IsoUtils.DistanceManhatten(this.getX(), this.getY(), other.getX(), other.getY());
+                                 float distCurrent = IsoUtils.DistanceManhatten(this.getX(), this.getY(), this.target.getX(), this.target.getY());
+                                 if (distOther > distCurrent) {
+                                    return;
+                                 }
+                              }
+
+                              if (bForced) {
+                                 chance = 1000000.0F;
+                              }
+
+                              if (this.bonusSpotTime > 0.0F) {
+                                 chance *= 5.0F;
+                              }
+
+                              if (this.sight == 1) {
+                                 chance *= 2.5F;
+                              }
+
+                              if (this.sight == 3) {
+                                 chance *= 0.45F;
+                              }
+
+                              if (this.inactive) {
+                                 chance *= 0.25F;
+                              }
+
+                              float traitMod = 1.0F;
+                              if (otherPlayer != null && otherPlayer.hasTrait(CharacterTrait.INCONSPICUOUS)) {
+                                 traitMod = 0.8F;
+                              }
+
+                              if (otherPlayer != null && otherPlayer.hasTrait(CharacterTrait.CONSPICUOUS)) {
+                                 traitMod = 1.2F;
+                              }
+
+                              chance *= traitMod;
+                              float shelterMod = 1.0F;
+                              if (this.getCurrentSquare() != other.getCurrentSquare() && otherPlayer != null && otherPlayer.isSneaking()) {
+                                 int xDiff = Math.abs(this.getCurrentSquare().getX() - other.getCurrentSquare().getX());
+                                 int yDiff = Math.abs(this.getCurrentSquare().getY() - other.getCurrentSquare().getY());
+                                 if (xDiff > yDiff) {
+                                    if (this.getCurrentSquare().getX() - other.getCurrentSquare().getX() > 0) {
+                                       shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.E);
+                                    } else {
+                                       shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.W);
+                                    }
+                                 } else if (this.getCurrentSquare().getY() - other.getCurrentSquare().getY() > 0) {
+                                    shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.S);
+                                 } else {
+                                    shelterMod = this.getObstacleMod(other.getCurrentSquare(), IsoDirections.N);
+                                 }
+                              }
+
+                              chance *= shelterMod;
+                              boolean intersectVision = this.isVehicleBetween(otherCharacter.getX(), otherCharacter.getY(), otherCharacter.getZ());
+                              thisToOther.x = other.getX();
+                              thisToOther.y = other.getY();
+                              thisToOther.x = thisToOther.x - this.getX();
+                              thisToOther.y = thisToOther.y - this.getY();
+                              float carObstacleMod = intersectVision && otherCharacter.getVehicle() == null
+                                 ? (thisToOther.getLength() < 1.5F ? 0.5F : 0.0F)
+                                 : 1.0F;
+                              chance *= carObstacleMod;
+                              chance /= this.getWornItemsVisionModifier();
+                              if (this.getEatBodyTarget() != null && chance > 0.0F) {
+                                 chance *= 0.5F;
+                              }
+
+                              chance = PZMath.fastfloor(chance);
+                              chance = Math.min(chance, 400.0F);
+                              chance /= 400.0F;
+                              chance = Math.max(0.0F, chance);
+                              chance = Math.min(1.0F, chance);
+                              float mp = GameTime.instance.getMultiplier();
+                              chance = (float)(1.0 - Math.pow(1.0F - chance, mp));
+                              chance *= 100.0F;
+                              if (Rand.Next(10000) / 100.0F < chance) {
+                                 success = true;
+                              }
                            }
 
                            if (!GameClient.client && !GameServer.server || NetworkZombieManager.canSpotted(this) || other == this.target) {
@@ -2410,8 +2551,16 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       boolean pzoptCull = pzopt.Overrides.enabled() && pzopt.Config.VEHICLE_CULL;
       float pzoptZx = this.getX();
       float pzoptZy = this.getY();
+      // pzopt: and since the player-LOS pass the walk covers only the vehicles near the target: every zombie asking in a
+      // frame asks about the same player position, and spottedNew only asks within the view distance, so one per-frame
+      // list of the vehicles whose circle reaches that disc (or this zombie's distance, whichever is larger) serves them all.
+      java.util.Collection<BaseVehicle> pzoptVehicles = IsoWorld.instance.currentCell.getVehicles();
+      if (pzoptCull) {
+         float pzoptReach = Math.max(GameTime.getInstance().getViewDist(), IsoUtils.DistanceTo(pzoptZx, pzoptZy, targetX, targetY));
+         pzoptVehicles = pzopt.VehicleCull.near(pzoptVehicles, targetX, targetY, pzoptReach, IsoWorld.instance.getFrameNo());
+      }
 
-      for (BaseVehicle vehicle : IsoWorld.instance.currentCell.getVehicles()) {
+      for (BaseVehicle vehicle : pzoptVehicles) {
          if (pzoptCull && !pzopt.VehicleCull.mayIntersect(vehicle, pzoptZx, pzoptZy, targetX, targetY)) {
             continue;
          }
@@ -5175,15 +5324,23 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
          return false;
       }
 
-      tempo.set(this.target.getX() - this.getX(), this.target.getY() - this.getY()).normalize();
-      if (tempo.getLength() == 0.0F) {
+      // pzopt: actionEvalParallel. This is the "isFacingTarget" animation variable, read by the action-context transition
+      // conditions, which evaluate on the frame workers; the two vectors are thread-local scratch instead of the shared
+      // static pair the class inherits (same arithmetic).
+      Vector2[] pzoptScratch = pzoptFacingScratch.get();
+      Vector2 pzoptTo = pzoptScratch[0];
+      Vector2 pzoptLook = pzoptScratch[1];
+      pzoptTo.set(this.target.getX() - this.getX(), this.target.getY() - this.getY()).normalize();
+      if (pzoptTo.getLength() == 0.0F) {
          return true;
       }
 
-      this.getLookVector(tempo2);
-      float dot = Vector2.dot(tempo.x, tempo.y, tempo2.x, tempo2.y);
+      this.getLookVector(pzoptLook);
+      float dot = Vector2.dot(pzoptTo.x, pzoptTo.y, pzoptLook.x, pzoptLook.y);
       return dot >= 0.8F;
    }
+
+   private static final ThreadLocal<Vector2[]> pzoptFacingScratch = ThreadLocal.withInitial(() -> new Vector2[]{new Vector2(), new Vector2()}); // pzopt: actionEvalParallel
 
    public boolean isTargetLocationKnown() {
       if (this.target == null) {
@@ -5972,6 +6129,94 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       public static IsoZombie.ZombieSound fromIndex(int index) {
          return index >= 0 && index < values.length ? values[index] : MAX;
       }
+   }
+
+   // pzopt: ecsLookupFast. IsoGameCharacter reaches its StateMachineComponent through the entity-component map on every
+   // getStateMachine / getActionContext / getCurrentState / isCurrentState / getVariable (a class walk, a HashMap probe and
+   // a reflective cast per call; ~5 % of the game thread on the Louisville horde, most of it under the action-context
+   // transition evaluation and the AI state checks). The component is registered once in the constructor and never
+   // replaced, so a zombie keeps it in a field after the first lookup and the accessors become field reads. The field has
+   // no initialiser on purpose: the IsoGameCharacter constructor already calls these accessors before this class's field
+   // initialisers run, and an initialiser would wipe the cached value afterwards.
+   private StateMachineComponent pzoptStateMachineComponent;
+
+   private StateMachineComponent pzoptStateMachineComponent() {
+      StateMachineComponent component = this.pzoptStateMachineComponent;
+      if (component == null) {
+         component = this.getStateMachineComponent();
+         this.pzoptStateMachineComponent = component;
+      }
+
+      return component;
+   }
+
+   private static boolean pzoptEcsFast() {
+      return pzopt.Overrides.enabled() && pzopt.Config.ECS_LOOKUP_FAST;
+   }
+
+   @Override
+   public ActionContext getActionContext() {
+      return pzoptEcsFast() ? this.pzoptStateMachineComponent().getActionContext() : super.getActionContext(); // pzopt: ecsLookupFast
+   }
+
+   @Override
+   public StateMachine getStateMachine() {
+      return pzoptEcsFast() ? this.pzoptStateMachineComponent().getStateMachine() : super.getStateMachine(); // pzopt: ecsLookupFast
+   }
+
+   @Override
+   public AdvancedAnimator getAdvancedAnimator() {
+      return pzoptEcsFast() ? this.pzoptStateMachineComponent().getAdvancedAnimator() : super.getAdvancedAnimator(); // pzopt: ecsLookupFast
+   }
+
+   @Override
+   public State getCurrentState() {
+      return pzoptEcsFast() ? this.pzoptStateMachineComponent().getStateMachine().getCurrent() : super.getCurrentState(); // pzopt: ecsLookupFast
+   }
+
+   @Override
+   public boolean isCurrentState(State state) {
+      if (!pzoptEcsFast()) {
+         return super.isCurrentState(state);
+      }
+
+      StateMachine stateMachine = this.pzoptStateMachineComponent().getStateMachine(); // pzopt: ecsLookupFast, one lookup instead of two
+      return stateMachine.isSubstate(state) || stateMachine.getCurrent() == state;
+   }
+
+   @Override
+   public IAnimationVariableSlot getVariable(AnimationVariableHandle handle) {
+      if (pzoptEcsFast()) {
+         // pzopt: ecsLookupFast, the action context from the field; the game-variable fallback is the inherited method
+         ActionContext actionContext = this.pzoptStateMachineComponent().getActionContext();
+         if (actionContext != null) {
+            IAnimationVariableSlot actionSlot = actionContext.getVariable(handle);
+            if (actionSlot != null) {
+               return actionSlot;
+            }
+         }
+      }
+
+      return super.getVariable(handle);
+   }
+
+   // pzopt: shadowPrep. The shadow ellipse computed on the worker right after this zombie's bones (AnimationPlayer
+   // override, pzopt.ShadowPrep) replaces the game-thread computation in renderShadow while the bones have not moved;
+   // a zombie whose update did not go through the batch this frame (or whose animation did not update) takes the stock path.
+   @Override
+   public ShadowParams calculateShadowParams(ShadowParams sp) {
+      if (pzopt.Overrides.enabled() && pzopt.Config.SHADOW_PREP && this.hasAnimationPlayer()) {
+         AnimationPlayer animationPlayer = this.getAnimationPlayer();
+         long packed = animationPlayer.pzoptShadowParams();
+         if (packed != 0L && animationPlayer.isReady()) {
+            pzopt.ShadowPrep.served++;
+            return sp.set(0.45F, pzopt.ShadowPrep.fm(packed), pzopt.ShadowPrep.bm(packed));
+         }
+
+         pzopt.ShadowPrep.fallback++;
+      }
+
+      return super.calculateShadowParams(sp);
    }
 
    private static class s_performance {

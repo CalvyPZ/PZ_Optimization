@@ -37,7 +37,12 @@ Modes:
   route since 2026-09-20 is `--flag route=S:450 --flag turn=90 --route-seconds 25` (south through
   Rosewood from the bench save, 55 chunks/s), reference runs `gt-q-*`. **Always** `--flag zoom=max` (the
   save's zoom drifts to 1.0; zoom 1.0 is CPU-bound near the 240 cap, zoom 2.5 is the real
-  test). Check `zoom=2.5` in `pzopt-bench.out` before comparing.
+  test). Check `zoom=2.5` in `pzopt-bench.out` before comparing. Since 2026-09-22 the summary also carries
+  `zombie_batches=` (the `anim batch:` / `action eval:` / `lighting batch:` / `frame batches` counters of
+  `pzopt.FrameBatch`'s users at route end: batched / inline / max per frame / work and wait ms / shadow served vs
+  fallback / dev-rig checks and mismatches) and `bake_counters=` (bakes, deferred, held and strong re-bakes,
+  strong marks, `strongBudgetCuts` of `lightingStrongFrameMs`, since boot) — the periodic FBORenderCell log line
+  never prints in a run shorter than 1,800 frames, these do.
 - Presets (`--preset name`, 2026-09-20): a named bundle of scene flags on top of the spinning
   game-thread route (`route=S:450 turn=90 zoom=max`, 25 s; any later `--flag`/`--mode`/`--route-seconds`
   wins). `night-torch` = 01:00 with a lit Base.HandTorch in the primary hand (beam sweeps with the
@@ -68,6 +73,8 @@ Modes:
   %[fx:standard_deviation*1000]`): stock 22.9, blurred optimized 7.9, pinned optimized 27.1 / stock 24.5; AV1
   recordings are too noisy for it.
   Scene flags on their own: `start=X,Y`, `population=N|max`, `zombies=off` (population 0 + every loaded zombie removed each tick), `jitter=T` (with hold: player X flips across the end square's east edge by ±T tiles every frame), `see_all=true`, `time_of_day=H`, `weather=storm|clear`, `fog=heavy|off|0..1`, `torch=on|off`, `headlights=on|off|auto` (drive: the spawned car's headlights; auto = on when `time_of_day` is a night hour, 2026-09-21), `lightbar=0..3` (drive: the emergency lightbar lights mode of an ambulance / police car, 0 = off),
+  `helicopter=true` (= `--preset helicopter`: the stock chopper event started at the route start and placed next to the player, its 500-radius world sound every few seconds from its moving position; state line every 5 s, `helicopter=` in pzopt-bench.out; 2026-09-22 runs `heli-*`),
+  `sound=R` (a stock 600-radius-style world sound every `sound_every` frames, `sound_fixed=true` from one still square like a house alarm, `sound_parts=true` times the fish walk and the popman scan too; `addSound` timed on the game thread, `sound_stats=` in pzopt-bench.out; 2026-09-22 runs `sound-*`),
   `visible=true` (`pzopt.Scene`; applied at world-ready, re-pinned every frame, recorded in `pzopt-bench.out`
   as `time_of_day/game_hour/weather/fog/torch/visible/night_strength/precipitation/fog_intensity/fog_fx/
   fog_quality/lightning_strikes/population/zombies_loaded/see_all`, plus `start=` = the route's first square; `torch check` console line every 5 s; the sandbox `MaxFogIntensity` cap
@@ -132,7 +139,16 @@ harness/queue.sh start [machine...] | stop [--now]   # monitor + workers (transi
 
 **Machines** (`harness/queue/machines.conf`: desktop = local; flip, dell, mac = ssh host, key, checkout,
 `PZ_ROOT`, `run_args`, display-env source, inhibit / steam_shutdown flags, installer, `runner=`). One worker
-unit per machine runs that machine's FIFO. A remote `run` job: rsync `harness/` (+ `build/classes` with
+unit per machine runs that machine's jobs in three tiers (2026-09-22, was FIFO): **media first** (oldest
+first; an encode / stitch normally means a session is wrapping up), then **each session's first job of a
+batch** FIFO (a job submitted while its session had nothing pending or running on that machine; a batch takes
+one place in the line, a newcomer never waits behind a peer's whole batch), then **every other job shortest
+first** (oldest on a tie). The size is estimated at submit time: `--size <secs>`, else the median `ran` of the
+finished jobs with the same signature (kind + arguments minus `--label` / `--prop` / `--option` / `--env`),
+else a default from the arguments (run: 40 s + route / quit-after seconds; mp 240; workshop 90; cmd 60;
+media 120). A job pending longer than `PZQ_MAX_WAIT` (1800 s) goes first regardless. `submit` prints the
+tier and estimate, `list` has an `order` column (`media` / `first` / `~85s`), `next [machine]` prints the
+pending jobs in pick order. A remote `run` job: rsync `harness/` (+ `build/classes` with
 `--install opt`, installed there with `install.sh --from` / `run-mac.sh install`) to the machine's checkout →
 a generated wrapper (`<job>/remote-job.sh`) exports the desktop session's display env from plasmashell's
 environ, unlocks + inhibits sleep (Dell), shuts Steam down (Dell), runs `harness/run.sh <args> <run_args>`
@@ -156,7 +172,12 @@ finished) or by `Monitor`ing `sessions/<sid>/events` / a job's `status` file; `e
 `mp/run.sh` / `showcase-record.sh` / `ui-drive.py workshop` outside the queue, a locked desktop; a
 `workshop` job also needs a really logged-on Steam client (one client restart when the session was replaced).
 `--install opt` = `pzopt.sh reinstall` from the job's checkout (build first), `stock` = uninstall, reinstalled
-from the same checkout once the desktop queue drains; `--prop enabled=false` needs no install.
+from the same checkout once the desktop queue drains; `--prop enabled=false` needs no install. `keep` (the
+default) leaves the install alone, except that a `run` / `mp` job finding the game dir stock with no `--install
+stock` job behind it reinstalls from its checkout first: an uninstalled game has no `pzopt.Harness`, so nothing
+presses click-to-start and a bench run sits there forever (job 0204 on 2026-09-22, after a peer's `--install opt`
+had uninstalled and then failed on an empty `build/classes`; `pzopt.sh reinstall` now checks the build before
+removing anything).
 
 **result.txt** (`--wait` prints it, exit = the job's):
 - `run`: exit code, `run_dir`, `route complete` count, resolution / OpenGL lines, `zoom=` & scene lines from
@@ -174,9 +195,9 @@ from the same checkout once the desktop queue drains; `--prop enabled=false` nee
   page's newest entry; `~/Zomboid/.../workshop.txt` copied to `docs/workshop/workshop.txt` (uncommitted). A
   failure keeps `failure.png` and quits the game so the queue goes on.
 - `cmd`: exit code, output tail, the run dir if the command produced one under the label.
-- `media` (every encode / re-encode / stitch / GIF render, 2026-09-21 night): shares the desktop FIFO with
-  the runs, so an encode never overlaps a benchmark on this machine; it yields to every other pending
-  desktop job (runs first, encodes fill the gaps) and both kinds wait for a game, run.sh or
+- `media` (every encode / re-encode / stitch / GIF render, 2026-09-21 night): shares the desktop queue with
+  the runs, so an encode never overlaps a benchmark on this machine; since 2026-09-22 it goes before every
+  pending run (tier 1, see above) and both kinds wait for a game, run.sh or
   `ffmpeg` / `gpu-screen-recorder` started outside the queue. The result probes every output (`--out`, else
   the video / image paths in the command that the job wrote) with ffprobe: `output=<file> WxH s MB codec=
   pix_fmt= transfer= primaries= hdr_av1_ok=yes|no`, with a WARNING under a video that is not AV1 10-bit
@@ -249,11 +270,14 @@ same window with `harness/mp/window.py <run>:27 ...`; results in `docs/results.m
 | `waits.py <run>` | JFR wait events (`--jfr --jfr-setting jdk.JavaMonitorWait#threshold=0ms` etc.) | per-thread blocking sites in the route window |
 | `attribute.py` / `sections.py` | JFR samples / GameProfiler recording (`--game-profiler`) | where slow-frame time goes (`sections.py --thread game\|render`: the game records `MainThread` = game thread and `main` = render thread; the probes themselves cost ~8 % of the game thread; prefer JFR) |
 | `flamegraph.py <run> [--out x.svg] [--folded x.txt] [--all]` | pzopt-stacks.out (the overlay's folded game-thread stacks, one block per second, frame-id dictionary; every harness run with the overrides on) | self-contained SVG flame graph of the game thread over the route window (root `GameWindow.frameStep` at the bottom, hover = share, click = zoom, search box; update green / render blue / lighting amber / pzopt magenta), `<run>/flamegraph.svg` by default; `--folded` = classic `a;b;c count` lines; `--all` = the whole run (boot, load). No JFR needed; safepoint-biased at 100 Hz |
+| `subtree.py <run>... [--frame Class.method] [--depth N] [--min-pct P] [--self] [--all]` | pzopt-stacks.out | the callee tree under one game frame over the route window (default `FBORenderCell.renderMovingObjects`, the characters draw), inclusive share of all game-thread samples per callee, `--self` adds the leaf frames; several runs = one tree each, so a before / after pair is one command (2026-09-22, the characters draw pass) |
+| `simdiff.py <run-a> <run-b>` | pzopt-sim.out (`--prop devSimChecksum=true`: one line per frame hashing every zombie's position, target, action and animation state after postupdate) | the first frame two runs' checksums differ. Caveat found on 2026-09-22: two runs of the game are never frame-aligned (the zombie count differs from frame 5, spawn timing), so it cannot prove a parallel phase equal to the serial one; the per-phase in-run rigs do (`devActionEvalCheck`, `devLightingReadCheck`, counters on the `zombie_batches=` line) |
 | `gametree.py <run>` | JFR samples (`--jfr --jfr-period 1`) | inclusive call tree of the game thread over the route (`--root`, `--thread main` for the GL thread, `--callers method`, `--min-pct`) |
 | `loadtime.py <runs>` | pzopt-loadtrace.out | load-after-Continue phases side by side |
 | `loadsheet.sh <run>` | recording.mp4 + loadtrace | contact sheet around the load |
 | `parity.py a b` | pzopt-parity.out | square-by-square recalc diff |
 | `blacktiles.py ctrl.png run.png...` | `--shot-at` captures | newly-black pixels and fully black 32 px tiles of a run against a control capture |
+| `blackframes.py <recording.mp4>... [--fps 4] [--csv out]` | `--record` captures | per-frame count of entirely black 8 px blocks (32 px at 5K) over the scene, whole and centre 50 %, worst seconds; compare runs of one route only — downtown interiors and the void beyond the loaded grid are black in stock too (2026-09-22, Louisville black squares), so read it next to frames, not alone |
 | `zoomsteps.py <run> [--window S]` | pzopt-frames.out of a `--flag zoom_cycle=S [zoom_span=N] [zoom_jump=true]` run (the harness marks `zoom-<level>` at every step) | frame times in the window after each camera zoom step vs the rest of the route (max / p99 / >8 >16 >33 ms); the console has a per-step bake trace (`zoom step N trace`) and the `retain:` / `change-frame` counters; `attribute.py --after-mark zoom-:1` and `sections.py --after-mark zoom-2.5:1` profile the change frames |
 | `flicker.py <run>/recording.mp4 START END [--scale W] [--heat png]` | `--record` of a `--flag hold=N` run | per-frame appear / disappear metric (pixels that change and revert within 3 frames), busiest screen cells, heat map |
 | `flicker-triple.py <run>/recording.mp4 FRAME` | same | crops of one frame triple with the A-B-A pixels marked (frame-numbered; use `-ss` times for anything compared with flicker.py) |
@@ -267,7 +291,6 @@ same window with `harness/mp/window.py <run>:27 ...`; results in `docs/results.m
 | `stitch-quad.sh` | four drive recordings | 2:1 quad video (header comment has the launch recipe); its quad6 captures are SDR H.264, composed in SDR and mapped to PQ/BT.2020 (reference white 203 nits) at the end |
 | `stitch-louisville-sbs.sh <stock-label> <opt-label> [out]` | two `--preset louisville` recordings (in-game overlay on) | side-by-side aligned at the quit-to-black instant (the game quits the moment the route ends: a hard sync point in both captures, unlike the file birth time, which is 0.3-0.6 s off and drifts 6 ms/s) minus the route length; overlay insets at half size; header numbers from `analyze.py`'s overlay line; `docs/media/louisville-horde-spin-stock-vs-optimized.mp4` |
 | `stitch-storm-sbs.sh` | stock + optimized 120 km/h thunderstorm recordings (`sbs-storm120-*`, in-game overlay on) | side-by-side aligned at the car's motion onset, each run's overlay inset at full resolution |
-| `blackframes.py <recording.mp4>... [--fps 4] [--csv out]` | `--record` captures | per-frame count of entirely black 8 px blocks (32 px at 5K) over the scene, whole and centre 50 %, worst seconds; compare runs of one route only — downtown interiors and the void beyond the loaded grid are black in stock too (2026-09-22, Louisville black squares), so read it next to frames, not alone |
 | `stitch-stormfog-sbs.sh` | stock + optimized 120 km/h heavy-fog thunderstorm recordings (`sbs-stormfog-*`, preset storm-fog, 2026-09-21) | the same layout: `docs/media/drive-120kmh-storm-fog-stock-vs-optimized.mp4` (AV1 HDR, 3840x810, 42 s) + poster jpg |
 | `stitch-blocky-lights.sh` | the `bl-torch-*`, `bl-drive-*` and `bl-amb-*` night recordings (before = the fix keys at their old values) | `docs/media/blocky-lights-before-vs-after.mp4` (AV1 HDR, 3840x790, 60 s: torch spin, SportsCar drive, ambulance drive, each BEFORE / AFTER / STOCK) + poster jpg |
 | `encode-av1-hdr.sh in out [width]` | any mp4 | AV1 10-bit HDR re-encode (HDR input kept, SDR input mapped to PQ/BT.2020), optional downscale; used for the 60 km/h video and the `-1080` README copies |

@@ -251,6 +251,7 @@ public final class FogPass {
       private final int[] uni = new int[16];
       private final FloatBuffer mat = BufferUtils.createFloatBuffer(16);
       private final int[] viewport = new int[4];
+      private final float[] viewportF = new float[4]; // the exact viewport, fractional offset included (the upscaler's sub-pixel jitter)
       private final Matrix4f mvp = new Matrix4f();
       private int checks;
       private int sampler;
@@ -276,6 +277,7 @@ public final class FogPass {
             return false;
          }
          GL11.glGetIntegerv(GL11.GL_VIEWPORT, this.viewport);
+         GL11.glGetFloatv(GL11.GL_VIEWPORT, this.viewportF);
          int vx = this.viewport[0];
          int vy = this.viewport[1];
          int vw = this.viewport[2];
@@ -415,7 +417,11 @@ public final class FogPass {
          // four nearest fog texels weighted by bilinear distance and by how close their depth is to its own scene
          // depth, so a wire keeps the fog of the texel that was decided at its depth and the ground next to it its own
          GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, currentFbo);
-         GL11.glViewport(vx, vy, vw, vh);
+         if (this.viewportF[0] != vx || this.viewportF[1] != vy) {
+            org.lwjgl.opengl.GL41.glViewportIndexedf(0, this.viewportF[0], this.viewportF[1], this.viewportF[2], this.viewportF[3]); // keep the upscaler's jitter
+         } else {
+            GL11.glViewport(vx, vy, vw, vh);
+         }
          GL20.glUseProgram(this.compositeProgram);
          GL20.glUniform1i(this.uni[9], 0);
          GL20.glUniform1i(this.uni[13], 1);

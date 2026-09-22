@@ -1,7 +1,5 @@
 package pzopt;
 
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.LockSupport;
 import zombie.characters.IsoGameCharacter;
 import zombie.characters.IsoZombie;
 import zombie.core.skinnedmodel.animation.AnimationPlayer;
@@ -16,7 +14,8 @@ import zombie.core.skinnedmodel.animation.AnimationPlayer;
  * arrays, the read-only clips, thread-safe pools and the scratch objects the override made thread-local, so it can run
  * anywhere: during {@code MovingObjectUpdateScheduler.postupdate()} the override's {@code updateInternal} keeps the
  * multi-track tick on the game thread and hands the rest to this batch; after the last object the batch runs on the
- * worker threads and the game thread together and is joined before anything (attachments, the render data) reads a bone.
+ * {@link FrameBatch} workers and the game thread together and is joined before anything (attachments, the render data)
+ * reads a bone.
  *
  * <p>Not batched: players and animals, a zombie without a model (its update is non-visual), a zombie being grappled or
  * grappling (the other side reads its bones in the same loop), one that reanimated a dead player (the player copies its
@@ -31,17 +30,11 @@ public final class AnimBatch {
    }
 
    private static final boolean ENABLED = Config.ANIM_BONES_PARALLEL && Config.effectiveWorkers() > 1;
-   private static final int THREADS = Math.max(1, Math.min(Config.ANIM_BONES_THREADS, Runtime.getRuntime().availableProcessors() - 1));
 
    private static boolean active; // game thread only: submissions accepted
    private static AnimationPlayer[] players = new AnimationPlayer[1024];
    private static float[] deltas = new float[1024];
    private static int count;
-   private static final AtomicInteger cursor = new AtomicInteger();
-   private static final AtomicInteger finished = new AtomicInteger();
-   private static final Object gate = new Object();
-   private static int generation; // guarded by gate
-   private static Thread[] workers;
    private static volatile boolean failed;
 
    public static long batched, inline, frames, maxBatch, waitNanos, workNanos; // counters for the log
@@ -50,9 +43,6 @@ public final class AnimBatch {
    public static void begin() {
       if (!ENABLED || failed) {
          return;
-      }
-      if (workers == null) {
-         start();
       }
       count = 0;
       active = true;
@@ -84,7 +74,7 @@ public final class AnimBatch {
       return true;
    }
 
-   /** Game thread: run everything queued since begin() on the workers and this thread, and wait for all of it. */
+   /** Game thread: run everything queued since begin() on the workers and this thread (pzopt.FrameBatch), and wait for all of it. */
    public static void flush() {
       if (!active) {
          return;
@@ -93,82 +83,27 @@ public final class AnimBatch {
       if (count == 0) {
          return;
       }
-      long t0 = System.nanoTime();
       frames++;
       if (count > maxBatch) {
          maxBatch = count;
       }
-      cursor.set(0);
-      finished.set(0);
-      synchronized (gate) {
-         generation++;
-         gate.notifyAll();
+      long w0 = FrameBatch.workNanos;
+      long q0 = FrameBatch.waitNanos;
+      Throwable t = FrameBatch.run(count, i -> players[i].pzoptRunDeferred(deltas[i]));
+      workNanos += FrameBatch.workNanos - w0;
+      waitNanos += FrameBatch.waitNanos - q0;
+      if (t != null && !failed) {
+         failed = true; // back to the inline path from the next frame on
+         Log.warn("animBonesParallel: deferred bone update failed, batching off: " + t);
       }
-      run();
-      long t1 = System.nanoTime();
-      int spins = 0;
-      while (finished.get() < count) {
-         if (++spins < 200) {
-            Thread.onSpinWait();
-         } else {
-            LockSupport.parkNanos(20_000L);
-         }
-      }
-      long t2 = System.nanoTime();
-      workNanos += t1 - t0;
-      waitNanos += t2 - t1;
       java.util.Arrays.fill(players, 0, count, null);
       count = 0;
-   }
-
-   private static void run() {
-      int i;
-      while ((i = cursor.getAndIncrement()) < count) {
-         try {
-            players[i].pzoptRunDeferred(deltas[i]);
-         } catch (Throwable t) {
-            if (!failed) {
-               failed = true; // back to the inline path from the next frame on
-               Log.warn("animBonesParallel: deferred bone update failed, batching off: " + t);
-            }
-         } finally {
-            finished.incrementAndGet();
-         }
-      }
-   }
-
-   private static void start() {
-      workers = new Thread[THREADS];
-      for (int k = 0; k < THREADS; k++) {
-         Thread t = new Thread(AnimBatch::workerLoop, "pzopt-anim-" + k);
-         t.setDaemon(true);
-         t.setPriority(Thread.NORM_PRIORITY);
-         workers[k] = t;
-         t.start();
-      }
-      Log.info("animBonesParallel: " + THREADS + " worker threads for the zombies' bone math");
-   }
-
-   private static void workerLoop() {
-      int seen = 0;
-      while (true) {
-         synchronized (gate) {
-            while (generation == seen) {
-               try {
-                  gate.wait();
-               } catch (InterruptedException e) {
-                  return;
-               }
-            }
-            seen = generation;
-         }
-         run();
-      }
    }
 
    /** One line for the periodic FBORenderCell log. */
    public static String describe() {
       return "anim batch: frames=" + frames + " batched=" + batched + " inline=" + inline + " max=" + maxBatch
-            + " work ms=" + (workNanos / 1_000_000L) + " wait ms=" + (waitNanos / 1_000_000L) + (failed ? " FAILED" : "");
+            + " work ms=" + (workNanos / 1_000_000L) + " wait ms=" + (waitNanos / 1_000_000L) + (failed ? " FAILED" : "")
+            + " shadow computed=" + ShadowPrep.computed + " served=" + ShadowPrep.served + " fallback=" + ShadowPrep.fallback;
    }
 }

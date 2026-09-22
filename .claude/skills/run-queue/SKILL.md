@@ -17,7 +17,8 @@ its readings and the benchmark stretches the encode.
 ```bash
 harness/queue.sh machines        # every machine: connected / disconnected / local, queue depth, running job, bound sessions,
                                  # and "this session: <id> -> <machine>" (your affinity)
-harness/queue.sh list            # every job: machine, status, label, note (blocked reason / exit + Jev verdict)
+harness/queue.sh list            # every job: machine, status, order (media / first / ~85s), label, note (blocked reason / exit + Jev verdict)
+harness/queue.sh next [machine]  # the pending jobs of a machine in the order the worker will take them
 harness/queue.sh events          # the last 20 events for this session (jobs ended, machine dropped / came back)
 ```
 
@@ -27,7 +28,11 @@ machine (default `desktop`); after that **every run of this session goes to that
 
 ## 2. Submit
 
-Always say in the message that a run is queued and on which machine. Then:
+Always say in the message that a run is queued and on which machine. The order on a machine is not
+FIFO (2026-09-22): media jobs go first, then every session's *first* job of a batch in submission order,
+then the remaining jobs shortest first (estimate from history of the same arguments, else from the route /
+quit-after seconds; `--size <secs>` to correct it). So one job of yours gets its place in the line at once;
+a batch of five fills the gaps after the other sessions' first jobs, short ones before long ones. Then:
 
 ```bash
 # desktop bench / preset / drive (the run.sh arguments go after --, unchanged from the bench-run skill)
@@ -52,8 +57,8 @@ harness/queue.sh submit mp -- <label> [stock]                                   
 harness/queue.sh submit workshop --notes "Release <commit> (game revision <rev>). ..." -- --tag win-<rev>-<commit>
 harness/queue.sh submit cmd --label <name> -- harness/showcase-record.sh storm120 opt
 
-# media: every encode, re-encode, stitch or GIF render (desktop only; shares the FIFO with the runs, so it
-# can never overlap one; runs go first, encodes fill the gaps; waits for any ffmpeg / run started outside the queue)
+# media: every encode, re-encode, stitch or GIF render (desktop only; shares the queue with the runs, so it
+# can never overlap one; goes before every pending run; waits for any ffmpeg / run started outside the queue)
 harness/queue.sh submit media --label <name> -- harness/encode-av1-hdr.sh <in.mp4> docs/media/<name>.mp4 [width]
 harness/queue.sh submit media --label <name> -- harness/stitch-storm-sbs.sh
 harness/queue.sh submit media --label <name> --out docs/media/<name>.mp4 --out docs/media/<name>.jpg -- python3 harness/stitch-showcase.py
@@ -64,8 +69,9 @@ in the command that the job wrote is probed.
 
 Options before `--`: `--machine`, `--rebind`, `--install opt|stock|keep|<repo>`, `--goal "..."`,
 `--against <run|baseline.json>` (repeatable), `--parity-against <recorded run>`, `--cap N`, `--wait`,
-`--notes` (workshop), `--label` (cmd, media), `--out <file>` (media, repeatable). `submit` prints the job id, its dir, the `result.txt` path and how
-many jobs are ahead on that machine; it starts the worker and the connection monitor when they are not
+`--notes` (workshop), `--label` (cmd, media), `--out <file>` (media, repeatable), `--size <secs>` (the expected
+duration when the estimate is off). `submit` prints the job id, its order tier and size estimate, its dir, the
+`result.txt` path and how many jobs go before it on that machine; it starts the worker and the connection monitor when they are not
 running. A disconnected laptop still accepts the job; it waits (`blocked: <m> disconnected`) and runs
 when the machine is back.
 

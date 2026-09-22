@@ -209,6 +209,10 @@ public final class FBORenderCell {
          }
       }
       int playerIndex = IsoCamera.frameState.playerIndex;
+      if (pzopt.CharDraw.enabled()) {
+         pzopt.CharDraw.walk(IsoWorld.instance.getCell().getObjectList(), this); // pzopt: charDrawPrep, the object walk on a worker from here
+      }
+
       int playerZ = PZMath.fastfloor(IsoCamera.frameState.camCharacterZ);
       if (!PerformanceSettings.newRoofHiding) {
          if (this.cell.hideFloors[playerIndex] && this.cell.unhideFloorsCounter[playerIndex] > 0) {
@@ -595,6 +599,14 @@ public final class FBORenderCell {
 
          this.checkBlackedOutBuildings(playerIndex);
          this.checkBlackedOutRooms(playerIndex);
+         if (pzopt.CharDraw.enabled()) {
+            // pzopt: charDrawPrep. Everything the zombies' draw data reads is final now (cutaways, this frame's lighting,
+            // the blacked-out passes): the visibility test and the texture-creator check run here and the draw data
+            // builds on the slot-init executor while the chunk bakes and the rest of performRenderTiles run, joined in
+            // renderMovingObjects.
+            pzopt.CharDraw.start(IsoWorld.instance.getCell().getObjectList(), this);
+         }
+
          FBORenderLevels.clearCachedSquares = false;
          AbstractPerformanceProfileProbe var44 = renderTiles.performRenderTiles.profile();
 
@@ -4406,11 +4418,50 @@ public final class FBORenderCell {
     * pzopt: whether this level's strong lighting change (pzopt.LightDirt) re-bakes now. Granted while the frame's strong
     * budget lasts; past it the level is held like weak drift (it re-bakes within lightingRebakeMs or the spread anyway).
     */
+   private int pzoptStrongBudgetNow = -1; // pzopt: lightingStrongFrameMs, the adaptive strong budget of this frame
+   private int pzoptStrongBudgetFrame = -1;
+
+   /**
+    * pzopt: the frame's strong re-bake budget. With lightingStrongFrameMs > 0 it follows the last game-thread frame step
+    * (pzopt.FrameCap.lastStepNs, the limiter's wait excluded): over the threshold it halves (down to 1), under 3/4 of it
+    * it grows by one, up to lightingStrongBudget. The out-of-sight fade (darkMulti) moves per unit of game time, so a slow
+    * frame moves every exterior square further, marks more levels strong, bakes more textures (GPU work) and slows the
+    * next frame: at ~30 fps in downtown Louisville the loop held ~30 % of the runs of 2026-09-22 at twice the GPU time
+    * per frame. Held strong levels still re-bake within lightingRebakeMs or the spread.
+    */
+   private int pzoptStrongBudget() {
+      int budget = pzopt.Config.LIGHTING_STRONG_BUDGET;
+      float thresholdMs = pzopt.Config.LIGHTING_STRONG_FRAME_MS;
+      if (budget <= 0 || thresholdMs <= 0.0F) {
+         return budget;
+      }
+      int frame = IsoWorld.instance.getFrameNo();
+      if (frame != this.pzoptStrongBudgetFrame) {
+         this.pzoptStrongBudgetFrame = frame;
+         if (this.pzoptStrongBudgetNow < 0) {
+            this.pzoptStrongBudgetNow = budget;
+         }
+         long lastStepNs = pzopt.FrameCap.lastStepNs;
+         if (lastStepNs > 0L) {
+            float lastMs = lastStepNs / 1e6F;
+            if (lastMs > thresholdMs) {
+               this.pzoptStrongBudgetNow = Math.max(1, this.pzoptStrongBudgetNow / 2);
+               pzoptStrongBudgetCuts++;
+            } else if (lastMs < thresholdMs * 0.75F) {
+               this.pzoptStrongBudgetNow = Math.min(budget, this.pzoptStrongBudgetNow + 1);
+            }
+         }
+      }
+      return this.pzoptStrongBudgetNow;
+   }
+
+   private static long pzoptStrongBudgetCuts; // pzopt: frames that halved the strong budget (log)
+
    private boolean pzoptStrongNow(IsoChunk c, int level) {
       if (!pzopt.LightDirt.rebakeNow(c, level, IsoWorld.instance.getFrameNo())) {
          return false;
       }
-      int budget = pzopt.Config.LIGHTING_STRONG_BUDGET;
+      int budget = this.pzoptStrongBudget();
       if (budget > 0 && this.pzoptStrongThisFrame >= budget) {
          pzoptStrongHeld++;
          return false;
@@ -4570,6 +4621,14 @@ public final class FBORenderCell {
    private int pzoptGridStackFrame = -1000;
    private final java.util.IdentityHashMap<FBORenderChunk, Long> pzoptLastBakeMs = new java.util.IdentityHashMap<>();
    private static long pzoptBakesTotal;
+
+   /** pzopt: the bake / re-bake counters since boot, one string for the harness summary at route end (the periodic log line may never print in a short run). */
+   public static String pzoptBakeCounters() {
+      return "bakes=" + pzoptBakesCumulative + " deferred=" + pzoptDeferredTotal + " lightingRebakesHeld=" + pzoptLightingRebakesHeld + " strongNow=" + pzoptStrongRebakes
+            + " strongPastBudget=" + pzoptStrongHeld + " strongMarks=" + pzopt.LightDirt.strongMarks + " globalLightEvents=" + pzopt.LightDirt.globalEvents
+            + " flushed=" + pzoptLightingFlushed + " budgetedRebakes=" + pzoptRebakesTotal + " rebakesHeld=" + pzoptRebakesHeld + " creationsDeferred=" + pzoptCreatesStarved
+            + " strongBudgetCuts=" + pzoptStrongBudgetCuts;
+   }
    public static long pzoptBakesCumulative; // pzopt: never reset; the harness zoom trace reads the per-frame delta
    public static long pzoptDeferredCumulative; // pzopt: never reset; deferred (budgeted / held) levels
    private static final long[] pzoptBakeFlags = new long[16];
@@ -4635,6 +4694,9 @@ public final class FBORenderCell {
       if (pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Config.TREE_BAKE_PASS) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
       if (pzopt.Config.TREE_BAKE_MAX_CHUNKS_PER_SEC > 0) { sb.append(" | trees per-frame frames: ").append(pzoptTreesPerFrameFrames).append(" chunks/s now ").append(String.format(java.util.Locale.ROOT, "%.0f", pzopt.ChunkRate.perSecond())); } // pzopt: treeBakeMaxChunksPerSec
       sb.append(" | ").append(pzopt.AnimBatch.describe()); // pzopt: the zombies' bone-math batch
+      sb.append(" | ").append(pzopt.ActionEval.describe()); // pzopt: the zombies' transition-evaluation batch
+      sb.append(" | ").append(pzopt.CharDraw.describe()); // pzopt: charDrawPrep, the characters draw pre-pass
+      sb.append(" | ").append(pzopt.LightingBatch.describe()); // pzopt: the lighting reads on the workers
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));
@@ -4929,6 +4991,10 @@ public final class FBORenderCell {
       int savedPlayer = IsoCamera.frameState.playerIndex;
       IsoCamera.frameState.playerIndex = playerIndex; // cacheLightInfo reads the player from the frame state
       try {
+         if (pzopt.LightingBatch.ENABLED && pzopt.Overrides.enabled()) {
+            cell.pzoptFlushPendingLightingParallel(playerIndex, pending, perPlayerData1); // pzopt: lightingReadParallel
+            return;
+         }
          for (java.util.Map.Entry<IsoChunk, Long> e : pending.entrySet()) {
             IsoChunk chunk = e.getKey();
             long mask = e.getValue();
@@ -4943,8 +5009,106 @@ public final class FBORenderCell {
          }
       } finally {
          IsoCamera.frameState.playerIndex = savedPlayer;
+         pending.clear();
       }
-      pending.clear();
+   }
+
+   private IsoChunk[] pzoptLightTaskChunks = new IsoChunk[256];
+   private int[] pzoptLightTaskLevels = new int[256];
+
+   /**
+    * pzopt: lightingReadParallel (pzopt.LightingBatch). The same drain as the loop above, but the chunk levels are
+    * collected first, the structures a level's read creates lazily are created here on the game thread (the per-player
+    * render levels, the cutaway level data, the once-per-frame stamp row), then every level reads its squares on the
+    * frame workers and this thread, and the room / meta hooks the reads deferred run afterwards in level order. With
+    * devLightingReadCheck one square in sixteen is asked again here and compared with what the worker stored.
+    */
+   private void pzoptFlushPendingLightingParallel(int playerIndex, java.util.LinkedHashMap<IsoChunk, Long> pending, FBORenderCell.PerPlayerData perPlayerData1) {
+      int n = 0;
+      for (java.util.Map.Entry<IsoChunk, Long> e : pending.entrySet()) {
+         IsoChunk chunk = e.getKey();
+         long mask = e.getValue();
+         if (!perPlayerData1.onScreenChunks.contains(chunk)) {
+            continue;
+         }
+         boolean any = false;
+         for (int z = chunk.minLevel; z <= chunk.maxLevel; z++) {
+            if ((mask & (1L << (z + 32))) != 0L) {
+               if (n == this.pzoptLightTaskChunks.length) {
+                  this.pzoptLightTaskChunks = Arrays.copyOf(this.pzoptLightTaskChunks, n * 2);
+                  this.pzoptLightTaskLevels = Arrays.copyOf(this.pzoptLightTaskLevels, n * 2);
+               }
+               this.pzoptLightTaskChunks[n] = chunk;
+               this.pzoptLightTaskLevels[n] = z;
+               n++;
+               any = true;
+               chunk.getRenderLevels(playerIndex);
+               chunk.getCutawayDataForLevel(z);
+               pzoptTouchLightInfoRow(chunk, playerIndex, z);
+            }
+         }
+         if (any) {
+            pzoptLightingFlushed++;
+         }
+      }
+      if (n == 0) {
+         return;
+      }
+      final IsoChunk[] chunks = this.pzoptLightTaskChunks;
+      final int[] levels = this.pzoptLightTaskLevels;
+      final int player = playerIndex;
+      final int count = n;
+      if (n < 2) {
+         this.pzoptCacheChunkLevelLightInfo(player, chunks[0], levels[0]);
+      } else {
+         final pzopt.LightingBatch.Effects[] effects = new pzopt.LightingBatch.Effects[n];
+         for (int i = 0; i < n; i++) {
+            effects[i] = pzopt.LightingBatch.effectsFor(i, count, player);
+         }
+         Throwable t = pzopt.FrameBatch.run(n, i -> {
+            IsoChunk chunk = chunks[i];
+            int z = levels[i];
+            pzopt.LightingBatch.withEffects(effects[i], () -> this.pzoptCacheChunkLevelLightInfo(player, chunk, z));
+         });
+         pzopt.LightingBatch.applyAll(n);
+         if (t != null) {
+            pzopt.Log.warn("lightingReadParallel: a lighting read failed on a worker: " + t);
+         }
+         if (pzopt.Config.DEV_LIGHTING_READ_CHECK) {
+            for (int i = 0; i < n; i++) {
+               IsoChunk chunk = chunks[i];
+               IsoGridSquare[] squares = chunk.squares[chunk.squaresIndexOfLevel(levels[i])];
+               for (int k = (i & 15); k < squares.length; k += 16) {
+                  IsoGridSquare square = squares[k];
+                  if (square != null && square.lighting[player] instanceof LightingJNI.JNILighting) {
+                     pzopt.LightingBatch.checks++;
+                     if (!((LightingJNI.JNILighting)square.lighting[player]).pzoptRecheck()) {
+                        pzopt.LightingBatch.mismatches++;
+                     }
+                  }
+               }
+            }
+         }
+      }
+      Arrays.fill(chunks, 0, n, null);
+   }
+
+   /** pzopt: lightingReadParallel, the once-per-frame stamp row of (player, level) created on the game thread before the batch. */
+   private static void pzoptTouchLightInfoRow(IsoChunk chunk, int playerIndex, int level) {
+      if (!pzopt.Config.LIGHT_INFO_ONCE_PER_FRAME || level < -32 || level >= 32) {
+         return;
+      }
+      int[][] stamps = chunk.pzoptLightInfoFrame;
+      if (stamps == null) {
+         stamps = new int[256][];
+         chunk.pzoptLightInfoFrame = stamps;
+      }
+      int row = playerIndex * 64 + level + 32;
+      if (stamps[row] == null) {
+         int[] r = new int[64];
+         Arrays.fill(r, Integer.MIN_VALUE);
+         stamps[row] = r;
+      }
    }
 
    private boolean pzoptIsChunkLevelLightingDirty(int playerIndex, IsoChunk chunk, int level) {
@@ -5699,12 +5863,43 @@ public final class FBORenderCell {
    private void renderMovingObjects() {
       this.renderTranslucentOnly = true;
 
-      for (IsoMovingObject isoMovingObject : IsoWorld.instance.getCell().getObjectList()) {
-         this.renderMovingObject(isoMovingObject);
+      java.util.ArrayList<IsoMovingObject> pzoptOnScreen = pzopt.CharDraw.enabled() ? pzopt.CharDraw.join(IsoWorld.instance.getCell().getObjectList(), this) : null;
+      if (pzoptOnScreen != null) {
+         // pzopt: charDrawPrep. The walk of the cell's objects (CharDraw.walk / start) kept the on-screen ones in the stock
+         // order and handed the zombies about to be drawn to the executor; join waited for the tail of that, and the loop
+         // below is the stock per-object chain over the on-screen list, finding the data ready in TextureDraw.drawModel.
+         int pzoptPlayerIndex = IsoCamera.frameState.playerIndex;
+
+         for (int i = 0; i < pzoptOnScreen.size(); i++) {
+            this.pzoptRenderOnScreenObject(pzoptOnScreen.get(i), pzoptPlayerIndex); // the list already passed the three leading tests
+         }
+
+         pzopt.CharDraw.finish();
+      } else {
+         for (IsoMovingObject isoMovingObject : IsoWorld.instance.getCell().getObjectList()) {
+            this.renderMovingObject(isoMovingObject);
+         }
       }
 
       this.renderTranslucentOnly = false;
       SpriteRenderer.instance.renderQueued();
+   }
+
+   /**
+    * pzopt: charDrawPrep. IsoGameCharacter.renderShadow returns without drawing for a scene-culled character that has
+    * no active model and is not a fake-dead zombie (every earlier test in it returns too); most of a horde on screen is
+    * such zombies, drawn as atlas sprites, so their call is skipped.
+    */
+   private static boolean pzoptShadowIsNoOp(IsoGameCharacter chr) {
+      return pzopt.CharDraw.enabled()
+         && chr.isSceneCulled()
+         && !chr.hasActiveModel()
+         && !(chr instanceof IsoZombie && chr.getCurrentState() == zombie.ai.states.FakeDeadZombieState.instance());
+   }
+
+   /** pzopt: charDrawPrep, the moving-object visibility test for pzopt.CharDraw's pre-pass. */
+   public boolean pzoptShouldRenderSquare(IsoGridSquare square) {
+      return this.shouldRenderSquare(square);
    }
 
    private void renderMovingObject(IsoMovingObject isoMovingObject) {
@@ -5712,33 +5907,49 @@ public final class FBORenderCell {
       if (isoMovingObject.getClass() != IsoPlayer.class) {
          if (isoMovingObject.getCurrentSquare() != null) {
             if (isoMovingObject.isOnScreen()) {
-               if (isoMovingObject.getCurrentSquare().getLightInfo(playerIndex) != null) {
-                  if (this.shouldRenderSquare(isoMovingObject.getCurrentSquare())) {
-                     if (DebugOptions.instance.terrain.renderTiles.shadows.getValue()) {
-                        IsoGameCharacter chr = (IsoGameCharacter)Type.tryCastTo(isoMovingObject, IsoGameCharacter.class);
-                        if (chr != null && chr.getCurrentSquare() != null && chr.getCurrentSquare().HasStairs() && chr.isRagdoll()) {
-                           boolean vehicle = true;
-                        } else if (chr != null) {
-                           chr.renderShadow(isoMovingObject.getX(), isoMovingObject.getY(), isoMovingObject.getZ());
-                        }
+               this.pzoptRenderOnScreenObject(isoMovingObject, playerIndex);
+            }
+         }
+      }
+   }
 
-                        if (isoMovingObject instanceof BaseVehicle vehicle) {
-                           vehicle.renderShadow();
-                        }
-                     }
+   /**
+    * pzopt: charDrawPrep. The rest of renderMovingObject for an object known to be on screen with a square and not a
+    * player (the pre-pass's on-screen list, built from those three tests in this frame; nothing changes them during the
+    * render). Stock's body from the light-info test on.
+    */
+   private void pzoptRenderOnScreenObject(IsoMovingObject isoMovingObject, int playerIndex) {
+      IsoGridSquare square = isoMovingObject.getCurrentSquare();
+      // pzopt: charDrawPrep. A zombie whose draw data the pre-pass built passed these two square tests on the game
+      // thread this frame already (CharDraw.start, nothing changed them since), so they are not asked again.
+      boolean pzoptPrepared = isoMovingObject.getClass() == IsoZombie.class
+         && pzopt.CharDraw.isPrepared(((IsoZombie)isoMovingObject).legsSprite == null ? null : ((IsoZombie)isoMovingObject).legsSprite.modelSlot);
+      if (pzoptPrepared || square.getLightInfo(playerIndex) != null) {
+         if (pzoptPrepared || this.shouldRenderSquare(square)) {
+            if (DebugOptions.instance.terrain.renderTiles.shadows.getValue()) {
+               IsoGameCharacter chr = (IsoGameCharacter)Type.tryCastTo(isoMovingObject, IsoGameCharacter.class);
+               if (chr != null && chr.getCurrentSquare() != null && chr.getCurrentSquare().HasStairs() && chr.isRagdoll()) {
+                  boolean vehicle = true;
+               } else if (chr != null && !pzoptShadowIsNoOp(chr)) { // pzopt: charDrawPrep, the culled atlas zombies' call returns before drawing
+                  chr.renderShadow(isoMovingObject.getX(), isoMovingObject.getY(), isoMovingObject.getZ());
+               }
 
-                     isoMovingObject.render(
-                        isoMovingObject.getX(),
-                        isoMovingObject.getY(),
-                        isoMovingObject.getZ(),
-                        isoMovingObject.getCurrentSquare().getLightInfo(playerIndex),
-                        true,
-                        false,
-                        null
-                     );
-                  }
+               if (isoMovingObject instanceof BaseVehicle vehicle) {
+                  vehicle.renderShadow();
                }
             }
+
+            // pzopt: zombieAtlasFast. A culled zombie drawn as an atlas sprite, or a zombie whose model draw data the
+            // pre-pass built, takes the flat copy of its render chain (IsoZombie.pzoptRenderFlat); false = neither
+            // case, the stock virtual chain below runs.
+            if (isoMovingObject.getClass() == IsoZombie.class
+               && ((IsoZombie)isoMovingObject).pzoptRenderFlat(isoMovingObject.getX(), isoMovingObject.getY(), isoMovingObject.getZ(), square.getLightInfo(playerIndex))) {
+               return;
+            }
+
+            isoMovingObject.render(
+               isoMovingObject.getX(), isoMovingObject.getY(), isoMovingObject.getZ(), square.getLightInfo(playerIndex), true, false, null
+            );
          }
       }
    }

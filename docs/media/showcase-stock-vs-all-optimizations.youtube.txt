@@ -1,0 +1,31 @@
+Project Zomboid Build 42: stock vs all optimizations
+
+Same PC, same save, same routes. Left: the stock game with every optimization off and the frame cap removed. Right: the same build with my class overrides on, uncapped. Boot and load, the 120 km/h highway drive, the Options > Optimizations tab, the spinning Rosewood route, heavy fog and a thunderstorm. The in-game overlay shows the live frame time; the big number is the 1 s average from its log.
+
+RESULTS (whole route each time, max zoom, 5120x2160, no frame cap on either side)
+
+                                    stock       optimized   change
+Boot, launch to main menu           7.3 s       4.8 s       -34 %
+Load, Continue to world ready       7.5 s       3.4 s       -55 %
+120 km/h highway drive - fps        156 fps     512 fps     +228 %
+120 km/h highway drive - p99        16.5 ms     5.8 ms      -65 %
+Rosewood, spinning view - fps       140 fps     447 fps     +220 %
+Rosewood, spinning view - p99       27.9 ms     8.4 ms      -70 %
+120 km/h drive, heavy fog - fps     111 fps     256 fps     +131 %
+120 km/h drive, heavy fog - p99     18.9 ms     8.4 ms      -56 %
+120 km/h drive, thunderstorm - fps  76 fps      284 fps     +272 %
+120 km/h drive, thunderstorm - p99  63.0 ms     8.4 ms      -87 %
+
+Boot and load are the mean of the four launches. fps = presented frames per second over the whole route; p99 = the frame time 99 % of frames stay under.
+
+Ryzen 7 9800X3D, RTX 4090, 32 GB DDR5-8000, CachyOS, native Linux build, NVIDIA OpenGL, 5120x2160 at 240 Hz.
+
+Source and installer: https://github.com/xD3I/PZ_Optimization
+Sound: the game's main-menu theme and its rain loop. Project Zomboid is by The Indie Stone.
+
+TAGS
+Project Zomboid, Project Zomboid Build 42, Project Zomboid B42, Project Zomboid optimization, Project Zomboid performance, Project Zomboid fps, Project Zomboid fps boost, Project Zomboid stuttering fix, Project Zomboid frame time, Project Zomboid mod, Project Zomboid Linux, Project Zomboid uncapped fps, Project Zomboid 240 fps, Project Zomboid load time, Project Zomboid boot time, Project Zomboid thunderstorm, Project Zomboid fog, Project Zomboid driving, stock vs optimized, side by side comparison, benchmark, RTX 4090, Ryzen 7 9800X3D, 5120x2160, HDR, Java game optimization, OpenGL, PZ_Optimization
+
+#ProjectZomboid #Build42 #Optimization #FPS #Benchmark #Linux #RTX4090 #HDR
+
+Thumbnail: docs/media/showcase-stock-vs-all-optimizations-thumbnail.jpg (harness/showcase-thumbnail.py: the 25 s frame of the results-card capture, 2560x1440)

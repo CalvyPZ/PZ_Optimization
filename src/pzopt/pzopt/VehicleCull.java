@@ -1,5 +1,8 @@
 package pzopt;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import org.joml.Vector3f;
 import zombie.scripting.objects.VehicleScript;
 import zombie.vehicles.BaseVehicle;
@@ -13,6 +16,13 @@ import zombie.vehicles.BaseVehicle;
  * line of sight, and the walk was 6 % of the game thread. A vehicle whose bounding circle (half the horizontal diagonal
  * of its script extents plus the centre-of-mass offset, with a margin) does not reach the segment cannot intersect it,
  * and that is two subtractions and a few multiplies on the vehicle's world position.
+ *
+ * <p>Since the player-LOS pass (2026-09-22) the per-zombie walk does not even visit every loaded vehicle: every zombie
+ * asking in one frame asks about the same player position, and a vehicle can only cross a zombie-to-player segment
+ * when its circle reaches the disc around the player whose radius is the zombie's distance. {@link #near} keeps, per
+ * frame and player position, the vehicles whose circle reaches the disc of the zombie view distance (plus any caller
+ * standing further out), so the exact test runs over the handful of cars around the player instead of the hundreds
+ * parked across downtown.
  */
 public final class VehicleCull {
    private VehicleCull() {
@@ -26,15 +36,67 @@ public final class VehicleCull {
 
    /** False when the vehicle's bounding circle misses the segment (x1,y1)-(x2,y2) in world tiles. */
    public static boolean mayIntersect(BaseVehicle vehicle, float x1, float y1, float x2, float y2) {
+      float radius = radius(vehicle);
+      if (radius < 0.0F) {
+         return true;
+      }
+      return distanceSquaredToSegment(vehicle.getX(), vehicle.getY(), x1, y1, x2, y2) <= radius * radius;
+   }
+
+   /** The bounding-circle radius of a vehicle in tiles, -1 when it has no script (then nothing is rejected). */
+   static float radius(BaseVehicle vehicle) {
       VehicleScript script = vehicle.getScript();
       if (script == null) {
-         return true;
+         return -1.0F;
       }
       Vector3f extents = script.getExtents();
       Vector3f com = script.getCenterOfMassOffset();
       float half = 0.5F * (float)Math.sqrt(extents.x * extents.x + extents.z * extents.z);
-      float radius = half + (float)Math.sqrt(com.x * com.x + com.z * com.z) + MARGIN;
-      return distanceSquaredToSegment(vehicle.getX(), vehicle.getY(), x1, y1, x2, y2) <= radius * radius;
+      return half + (float)Math.sqrt(com.x * com.x + com.z * com.z) + MARGIN;
+   }
+
+   // The per-frame candidate list: the vehicles whose circle reaches the disc of radius nearRadius around
+   // (nearX, nearY), built in frame nearFrame. Game thread only (IsoZombie.spottedNew runs there).
+   private static final ArrayList<BaseVehicle> near = new ArrayList<>();
+   private static int nearFrame = Integer.MIN_VALUE;
+   private static float nearX;
+   private static float nearY;
+   private static float nearRadius = -1.0F;
+   private static int nearBuilds;
+
+   /**
+    * The vehicles of {@code all} that can cross a segment from a point within {@code reach} tiles of (tx,ty) to
+    * (tx,ty): a superset of what {@link #mayIntersect} accepts for any such segment. Reused across the frame while the
+    * target and the frame stay the same and the reach fits; rebuilt otherwise (once per player per frame in practice).
+    */
+   public static List<BaseVehicle> near(Collection<BaseVehicle> all, float tx, float ty, float reach, int frame) {
+      if (frame != nearFrame || tx != nearX || ty != nearY || reach > nearRadius) {
+         near.clear();
+         for (BaseVehicle vehicle : all) {
+            float radius = radius(vehicle);
+            if (radius < 0.0F) {
+               near.add(vehicle);
+               continue;
+            }
+            float dx = vehicle.getX() - tx;
+            float dy = vehicle.getY() - ty;
+            float limit = radius + reach;
+            if (dx * dx + dy * dy <= limit * limit) {
+               near.add(vehicle);
+            }
+         }
+         nearFrame = frame;
+         nearX = tx;
+         nearY = ty;
+         nearRadius = reach;
+         nearBuilds++;
+      }
+      return near;
+   }
+
+   /** Candidate lists built so far (for the log line). */
+   public static int nearBuilds() {
+      return nearBuilds;
    }
 
    /** Squared distance from (px,py) to the segment (x1,y1)-(x2,y2). */

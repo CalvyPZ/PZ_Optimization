@@ -4,6 +4,7 @@ after a fix)? Code measures, TypeSafe (Jev) classifies the measurements.
 
   harness/parity-judge.py <run-or-mp4 A> <run-or-mp4 B> [--seconds 20 | --window START END]
                           [--scale 1280] [--shots a.png b.png] [--context "<what changed>"] [--json out.json]
+                          [--window-a START END] [--window-b START END]   # a fixed window for one side only (the other keeps the rule)
 
 Jev is text-only (it never sees a frame), so every visual property is a number computed here,
 identically for both recordings over the same route phase (default: the last --seconds of
@@ -148,11 +149,14 @@ def ratio(x, y):
 
 def main(argv):
     specs, window, scale, shots, context, out_json, seconds = [], None, 1280, [], "", None, 20.0
+    windows = [None, None]  # per-side override: the auto window slides when the desktop stays busy after the quit (2026-09-22)
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--window":
             window = (float(argv[i + 1]), float(argv[i + 2])); i += 3
+        elif a in ("--window-a", "--window-b"):
+            windows[0 if a == "--window-a" else 1] = (float(argv[i + 1]), float(argv[i + 2])); i += 3
         elif a == "--scale":
             scale = int(argv[i + 1]); i += 2
         elif a == "--seconds":
@@ -169,8 +173,10 @@ def main(argv):
         sys.exit(__doc__)
     va, vb = video_of(specs[0]), video_of(specs[1])
     m = []
-    for v in (va, vb):
-        if window:
+    for side, v in enumerate((va, vb)):
+        if windows[side]:
+            s, e = windows[side]
+        elif window:
             s, e = window
         else:
             s, e = active_window(v, seconds)

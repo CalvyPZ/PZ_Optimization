@@ -1749,6 +1749,41 @@ with `+connect 127.0.0.1:16261 -nosteam`, its own `-Ddeployment.user.cachedir`, 
 the reported message. A killed client leaves "User is already connected" on the server;
 `kickuser` on its console clears it.
 
+## zombie.WorldSoundManager (added 2026-09-22, world-sound hitch)
+
+Loose copy with one edit in the full `addSound`, behind `pzopt.Config.WORLD_SOUND_FAST`. Stock
+attaches a new sound to every chunk in the square of side `2 * radius * hearingMultiplier` around it
+by asking the cell for each of those world chunk coordinates, so a 600-tile house alarm (or a 500-tile
+helicopter pass, a 600-tile meta gunshot) asks for 22,500 chunks at normal hearing and 202,500 at
+pinpoint hearing, of which only the loaded grid (a few hundred) can answer. The edit intersects the
+radius rectangle with the union of the active players' loaded chunk ranges before the walk; the cell
+returns null outside that union, so the chunks that receive the sound are exactly stock's. The rest of
+the method (the sound object, the manager list, the population manager call, the network send) is
+untouched. Why it matters: `zombie.iso.Alarm.update` adds its 600-radius sound every frame for the
+~49 s an alarm rings, so every per-call cost here is a per-frame cost during an alarm.
+
+## zombie.iso.FishSchoolManager (added 2026-09-22, world-sound hitch)
+
+Loose copy with a memo in `addSoundNoise`, behind `pzopt.Config.WORLD_SOUND_FAST`. Every world
+sound (from `WorldSound.init`, single player and server) scares the fish: the stock method walks
+every square of the disc of radius `soundRadius / 6` around the sound (40,000 squares for the house
+alarm, with a square root, the procedural fish-point roll, the no-fish-zone list and a boxed
+hash-map probe per square) and writes "disabled until now + 180 game minutes" for each fish or chum
+point in it. A repeat of the same call in the same game minute rewrites the same keys with the same
+value, i.e. does nothing, and the house alarm makes exactly that call every frame. The edit keeps
+the last eight (centre, radius, game minute) calls and returns at once for a repeat; the memo is
+dropped whenever the noise or chum maps are cleared, purged of expired entries, replaced by the
+server's copy, or a chum point is added, so a call that could write something new always runs.
+Saved and transmitted data are unchanged (the maps themselves are never touched by the memo).
+Same key, same day, the walk itself: stock tests every square of the box against all fourteen no-fish
+rectangles, takes a square root for the disc test and probes the chum map. The override's walk selects
+the rectangles that meet the box once per call (none, almost always), compares the squared float distance
+with the squared radius (the same float arithmetic as the stock helper; the square root is monotonic, so
+the test is identical), probes the chum map only when chum points exist, reads the game clock once, and
+handles a missing `Fishing.NoFishZones` table as stock does (every square a no-fish zone). Same keys, same
+values: `tests/pzopt/FishNoiseWalkTest.java` compares it with the stock loop over 420 walks. The
+helicopter's moving 500-radius sound goes 0.27 → 0.08 ms per call.
+
 ## zombie.core.skinnedmodel.animation.AnimationPlayer (added 2026-09-22 night, zombie bone math on the other cores)
 
 Louisville horde profile (`lou-budget`, game thread 98 % busy): the zombies' postupdate is 17 % of the
@@ -1859,6 +1894,131 @@ Now (`pzopt.ZoomRetain`, keys `zoomRetain` true, `zoomRebakeBudget` 12, `zoomFra
 Results (240 cap, south route, `zoomsteps.py --window 1.0`): 0.25 ↔ 2.5 instant jumps, worst frame per
 jump 375 / 86 / 59 / 52 ms (stock) → see `docs/results.md` for the adopted build's numbers.
 
+## zombie.characters.IsoPlayer (added 2026-09-22, player line-of-sight pass)
+
+Loose copy with three edits behind `pzopt.Config.PLAYER_LOS_FAST` (`playerLosFast`, true), plus the
+class-loaded marker. Profile: on the Louisville preset (2,433 zombies loaded, spectator view) the
+player was 16 % of the game thread and `updateLOS` 15 of it, 12 in its own body.
+
+- `updateLOS`: stock keeps every object the player spotted since the last quiet frame in the
+  `lastSpotted` Stack and asks it `contains` once per object spotted this frame, plus once more per
+  zombie within a few tiles: a linear walk of a synchronized Vector. The list only empties on a frame
+  that spots no zombie at all, so in a horde it holds every zombie ever seen and the walk is spotted ×
+  remembered identity compares a frame. The override keeps an identity set beside the stack
+  (`pzopt.PlayerLos`): `sync` at the top of the pass rebuilds the set whenever the stack object or its
+  size is not what the set last mirrored (a mod adding through `getLastSpotted` or replacing it through
+  `setLastSpotted` is picked up), the two `contains` become one probe each, the end-of-pass add goes
+  through the set (add unless remembered, then push), and the periodic clear empties both. The stack
+  keeps exactly the stock contents and order. The end-of-pass loop also reads each spotted object once
+  instead of three synchronized `get`s.
+- `getSneakSpotMod` (new override of the `IsoGameCharacter` method): every zombie that could see the
+  player asks for it in `spottedNew`, and stock walks the perk list for the sneak level each time; the
+  answer cannot change between two zombies of one frame, so it is memoised per `IsoWorld` frame number
+  (a level gained mid-frame shows to the next frame's zombies).
+
+## zombie.characters.IsoZombie (second edit, 2026-09-22, spot roll early-out and nearby vehicles)
+
+- `spottedNew`, behind `pzopt.Config.ZOMBIE_SPOT_FAST` (`zombieSpotFast`, true): the vision-radius
+  update moves above the look-vector / facing block (neither depends on the other), and a chance that is
+  already zero (the player beyond this zombie's vision radius, or in the dark) skips the look-vector
+  trig, since the facing block only scales the chance. After the facing block a zero chance (not
+  forced) skips every remaining modifier (movement, sneak, traits, shelter, the vehicle test, worn
+  items, the pow and the roll): each one multiplies or divides the chance, so the roll could not
+  succeed, and the code goes straight to the one early exit a zero chance still takes (a nearer current
+  target) and to the failed-roll bookkeeping, which is unchanged: the could-be-seen flag needs a chance
+  above 20, and the sneak / lightfoot XP rolls never read the chance. The only difference to stock is
+  one fewer `Rand.Next(10000)` draw from the shared generator per skipped zombie.
+- `isVehicleBetween`, under the existing `vehicleCull`: instead of walking every loaded vehicle, the
+  walk covers `pzopt.VehicleCull.near(...)`: the per-frame list of the vehicles whose bounding circle
+  reaches the disc around the target (the player) of radius max(view distance, this zombie's distance)
+  — every zombie asking in a frame asks about the same player position, and `spottedNew` only asks
+  within the view distance, so the list is built once per player per frame (rebuilt on a new frame, a
+  moved target or a larger reach). A vehicle without a script is always a candidate. `nearBuilds()`
+  counts the builds.
+
+## zombie.iso.LightingJNI (2026-09-22, dead end: clean squares asked once per frame — removed)
+
+Tried and removed the same night: a per-square stamp in `JNILighting.updateFBORenderChunk` so a square
+the native called "not dirty" was not asked `getSquareDirty` again in the same frame under the same
+`updateCounter`. A dev rig re-asked on every skip: 0 misses in 1,500 frames (the stamp was sound), but
+only 5,636 skips against 19.1 M dirty answers and 173 k clean ones — the native reports nearly every
+visible square dirty on nearly every frame, so the whole on-screen set is re-fetched each frame
+(`getSquareDirty` 4 % + `getSquareLighting` 3 % of the game thread on the Louisville preset). That is
+the shape of the "lighting jni" cost; a per-frame memo cannot touch it. Also learnt: `getChunkDirty`
+is only legal between `stateBeginUpdate` / `stateEndUpdate` (it throws `missing stateEndUpdate?`
+elsewhere), so a chunk-level gate cannot live in the square accessors either (run `lou-los4`: the
+exception on every frame left the zombies invisible and a meaningless 91 fps).
+
+## zombie.core.skinnedmodel.animation.AnimationPlayer (third edit, 2026-09-22, shadow ellipse and palette on the worker)
+
+- `updateInternal` clears a "shadow valid" flag at its start; `pzoptRunDeferred` ends (after the skin transforms)
+  with `pzoptPrecomputeShadow` behind `pzopt.Config.SHADOW_PREP` (`shadowPrep`, true): the head and both feet bone
+  indices (through the cached `getSkinningBoneIndex`), then `pzopt.ShadowPrep.compute` — stock's
+  `IsoGameCharacter.calculateShadowParams(player, 1, false, sp)` arithmetic step for step with thread-local scratch
+  (the stock static `L_renderShadow` holder cannot be shared by workers), packed into a long on the player and the
+  flag set. `pzoptShadowParams()` returns it while the flag holds (0 otherwise). Out-of-range bone indices leave the
+  flag clear (stock path). Counters `shadow computed= served= fallback=` on the `anim batch:` log line.
+- `SkinTransformData` carries a `FloatBuffer` palette and a valid flag (`skinPalettePrecompute`, true, needs
+  `skinTransformsPrecompute`): `pzoptPrecomputeSkinTransforms` stores each set it computed into the set's own buffer
+  (`Matrix4f.store` per bone, the shader's column order, flipped); `getSkinTransforms` clears the flag whenever it
+  recomputes a dirty set; `pzoptSkinPalette(skinnedTo)` (game thread) returns the buffer, rewound, when the set is
+  clean and its palette valid, else null.
+
+## zombie.core.skinnedmodel.advancedanimation.AnimatedModel (added 2026-09-22, palette hand-off)
+
+Inner class `AnimatedModelInstanceRenderData.initMatrixPalette`: with `skinPalettePrecompute` the draw data asks the
+player for the precomputed palette of the model's skinning data and, when it gets one, sizes its own buffer to it and
+copies it in a single bulk `put` (then flips and marks the palette valid, as stock); otherwise the stock loop
+(`getSkinTransforms`, sixteen puts per bone) runs. Stock's `init()` on the render thread and the shader upload read
+the draw data's buffer as before.
+
+## zombie.characters.IsoZombie (fourth edit, 2026-09-22, shadow from the worker, thread-local facing test)
+
+- `calculateShadowParams(ShadowParams)` override (`shadowPrep`): when the animation player holds a pair from its last
+  deferred update and is ready, `sp.set(0.45, fm, bm)` from it (`served++`); else the inherited computation
+  (`fallback++`). Sits in the tail block with the cached-component accessors.
+- `isFacingTarget` (the `isFacingTarget` animation variable, read by transition conditions that now evaluate on the
+  frame workers): the two vectors are a thread-local pair instead of the inherited static `tempo` / `tempo2`; same
+  arithmetic.
+
+## zombie.characters.IsoGameCharacter (added 2026-09-22, postUpdateAnimating split for the parallel transition evaluation)
+
+`postUpdateAnimating` (private) is split at the point after `setTurningAround`: everything from
+`getActionContext().update()` to the end (network AI post-update, the animator update, the three
+`ActiveAnim*` event clears, `applyDeltas`, `updateAnimPlayer` or `updateModelSlot`, `updateLightInfo`, the
+animation recorder, the finishing event) moved verbatim into a new public `pzoptPostUpdateAnimatingRest()`. The
+original method computes the forward direction, the vertical aim angle and the three turning flags as before, then
+asks `pzopt.ActionEval.submit(this)`: true (an eligible zombie inside a batch) returns at once, the rest runs from
+`ActionEval.flush()` in loop order after the parallel evaluation; false calls `pzoptPostUpdateAnimatingRest()`
+directly, i.e. the stock sequence. Note for the regen: CFR renders the model-less / model branch of this method
+wrongly (as two sequential blocks); the bytecode and Vineflower have `if (!hasActiveModel()) updateAnimPlayer else
+updateModelSlot`.
+
+## zombie.characters.action.ActionContext (added 2026-09-22, evaluate on a worker, apply on the game thread)
+
+`actionEvalParallel` (`pzopt.ActionEval`). `updateInternal` is stock's set / evaluate / transfer, with a first check:
+when this context was evaluated by the current batch (a generation stamp) and the batch is being applied, only the
+transfer runs. New methods: `pzoptEvaluate()` (worker: set + evaluate into the "next" container, stamp the
+generation), `pzoptOffThreadSafe()` (the root state and every sub-state have only `CharacterVariableCondition`,
+`EventOccurred` and `EventNotOccurred` conditions — anything else, i.e. `LuaCall`, keeps the zombie inline; cached
+per `ActionState` in an identity map, game thread only; reads `ActionTransition.conditions`, package-private, which
+is why the check lives here). With `devActionEvalCheck=true` the apply step first evaluates again on the game thread
+into a scratch container and counts a mismatch when the two containers differ (`ActionEval.checks / mismatches`,
+first 20 logged with the state names): the determinism rig of this phase.
+
+## zombie.MovingObjectUpdateScheduler (third edit, 2026-09-22, two-phase postupdate)
+
+`postupdate()` begins both batches (`ActionEval.begin()` after `AnimBatch.begin()`), runs the bucket loop, then in
+the finally `ActionEval.flush()` (the parallel evaluation, then every queued zombie's
+`pzoptPostUpdateAnimatingRest()` in order, which is where their bone math gets queued) and last `AnimBatch.flush()`.
+Log line `action eval:` next to `anim batch:` (FBORenderCell).
+
+## pzopt.FrameBatch (2026-09-22)
+
+The worker pool both batches share (`frameThreads`, default 8 = the old `animBonesThreads`, clamped to cores - 1):
+`run(count, runner)` executes indices 0..count-1 on the daemon workers `pzopt-frame-N` plus the calling thread and
+returns when all finished, with the first exception a task threw. `AnimBatch` lost its own pool and threads.
+
 ## zombie.core.textures.MultiTextureFBO2 (edit of 2026-09-22, zoom motion as a cubic Bézier)
 
 `update()`: stock moves the zoom towards the target by a fixed 0.03 per frame (0.004 × 1.5 × 5 for a manual
@@ -1874,3 +2034,249 @@ zoom, so nothing jumps; `dirtyRecalcGridStackTime` is set while it moves as stoc
 the stock step. Auto-zoom keeps the stock step (it retargets every frame with a distance term, a restarted
 curve would never leave its slow start).
 
+## zombie.characters.IsoPlayer (second edit, 2026-09-22, experiment: the LOS pass in C++)
+
+Asked for after the player pass: the same logic rewritten in the lighting engine's language. Key
+`pzopt.Config.PLAYER_LOS_NATIVE` (`playerLosNative`, **false**, experiment). `pzoptUpdateLosNative` is
+the stock loop split in three: Java packs every object that passes the cheap filters (position, the
+could-see / can-see bits read from its square's `JNILighting`), one call into
+`natives/libpzopt_los64.so` (`src/native/pzopt_los.cpp`, `pzopt_los_pass`: the distance with
+`IsoUtils.DistanceTo`'s float semantics, the "close" count and the branch per object) through the FFM
+linker with `Linker.Option.critical(true)` (heap arrays read in place, no JNI copy; `pzopt.NativeLos`),
+then Java applies the side effects in stock order (alpha targets, spot tests, stats, the spotted list).
+The library is only built with `PZOPT_NATIVE=1 scripts/build.sh` and never ships; with the key on and
+the library missing the Java loop runs.
+
+Result: no difference. Micro-benchmark over 2,433 objects on the same JIT: Java 3.6 µs a pass, C++
+through one FFM call 3.7 µs (C2 emits the same `sqrtss`; a whole pass is ~0.01 % of a 30 ms frame);
+per-object native calls 102 µs a frame (42 ns a crossing), thirty times worse. In game, an isolated
+pair from a worktree of HEAD + this pass only (`lou-losn4-on` / `-off`, 05:12 / 05:16, library
+confirmed loaded): player 3.86 % vs 3.52 % of the game thread, 1.01 vs 0.99 ms a frame in absolute
+terms, `NativeLos.run` one sample in 2,600, the loop's own self time 0.19 vs 0.27 % (two samples);
+the 38 vs 35 fps gap is the route's run-to-run noise (two Java-only runs the same hour were 53 and 60). What is left of the player's cost is reads of Java object state (visibility bits,
+zombie state, rooms) and the spot tests' side effects, none of which a native pass can take over
+without Java packing it first — the packing loop is the loop. Everything worth moving out of Java was
+the algorithm (the `lastSpotted` walk), not the language.
+
+## zombie.iso.LightingJNI (fifth edit, 2026-09-22, square reads on the frame workers)
+
+`lightingReadParallel` (`pzopt.LightingBatch`). In `JNILighting`: the static `lightInts` scratch the native fills
+became a thread-local array (`pzoptLightInts`, both `update` paths take a local from it); the room-seen block at the
+end of `updateFBORenderChunk` (`checkRoomSeen`, then `Meta.dealWithSquareSeen` for a square seen for the first
+time) asks `LightingBatch.current()` first: on a worker the square is recorded in the task's effects list (only
+when the hooks would do something: first time seen, or its room unexplored) and the game thread runs the hooks after
+the batch; on the game thread the block runs as stock. New `pzoptRecheck()` (dev): asks `getSquareLighting` again
+and compares with the stored visibility bits (bit 2 excluded: the facing rule may force it), light colour, dark
+multipliers, light level and vertex lights. Everything else the read does — the square's fields, the level's
+`invalidateLevel`, `LightDirt.markStrong`, `PuddleCache.lightsChanged`, `FBORenderCutaways.squareChanged` — is per
+square, per chunk level or an idempotent write, and the natives are pure reads (disassembly of libLighting64.so:
+`getSquareDirty` is an index computation and a byte load; `getSquareLighting` reads the lighting arrays and copies
+into the Java array), so per-level tasks do not race.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-22, the pre-pass lighting drain on the frame workers)
+
+`pzoptFlushPendingLighting` hands over to `pzoptFlushPendingLightingParallel` when `lightingReadParallel` is on: the
+on-screen (chunk, level) pairs of the pending queue are collected into two arrays while the game thread creates
+what a level's read would create lazily (`getRenderLevels(player)`, `getCutawayDataForLevel(z)`, the
+once-per-frame stamp row through the new `pzoptTouchLightInfoRow`); one level alone reads inline, otherwise
+`FrameBatch.run` executes `pzoptCacheChunkLevelLightInfo` per level on the workers and this thread with the task's
+effects sink installed (`LightingBatch.withEffects`), then `LightingBatch.applyAll` runs the deferred room / meta
+hooks in level order. With `devLightingReadCheck` one square in sixteen of every level is re-read on the game
+thread through `JNILighting.pzoptRecheck` and mismatches counted. The `lightingBudget` path of the render phase
+(`updateChunkLighting`) stays serial. Log line `lighting batch:` next to `action eval:`; the harness summary line
+`zombie_batches=` in `pzopt-bench.out` carries all batch counters at route end.
+
+## zombie.core.textures.TextureDraw (added 2026-09-22, characters draw pre-pass)
+
+`drawModel(TextureDraw, ModelSlot)`: after the type and slot id are set, the method asks `pzopt.CharDraw.take(slot)`
+for draw data the frame workers already built and initialised for this slot (`charDrawPrep`); when it gets some,
+that object becomes the sprite's drawer, the future stays null (nothing left for the render thread to wait on) and
+the method returns. Otherwise the stock path runs unchanged: allocate, `initModel`, and `init` on the game's own
+eight-thread executor (the `Threading.ModelSlotInit` debug option, on by default) with the future the render thread
+waits on. The class also carries the load marker.
+
+## zombie.core.skinnedmodel.model.ModelInstance (added 2026-09-22, characters draw pre-pass)
+
+- `updateLights()`: returns at once when `pzopt.CharDraw.lightsDone(this)` says the pre-pass already ran it for the
+  current frame and player (a public int stamp field on the instance, set right after that call). Otherwise stock:
+  allocate the per-player data, run its update. Without the pre-pass the stamp never matches. The pre-pass runs it
+  on its worker, after `CharDraw.start` has performed, on the game thread, the lazy per-square refresh the method's
+  reads sit behind (`square.lighting[p].lightInfo()` for the character's square and the one above it on stairs —
+  `JNILighting.update` with its JNI reads and dirty-tracking hooks; stock's `renderShadow` refreshes the same
+  square just before the stock call); after that every read in the method is a plain field read.
+- Inner class `PlayerData.updateLights`: the two static `ColorInfo` scratch objects the ambient interpolation wrote
+  through are a thread-local pair now, and the two `IsoGridSquare.interpolateLight` calls (which write through the
+  square class's static `Color` scratch) go to the new `pzoptInterpolateLight`: the same four `getVertLight` reads,
+  the same `Color.abgrToColor` conversions and the same three `interp` lerps into the given `ColorInfo`, with seven
+  thread-local `Color` objects. The arithmetic, the order of the reads and the smoothing steps are stock. The
+  static fields stay declared and unused.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-22, characters draw pre-pass)
+
+- `renderInternal`, right after the player index is read: with `charDrawPrep` on, `pzopt.CharDraw.walk(objectList,
+  this)` hands the walk of the cell's object set (stock iteration order; the on-screen objects, and the zombies that
+  pass the model tests independent of this frame's cutaway / lighting passes) to one task of the pass's pool.
+- `renderTilesInternal`, after `checkBlackedOutRooms` and before `performRenderTiles` (the cutaway checks, the
+  lighting refresh and the blacked-out passes are done, i.e. everything the draw data reads): `pzopt.CharDraw.start`
+  takes the walk's result, applies the square light-info / cutaway visibility test on the game thread, runs
+  `checkUpdateModelTextures` and the lazy lighting refresh of the zombie's square (and the one above it on stairs)
+  for the zombies kept, and hands them to the pass's own pool (`charDrawThreads`) chunk by chunk — `updateLights`
+  (plain reads after that refresh), `initModel`, `init`, the camera record; the chunk bakes, the composite, the players, the corpse shadows, world items and
+  puddles that follow overlap that work.
+- `renderMovingObjects`: `pzopt.CharDraw.join(...)` waits for the tail of those tasks (or runs the whole pre-pass when
+  `start` did not) and returns the on-screen list; the loop then runs the stock `renderMovingObject` over that list
+  only, and `CharDraw.finish()` releases anything prepared and not drawn. A null (the pass failed this frame) or
+  the key off = the stock loop over the whole set.
+- New `pzoptShouldRenderSquare(square)`: the private `shouldRenderSquare` for the pre-pass's predicate.
+- `renderMovingObject`: the `renderShadow` call is skipped for a scene-culled character without an active model that
+  is not a fake-dead zombie (`pzoptShadowIsNoOp`): since the zombie session's reorder that call returns before
+  drawing anything for exactly that case, and every earlier test in it returns too, so nothing changes; ~1,100 of
+  the 1,600 on-screen objects of the horde are such zombies.
+- The periodic log line gets `char draw:` (frames, on-screen objects per frame out of the walked set, batched per
+  frame, max, taken, leftovers, walk ms on the worker, walk waits / ms and start ms on the game thread, join waits / ms).
+
+## zombie.characters.action.ActionContext + conditions.CharacterVariableCondition (second edit, 2026-09-22, the callback snapshot)
+
+The first parallel build ran every transition condition on the workers and tripped on the variables whose callback
+is not a read: `blunge` runs `PolygonalMap2.lineClearCollide` (whose `LineClearCollideMain` keeps a plain
+`ArrayDeque` point pool — corrupted from two threads, then `NoSuchElementException` / `NullPointerException` in
+every later line test on the game thread, wrong lunge / attack answers and, in the parity session's run, the
+god-mode ghost dying), `bHasTarget` clears the target, `bthump` drops the thump target, `beatbodytarget` scans the
+corpses nearby, `turndirection` uses the inherited static vectors. So, behind the same `actionEvalParallel`:
+
+- `CharacterVariableCondition` exposes its two lookups (`pzoptLhsLookup` / `pzoptRhsLookup`) and a static
+  `pzoptSnapshotValue(lookup, owner)`: null when the owner's slot for it is a stored value or a callback whose key
+  is in `pzopt.ActionEval.PURE_CALLBACKS` (the audited pure reads: field getters, the facing test, `canRagdoll`,
+  the animation angles...), else the typed value read now (a `NULL` marker for null). The classification is
+  cached on the lookup (`pzoptPure`). `CharacterVariableLookup.pzoptGetValue` first consults
+  `ActionEval.currentSnapshot()` (a thread-local `IdentityHashMap<lookup, value>`) and returns the snapshot value
+  when present.
+- `ActionContext` keeps one snapshot map; `pzoptSnapshot()` (game thread, called by `ActionEval.submit`, i.e. at the
+  point in the zombie's postupdate where stock would have evaluated) reads every non-pure variable of the current
+  state's and sub-states' conditions into it — their side effects happen there, in order, as in stock; a callback
+  stock would have short-circuited past runs once more than stock. The per-state cache (`pzoptStateLookups`)
+  holds the lookup array of a safe state or an UNSAFE marker. `pzoptEvaluate()` installs the map for the worker
+  evaluation, and the `devActionEvalCheck` re-evaluation installs it too.
+
+## zombie.characters.IsoGameCharacter (second edit, 2026-09-22, shadow params only where drawn; ragdoll test order)
+
+Both pure reorders, suggested by the characters-draw session from the Louisville profile:
+- `renderShadow`: stock computed `calculateShadowParams` (three bone projections, three nearest-point tests) before
+  the branch that returns for a scene-culled character, i.e. for the ~1,100 culled zombies of a 1,600-object horde
+  frame whose shadow is never drawn (2.5 % of the game thread). The culled return is tested first (same condition:
+  no model path, not a fake-dead zombie, scene-culled) and the params are computed after it. Same numbers on every
+  drawn shadow.
+- `render`: `getRagdollController() != null && canRagdoll()` instead of the reverse (`canRagdoll` walks the
+  state per zombie per frame; both are pure reads).
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-22, adaptive strong re-bake budget)
+
+`pzoptStrongNow` takes its per-frame budget from `pzoptStrongBudget()`: with `pzopt.Config.LIGHTING_STRONG_FRAME_MS`
+(`lightingStrongFrameMs`, default 0 = the fixed `lightingStrongBudget` since 06:45; 20 in the runs of 06:00-06:40) the budget follows the previous game-thread
+frame step (`FrameCap.lastStepNs`, the limiter's wait excluded) — over the threshold it halves (down to 1), under
+three quarters of it grows by one, up to `lightingStrongBudget`. Why: the out-of-sight fade (`darkMulti`) moves per
+unit of game time, so a slow frame moves every exterior square further, marks more levels strong, bakes more chunk
+textures (GPU work) and slows the next frame; on the Louisville preset about a third of the 2026-09-22 runs sat in
+that loop at 27-30 fps with the game's own GPU time doubled (30 vs 13-14 ms per frame, GPU 82 %, the parity
+session's per-process log showed no other GPU client). Held strong levels still re-bake within `lightingRebakeMs`
+or the spread. Counter `strongBudgetCuts=` in the harness summary's `bake_counters=` line (the bake / re-bake
+counters since boot, new in `pzopt-bench.out`, via `pzoptBakeCounters()`). Defaulted off after the parity session's
+reading of those counters: on a scene that is steadily slow (30-45 fps downtown) every frame exceeds 20 ms, the budget
+sits at 1, the held strong squares are re-marked every pass (strong marks 25x in the slow recorded runs) and the
+screen shows stale light — the loop it was meant to break turned out to be the zoom session's stale pending bits
+(`build-zoom-leak-fix`), not the strong re-bakes. Kept as an A/B key; a spike-relative rule (cut only on a frame well
+above the recent average) would be the version worth trying.
+
+## zombie.iso.IsoWorld (added 2026-09-22, the zombie relevance sort)
+
+`sceneCullZombies` sorts the zombies with a model by their relevance to the players before handing out the model /
+animation tiers; stock's comparator recomputes both zombies' scores on every comparison (n log n × 2 score walks,
+1.4 % of the game thread in a Louisville horde). Behind `pzopt.Config.ZOMBIE_CULL_SORT_FAST` (`zombieCullSortFast`,
+true) `pzoptSortZombiesByScore` computes each score once, packs it with the element index into a long
+(`pzopt.SortKeys.descending`: the negated sortable float bits in the high word, the index in the low word, so a signed long sort gives score descending, index ascending on ties; -0 folded into +0) and sorts the keys as
+primitives, then permutes the list's backing array through a scratch array — the exact order of stock's stable
+sort under its comparator (`tests/pzopt/SortKeysTest`). The rest of the method is stock.
+
+## Upscaling pass (added 2026-09-22; `upscaler`, `upscalerQuality`, `upscalerScalePct`, `fsrSharpnessPct`, dlss keys; docs/plan-upscalers.md)
+
+With `upscaler` other than `off` the world pass renders at `upscalerQuality`'s fraction of the screen and
+`pzopt.Upscaler` resolves it to the screen size before the stock screen shader; the UI, world text, cursor and
+that shader stay at full resolution. `pzopt.RenderScale` holds the scale and the render-thread state. With the
+key off every hook below is a no-op.
+
+### zombie.core.textures.TextureDraw (edit of 2026-09-22, upscaling)
+
+`run()`: after the stock `DoStartFrameStuff` (case `glDoStartFrame`) and `DoStartFrameNoZoom`
+(`glDoStartFrameNoZoom`) `RenderScale.afterStartFrame(player)` runs; when the frame was started with a player
+index and the world framebuffer is bound it replaces the viewport and scissor with the scaled player rectangle
+(with the current sub-pixel jitter as a float viewport offset) and marks the render thread "in the world pass".
+After `DoEndFrameStuff` (`glDoEndFrame`) the mark is cleared. Case `glViewport` goes through
+`RenderScale.requestedViewport`: inside the scaled world pass a rectangle equal to a player's screen rectangle or
+the whole screen (IsoWorld's view-cone restore) is scaled the same way; any other rectangle (the FX mask, the cone
+texture) is set as requested.
+
+### zombie.iso.IsoCamera (added 2026-09-22, upscaling)
+
+`getScreenLeft/Top/Width/Height` and `getOffscreenLeft/Top`: on the render thread, while the world framebuffer
+is bound inside a scaled world pass (`RenderScale.scaledView()`), they return the scaled rectangle. That covers
+the viewport restores and uniforms of `ModelOutlines` and `VisibilityPolygon2` (`screenSize`, `displayOrigin`)
+and the water / puddle viewport origin without touching those classes. The game thread always gets the stock
+values (culling, chunk work, UI, mouse).
+
+### zombie.iso.WaterShader and zombie.iso.PuddlesShader (added 2026-09-22, upscaling)
+
+`startRenderThread`: the `WViewport` size (stock `camera.offscreenWidth / camera.zoom`, the screen size) goes
+through `RenderScale.viewPx`, i.e. it is scaled inside the scaled world pass, since the shaders map
+`gl_FragCoord` through it for the sky reflection and the noise.
+
+### zombie.core.skinnedmodel.ModelManager (added 2026-09-22, upscaling)
+
+`RenderParticles`: the two `glViewport(0, 0, offscreenWidth, offscreenHeight)` of the fire / smoke pass take
+their size through `RenderScale.viewPx` (stock's numbers scaled like the rest of the pass; the stock behaviour
+at other zooms is unchanged).
+
+### zombie.iso.weather.fog.ImprovedFog (edit of 2026-09-22, upscaling)
+
+`startFrame` values: `screenWidth/Height` and `cameraOffscreenLeft/Top` (the `screenInfo.xy` / `cameraInfo.xy`
+the stock fog shader and `FogPass` map `gl_FragCoord` through) go through `RenderScale.scaledPx`, scaled
+whenever the pass is active (every world frame renders scaled; the game thread computes them).
+
+### zombie.core.textures.MultiTextureFBO2 (edit of 2026-09-22, upscaling)
+
+`render()`: before the per-player quads `pzopt.Upscaler.queueResolve()` queues the render-thread resolve
+(`GenericDrawer`) of the frame; with the pass active the quad draws the resolved texture (`fsr1`, `dlss`:
+`Upscaler.output()`, a `Texture` over the GL texture, same screen coordinates on both sides) or, for `bicubic`
+and before the first resolve, the offscreen texture's scaled region (`RenderScale.scaledRect`) stretched to the
+screen rectangle, so the stock screen shader's bicubic filter is the upscaler.
+
+### zombie.iso.weather.WeatherShader (added 2026-09-22, upscaling)
+
+`startMainThread`: `texd.col2/col3` (the `TextureSize` uniform, the bicubic texel size) take the resolved
+texture's size from `Upscaler.compositeTextureSize()` when the quad draws it; stock's offscreen texture size
+otherwise.
+
+## zombie.characters.IsoZombie (fifth edit, 2026-09-22, the flat draw of the horde's zombies)
+
+New `pzoptRenderFlat(x, y, z, col)` (`zombieAtlasFast`), called by `FBORenderCell.renderMovingObject` in place of
+`render` for an object of exactly this class: for the two cases that make up a horde — a culled zombie (no active
+model, the atlas sprite) and a zombie whose model draw data the pre-pass built (`CharDraw.isPrepared`) — it
+performs the observable steps of `IsoZombie.render` and `IsoGameCharacter.render` in their order: drop the
+corpse-atlas texture, the alpha rule when the camera is not on the player, the doRender / alpha / seat / invisible /
+alpha-zero returns, the depth-mask state, the static light scratch from the square, the default facing, the
+last-rendered statics, `checkUpdateModelTextures`, the sprite scale, then either `renderTextureInsteadOfModel` or
+the body of `IsoSprite.renderActiveModel` (the object / debug-option test, the profiler area, the lights call the
+frame stamp answers, the camera record — the one the pre-pass built with the draw data, `CharDraw.takeCamera`, else
+its own — and the model enqueue that takes the prepared data), then the item updaters
+and the ragdoll / ballistics debug renders — and returns true; otherwise (fire sprites, a non-parts sprite, the
+non-fbo path, a debug mode, a fake-dead zombie, a model without prepared data) it returns false having done nothing
+and the stock virtual chain runs. Sits after `renderTextureInsteadOfModel`.
+
+## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-22, the flat draw and the prepared zombies' tests)
+
+`renderMovingObject` is split: the three leading tests (not a player, a square, on screen) stay in it and the rest
+moves to the new `pzoptRenderOnScreenObject(object, playerIndex)`, which the pre-pass's loop calls directly (its
+list was built from the same three tests in this frame; nothing changes them during the render). In that rest: a
+zombie whose draw data the pre-pass built (`CharDraw.isPrepared`) skips the square light-info and cutaway-visibility
+tests (the pre-pass applied both on the game thread this frame); the square is read once into a local; before
+`render`, an object of class `IsoZombie` is offered to `pzoptRenderFlat`; true = drawn, the method returns; false =
+the stock `render` call as before.
