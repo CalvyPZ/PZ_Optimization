@@ -1354,6 +1354,10 @@ public final class FBORenderCell {
       FBORenderChunkManager.instance.startFrame();
       this.pzoptBakesThisFrame = 0;
       this.pzoptRebakesThisFrame = 0; // pzopt: re-bake budget
+      this.pzoptStrongThisFrame = 0; // pzopt: strong re-bake budget
+      this.pzoptCreatesThisFrame = 0; // pzopt: never-baked levels started this frame (the bakeBudget counts these alone)
+      this.pzoptCreatesDeferredLastFrame = this.pzoptCreatesDeferredThisFrame;
+      this.pzoptCreatesDeferredThisFrame = 0;
       this.pzoptDeferredTextures.clear();
       IsoPuddles.getInstance().clearThreadData();
       IsoWater.getInstance().clearThreadData();
@@ -1680,20 +1684,37 @@ public final class FBORenderCell {
             if (level == renderLevels.getMinLevel(level)) {
                // lighting-only re-bake (flag 32 alone: daylight drifted by 1/255 on some square) of a texture baked
                // less than LIGHTING_REBAKE_MS ago: hold it, the previous texture stays on screen
-               boolean pzoptLightingOnly = pzoptRebakeMs > 0 && pzoptRc != null && !renderLevels.isDirty(level, ~32L, zoom);
+               boolean pzoptOnly32 = pzoptRc != null && !renderLevels.isDirty(level, ~32L, zoom);
                // pzopt: a strong change (a torch beam sweeping in, a light switch; pzopt.LightDirt) is neither sky drift
-               // nor a flash: it re-bakes now, as stock does, unless the frame marked enough levels to be a global event
-               boolean pzoptStrong = pzoptLightingOnly && pzopt.LightDirt.rebakeNow(c, level, IsoWorld.instance.getFrameNo());
-               if (pzoptStrong) {
-                  pzoptStrongRebakes++;
-                  pzoptLightingOnly = false;
-               } else if (pzoptLightingOnly) {
+               // nor a flash: it re-bakes now, as stock does, unless the frame marked enough levels to be a global event.
+               // At most LIGHTING_STRONG_BUDGET such re-bakes a frame (pzoptStrongNow): turning sweeps the out-of-sight
+               // fade (darkMulti) across every exterior square, which marked ~every on-screen level strong each frame;
+               // cheap at 400 fps in Rosewood, 100+ tall-chunk bakes a frame in downtown Louisville (10.8 fps, GPU 97 %,
+               // never-baked levels starved black, 2026-09-22). Past the budget the level takes the holds below.
+               // pzopt: creation first. A never-baked level (DIRTY_CREATE) is black on screen until it bakes, a held
+               // re-bake only shows slightly stale light; so the never-baked budget counts creations alone (re-bakes used
+               // to fill it, and in downtown with re-bakes flowing every frame the new chunks at the end of the order
+               // stayed black), and while a creation was deferred last frame the optional re-bakes (strong, lighting
+               // hold, spread) wait so the whole frame goes to the black ones (2026-09-22, Louisville horde preset).
+               boolean pzoptCreate = renderLevels.isDirty(level, 512L, zoom);
+               boolean pzoptStarving = pzoptBudget > 0 && this.pzoptCreatesDeferredLastFrame > 0;
+               boolean pzoptStrong = pzoptOnly32 && !pzoptStarving && this.pzoptStrongNow(c, level);
+               boolean pzoptLightingOnly = pzoptRebakeMs > 0 && pzoptOnly32 && !pzoptStrong;
+               if (pzoptLightingOnly && !pzoptStarving) {
                   Long last = this.pzoptLastBakeMs.get(pzoptRc);
                   pzoptLightingOnly = last != null && currentTimeMillis - last < pzoptRebakeMs;
                }
                // only a never-baked level (DIRTY_CREATE) is deferred: a re-bake of a visible texture (obscuring set,
                // trees, cutaways, lighting) must land the same frame or the stale texture shows (window flicker)
-               pzoptDefer = pzoptLightingOnly || (pzoptBudget > 0 && this.pzoptBakesThisFrame >= pzoptBudget && renderLevels.isDirty(level, 512L, zoom));
+               pzoptDefer = pzoptLightingOnly || (pzoptBudget > 0 && this.pzoptCreatesThisFrame >= pzoptBudget && pzoptCreate);
+               if (pzoptCreate) {
+                  if (pzoptDefer) {
+                     this.pzoptCreatesDeferredThisFrame++;
+                     pzoptCreatesStarved++;
+                  } else {
+                     this.pzoptCreatesThisFrame++;
+                  }
+               }
                if (pzoptLightingOnly) {
                   pzoptLightingRebakesHeld++;
                }
@@ -1713,11 +1734,11 @@ public final class FBORenderCell {
                   boolean pzoptLightingDirt = !renderLevels.isDirty(level, ~32L, zoom);
                   int pzoptMaxFrames = pzoptLightingDirt ? pzopt.Config.LIGHTING_REBAKE_MAX_FRAMES : pzopt.Config.REBAKE_MAX_FRAMES;
                   int pzoptFrameBudget = pzoptLightingDirt ? pzopt.Config.LIGHTING_REBAKE_BUDGET : pzoptRebakeBudget;
-                  if (pzoptStrong || (pzoptLightingDirt && pzopt.LightDirt.rebakeNow(c, level, IsoWorld.instance.getFrameNo()))) {
-                     pzoptFrameBudget = Integer.MAX_VALUE; // pzopt: strong lighting change, never held (pzopt.LightDirt)
-                     if (!pzoptStrong) {
-                        pzoptStrongRebakes++;
-                     }
+                  if (pzoptStarving) {
+                     pzoptFrameBudget = 0; // pzopt: creation first, the spread waits (its max-frames cap still applies)
+                  }
+                  if (pzoptStrong) {
+                     pzoptFrameBudget = Integer.MAX_VALUE; // pzopt: strong lighting change within the strong budget, never held (pzopt.LightDirt)
                   }
                   if (this.pzoptRebakesThisFrame >= pzoptFrameBudget) {
                      Integer since = this.pzoptRebakeHeldSince.get(pzoptRc);
@@ -4251,6 +4272,29 @@ public final class FBORenderCell {
    // pzopt: bake budget — chunk-level textures (re)baked per frame; the rest keep their previous texture for a frame
    private int pzoptBakesThisFrame;
    private int pzoptRebakesThisFrame; // pzopt: re-bake budget (Config.REBAKE_BUDGET)
+   private int pzoptStrongThisFrame; // pzopt: strong re-bakes granted this frame (Config.LIGHTING_STRONG_BUDGET)
+   private int pzoptCreatesThisFrame; // pzopt: never-baked levels baked this frame (Config.BAKE_BUDGET counts only these)
+   private int pzoptCreatesDeferredThisFrame; // pzopt: never-baked levels left black this frame
+   private int pzoptCreatesDeferredLastFrame; // pzopt: ... and last frame: > 0 holds the optional re-bakes (creation first)
+   private static long pzoptCreatesStarved; // pzopt: counter for the log line
+
+   /**
+    * pzopt: whether this level's strong lighting change (pzopt.LightDirt) re-bakes now. Granted while the frame's strong
+    * budget lasts; past it the level is held like weak drift (it re-bakes within lightingRebakeMs or the spread anyway).
+    */
+   private boolean pzoptStrongNow(IsoChunk c, int level) {
+      if (!pzopt.LightDirt.rebakeNow(c, level, IsoWorld.instance.getFrameNo())) {
+         return false;
+      }
+      int budget = pzopt.Config.LIGHTING_STRONG_BUDGET;
+      if (budget > 0 && this.pzoptStrongThisFrame >= budget) {
+         pzoptStrongHeld++;
+         return false;
+      }
+      this.pzoptStrongThisFrame++;
+      pzoptStrongRebakes++;
+      return true;
+   }
    private final java.util.IdentityHashMap<FBORenderChunk, Integer> pzoptRebakeHeldSince = new java.util.IdentityHashMap<>();
    private static long pzoptRebakesTotal;
    private static long pzoptRebakesHeld;
@@ -4258,6 +4302,7 @@ public final class FBORenderCell {
    private static long pzoptDeferredTotal;
    private static long pzoptLightingRebakesHeld;
    private static long pzoptStrongRebakes; // pzopt: lighting-only re-bakes that skipped the holds (pzopt.LightDirt)
+   private static long pzoptStrongHeld; // pzopt: strong levels past the frame's strong budget, held like weak drift
    // pzopt: cutaway savings (Config.CUTAWAY_FAST / CUTAWAY_RADIUS / GRID_STACK_INTERVAL)
    private final java.util.ArrayList<IsoChunk> pzoptNearChunks = new java.util.ArrayList<>();
    private IsoGridSquare pzoptGridStackSquare;
@@ -4305,7 +4350,7 @@ public final class FBORenderCell {
       }
       if (!pzoptTlSets.isEmpty()) {
          final int frames = pzoptTlFrames;
-         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" strong now=").append(pzoptStrongRebakes).append(" strong marks=").append(pzopt.LightDirt.strongMarks).append(" global light events=").append(pzopt.LightDirt.globalEvents).append(" flushed=").append(pzoptLightingFlushed).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld).append(" flags:");
+         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" strong now=").append(pzoptStrongRebakes).append(" strong past budget=").append(pzoptStrongHeld).append(" creations deferred=").append(pzoptCreatesStarved).append(" strong marks=").append(pzopt.LightDirt.strongMarks).append(" global light events=").append(pzopt.LightDirt.globalEvents).append(" flushed=").append(pzoptLightingFlushed).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld).append(" flags:");
       for (int b = 0; b < 16; b++) {
          if (pzoptBakeFlags[b] > 0) sb.append(' ').append(PZOPT_FLAG_NAMES[b]).append('=').append(pzoptBakeFlags[b]);
          pzoptBakeFlags[b] = 0;
@@ -4326,6 +4371,7 @@ public final class FBORenderCell {
       if (pzopt.FogPass.enabled()) { sb.append(" | ").append(pzopt.FogPass.stats()); } // pzopt: one-pass fog
       if (pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Config.TREE_BAKE_PASS) { sb.append(" | ").append(pzopt.TreeBake.stats()); } // pzopt: issue #5
       if (pzopt.Config.TREE_BAKE_MAX_CHUNKS_PER_SEC > 0) { sb.append(" | trees per-frame frames: ").append(pzoptTreesPerFrameFrames).append(" chunks/s now ").append(String.format(java.util.Locale.ROOT, "%.0f", pzopt.ChunkRate.perSecond())); } // pzopt: treeBakeMaxChunksPerSec
+      sb.append(" | ").append(pzopt.AnimBatch.describe()); // pzopt: the zombies' bone-math batch
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));

@@ -1674,6 +1674,34 @@ periodic log line. Verified on the night-torch spinning bench (`bl-torch-*` runs
 recorded): hard-jump pixels per frame between consecutive recording frames stock 7.7 k, holds
 off 7.9 k, this fix 7.9 k, before 9.9 k (p90 16.7 / 17.5 / 17.9 / 22.3 k).
 
+**Strong budget (2026-09-22 night).** The strong path had no cap, and turning marks far more
+than a beam does: the out-of-sight fade (`darkMulti`, a quarter of its 1/1000 move in the
+accumulator) flips on every exterior square the vision cone crosses, so a spinning player marked
+about every on-screen level strong every frame. Cheap on the Rosewood spin at 400 fps (`strong
+now=` ~2 a frame), but on the Louisville horde preset (`--preset louisville`, downtown, eight
+levels a chunk, `see_all`) it was 100+ tall-chunk bakes a frame: 10.8 fps, GPU 97 %, chunk
+bakes 30 % of the game thread, and the never-baked levels behind them starved black (the
+"black squares" seen during run `lou-base`; `lightingStrongDelta=100000` gave 26.9 fps, GPU
+35 %, bakes 4 %). New `pzoptStrongNow(chunk, level)` grants the strong path to at most
+`Config.lightingStrongBudget` (8) levels a frame (`pzoptStrongThisFrame`, reset in
+`renderInternal` with the other per-frame budgets); a strong level past the budget takes the
+ordinary `lightingRebakeMs` hold and the spread, i.e. it still re-bakes within 250 ms. A torch or
+headlight beam touches a handful of levels a frame, so the blocky-lights fix above keeps its
+whole budget; only sweeps that mark dozens are spread. Counter `strong past budget=` on the log
+line; `lightingStrongBudget=0` restores the uncapped behaviour for A/Bs.
+
+**Creation first (2026-09-22 night, second pass).** With the strong budget in place the black squares
+still showed under any extra load: the never-baked budget (`bakeBudget`, 8) was counted against
+`pzoptBakesThisFrame`, which every bake incremented, so eight re-bakes of any kind (strong, lighting
+spread, redraw, object changes, all allowed before it) used the budget up and the never-baked levels
+of the chunks late in the draw order were deferred again and again, black on screen while re-bakes
+kept flowing every frame. Now the budget counts creations alone (`pzoptCreatesThisFrame`), and while a
+creation was deferred in the previous frame (`pzoptCreatesDeferredLastFrame`) the optional re-bakes
+wait: no strong grant, every lighting-only level is held regardless of `lightingRebakeMs`, and the
+spread budget is zero (its `lightingRebakeMaxFrames` / `rebakeMaxFrames` caps still apply, so nothing
+stays stale for long). Object, tree, cutaway and obscuring re-bakes are never held, as before. Counter
+`creations deferred=` on the log line.
+
 ## zombie.iso.LightingJNI + FBORenderCell (2026-09-21 evening, lighting-budget flush)
 
 The second half of the "blocky lights" report, the 120 km/h night drive: with `lightingBudget`
@@ -1720,3 +1748,55 @@ with `+connect 127.0.0.1:16261 -nosteam`, its own `-Ddeployment.user.cachedir`, 
 `force-disconnect checksum-File doesn't exist on the server: media/lua/shared/pzopt/pzopt_keybinding.lua`,
 the reported message. A killed client leaves "User is already connected" on the server;
 `kickuser` on its console clears it.
+
+## zombie.core.skinnedmodel.animation.AnimationPlayer (added 2026-09-22 night, zombie bone math on the other cores)
+
+Louisville horde profile (`lou-budget`, game thread 98 % busy): the zombies' postupdate is 17 % of the
+game thread and 9 % of that is `updateModelSlot`, i.e. `AnimationPlayer.Update` blending every live
+track's keyframes into the bone transforms, the body-angle steps, the twist bones, the model-space and
+skin matrices. That math only touches the player's own arrays, the read-only clips, the thread-safe
+pools (`Pool`, `ObjectPool`, `HelperFunctions`' locked matrix stack) and a set of static scratch
+objects, so it can run on any thread once the scratch is per thread.
+
+Edits: the seven static scratch holders (`L_applyTwistBone`, `L_getBoneModelTransform`,
+`L_getTrackTransform`, `L_getUnweightedBoneTransform`, `L_getUnweightedModelTransform`,
+`L_updateBoneAnimationTransform`, the deferred-movement bone-index array) hold instance fields now,
+one instance per thread through a `ThreadLocal`, and every use goes through it; the static `tempo`
+vector is a `ThreadLocal` too. In `updateInternal`, after the multi-track tick (which fires the
+animation events and stays on the game thread) and the non-visual / shared-skeleton branches, the
+standard-animation branch first offers the player to `pzopt.AnimBatch.submit`; when accepted the
+method returns and the batch calls the new `pzoptRunDeferred(deltaT)` (the standard animation plus
+`postUpdateRagdoll`) later. `pzoptBatchable()` says no for a child player (copies its parent's
+bones), a ragdoll or a recording player. Key `animBonesParallel` (true); `animBonesThreads` (8)
+worker threads, the game thread joins in. Nothing changes in the order of a single player's work,
+only where the second half runs.
+
+`isBoneReparented(boneIdx)` is a plain loop over the reparented-bone list instead of
+`PZArrayUtil.contains` with a pooled `Lambda.predicate`: stock allocated and released one pooled
+predicate per bone per character per frame (~30k a frame on the horde), and every pool alloc /
+release bumps shared atomic statistics counters, which the batch's worker threads all contended on
+(5 % of the game thread waiting inside `PooledObject.release` in run `lou-rec-fix`). Same answer,
+no allocation, inline or batched.
+
+## zombie.MovingObjectUpdateScheduler (added 2026-09-22 night, zombie bone math on the other cores)
+
+`postupdate()`: `pzopt.AnimBatch.begin()` before the bucket loop and `flush()` after it (in a
+`finally`), client side only. The batch runs after the loop rather than overlapping it because
+`IsoGameCharacter.updateAnimPlayer` (the model-less path, most of a horde) flips
+`PerformanceSettings.interpolateAnims` around each call and the keyframe sampling reads that flag; the
+join is before anything reads a bone (attachments, the render data). Zombies being grappled or
+grappling, or that reanimated a dead player, are refused by the batch (the other side reads their
+bones in the same loop) and run inline. Counters on the periodic FBORenderCell log line:
+`anim batch: frames= batched= inline= max= work ms= wait ms=`; a failure inside a deferred update is
+logged once and turns the batch off for the rest of the session.
+
+## zombie.characters.IsoZombie (added 2026-09-22 night, vehicle cull for the line-of-sight test)
+
+`isVehicleBetween`: for every loaded vehicle stock transforms the zombie-to-target segment into the
+vehicle's local space (two matrix multiplies, three pooled vectors) and runs the exact box test — per
+zombie that could see the player, per frame. Downtown Louisville has hundreds of parked cars, so
+`BaseVehicle.getIntersectPoint` was 6 % of the game thread. Now `pzopt.VehicleCull.mayIntersect`
+runs first: the vehicle's bounding circle (half the horizontal diagonal of its script extents plus the
+centre-of-mass offset plus a 1-tile margin (getX/getY follow the physics origin a tick behind)) against the segment's nearest point; a miss skips the
+exact test, a hit runs it unchanged. Key `vehicleCull` (true); a vehicle without a script always runs
+the exact test.

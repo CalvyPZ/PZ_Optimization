@@ -268,6 +268,17 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   neighbour textures instead of re-baking them; half the neighbour re-bakes while driving). Storm with lightning
   232 → 390 fps (2.6 ms, p99 8.6), clear 420 → 454 fps; the flashes cost ~0.1 ms mean. Laptop numbers pending
   (it was shut down mid-pass). A reduced-resolution puddle layer and a two-texture flash blend were rejected.
+- Louisville horde pass (2026-09-22 night, runs `lou-*`): the baseline had collapsed to 10.8 fps / GPU 97 % — the
+  09-21 `LightDirt` strong re-bake path had no per-frame cap and turning marks ~every exterior level strong
+  (`darkMulti` fade), a fps feedback loop near the scene's ~27 fps tipping point; `lightingStrongBudget=8` caps it,
+  and the never-baked budget now counts creations alone and holds optional re-bakes while a creation was deferred
+  (black squares beat stale light). Then the game thread (98 %, update 57 %): `animBonesParallel` (`pzopt.AnimBatch`,
+  `AnimationPlayer` + `MovingObjectUpdateScheduler` overrides: the zombies' bone math on 8 worker threads after the
+  postupdate loop, joined before rendering; `isBoneReparented` allocated a pooled lambda per bone per zombie, now a
+  loop), `vehicleCull` (`IsoZombie.isVehicleBetween` bounding circle, 6 % → 0.7 %). Clean all-in run `lou-final2`:
+  26.4 → 32.2 fps (p50 30 ms), GPU 46 %, batch flush 1 % of the game thread, zombie postupdate 19 → 14.5 %.
+  Runs right after a peer's `update-*` / `release-updater` cmd job showed GPU 75-80 % with the game's own gpu_ms
+  tripled (a leftover game / Steam UI client; a game at the main menu alone is ~40 % GPU here) — re-run those.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
   The game-thread optimization plans were dropped on 2026-09-21 at the maintainer's request.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
