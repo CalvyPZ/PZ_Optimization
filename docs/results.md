@@ -1568,3 +1568,5 @@ nearest-first over the next 20-40 frames, the kept textures on screen meanwhile)
 eased spin no longer shows in the frame times at all. The 240-cap frame rate during the fill is ~120-200
 fps for 0.1-0.2 s instead of one 80-375 ms freeze; with `zoomEaseMs=300` the motion itself is a 300 ms
 Bézier (CSS "ease") at every frame rate instead of 8 linear frames and a snap.
+Video: `docs/media/bench-zoom-spin-stock-vs-new-1080.mp4` (`harness/stitch-zoom-sbs.sh`, runs `zoom-rec-stock` /
+`zoom-rec-new`: the stock zoom paths on our build vs the new ones, side by side, aligned at the first zoom-out).
