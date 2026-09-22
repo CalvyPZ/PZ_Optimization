@@ -90,7 +90,10 @@ preview panel, `docs/media/options-preview-full.png`; 2026-09-22; the macOS sect
 in the intro line), `15` the "New! In-game updater" card (`docs/media/updater-card.png` from `harness/updater-card.py`:
 the main menu with the item greyed out and enabled plus the dialog before and after the install, from the desktop
 captures `docs/media/updater-menu-current.png`, `updater-menu.png`, `updater-dialog-available.png`,
-`updater-dialog-installed.png`; 2026-09-22; the two earlier "New!" sections lost their "New!" with it).
+`updater-dialog-installed.png`; 2026-09-22; the two earlier "New!" sections lost their "New!" with it), `16` the
+"New! Smooth zoom" card (`docs/media/zoom-card.png` from `harness/zoom-card.py`: the worst-frame table of the four zoom
+cases, stock vs `zoomRetain` + `zoomEase`, from `docs/results.md` "Camera zoom changes"; 2026-09-22 evening; the updater
+section lost its "New!" with it).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
