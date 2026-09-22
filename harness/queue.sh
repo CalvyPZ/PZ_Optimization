@@ -6,6 +6,9 @@
 # the machine that session is bound to. A session submits a job and reads the job's result.txt (or is
 # woken by `watch`) instead of pgrep-ing, messaging peers and running ssh wrappers by hand.
 #
+#   Every submit carries the session's context for Jev (required):
+#     --name "<session name, once per session; the ListAgents name>"  --intent "<why this job, what it decides>"
+#     --progress "<where the session's task stands: 3/5 A/B runs, last check before a commit, ...>"
 #   harness/queue.sh submit run      [--machine desktop|flip|dell|mac] [--install opt|stock|keep|<repo>]
 #                                    [--goal "<what the change should do>"] [--against <run|baseline.json>]...
 #                                    [--parity-against <recorded run>] [--cap 240] [--size <secs>] [--wait] -- <harness/run.sh args>
@@ -13,9 +16,16 @@
 #   harness/queue.sh submit workshop [--wait] --notes "<change notes>" -- --tag win-<rev>-<commit> | --zip <zip>   # desktop only
 #   harness/queue.sh submit cmd      [--install ...] [--wait] --label <name> -- <command>          # desktop only
 #   harness/queue.sh submit media    [--out <file>]... [--wait] --label <name> -- <encode / stitch command>   # desktop only
+#   harness/queue.sh session [--name N] [--intent T] [--progress T]   # this session's context (Jev reads it); no args = show
+#   harness/queue.sh suggest --intent "..." [--resource r1,r2] [-- <run.sh args>]   # Jev's bench for an intent (+ fit of your args)
+#   harness/queue.sh resources                 # the resource vocabulary of harness/queue/benches.json
+#   A `run` submit must name the resources it tests (--resource gpu,render-thread; `resources` lists them) and may take
+#   its arguments from the catalog: --bench <name> (harness/queue/benches.json) or --bench auto (Jev picks from the
+#   intent + resources); the arguments after -- are appended (--label, A/B --prop keys, --record ...). A run with its
+#   own arguments gets Jev's suggestion printed beside it (fits= / matches_suggestion=), never overridden.
 #   harness/queue.sh list                      # every job (machine, status, size estimate, verdict) and the workers
 #   harness/queue.sh machines                  # connection state of every machine, queue depth, bound sessions
-#   harness/queue.sh next [machine]            # the pending jobs of a machine in the order the worker will take them
+#   harness/queue.sh next [machine]            # Jev's current plan for a machine: order, estimates, ETAs (one Jev request)
 #   harness/queue.sh bind <machine> | unbind   # this session's affinity (submit binds on first use, default desktop)
 #   harness/queue.sh watch [--exit-on disconnect|job|any]   # this session's events as they happen (blocking)
 #   harness/queue.sh events [N]                # the last N events of this session
@@ -28,20 +38,24 @@
 # `--rebind`. mp, workshop, cmd and media jobs always run on the desktop (the stock server, the Steam upload,
 # the recordings and NVENC are here).
 #
-# Order (2026-09-22), per machine, three tiers:
-#   1. media jobs, oldest first: an encode / stitch normally means a session is wrapping up, so it goes
-#      before every run;
-#   2. each session's FIRST job (submitted while the session had nothing pending or running on that machine),
-#      oldest first: a session's batch takes one place in the line, a newcomer never waits behind a peer's
-#      whole batch;
-#   3. every other job (a session's second, third ... of a batch), shortest first, oldest on a tie.
+# Order (2026-09-22 evening): Jev is the only sorter. Whenever a worker is free it hands every pending job of
+# its machine to harness/queue-jev.py, which asks Jev (TypeSafe) one choice question over the facts: each job's
+# intent, the session's task progress, name and age (from its Claude Code transcript), how long the job and the
+# session have waited, the job's size estimate and where it came from, its place in the session's batch, what
+# is running now. Jev's probabilities over the candidates are the whole order; the pick runs, the order is the
+# plan (machines/<m>/plan, `next`), with an ETA per job from the estimates. No tier or FIFO rule in code: the
+# policy (fairness between sessions, short jobs first when equal, wrap-up / media / release work unblocked,
+# no starvation) is text Jev weighs. When Jev cannot be asked the pending jobs show `blocked: waiting for Jev`
+# and the worker retries every 30 s; PZQ_JEV_FALLBACK=fifo lets it take the oldest instead.
 # Every job gets a size estimate in seconds at submit time: `--size <secs>` when given, else the median
 # duration of the finished jobs with the same signature (kind + arguments without --label / --prop /
 # --option / --env, i.e. the same route, preset, mode and recording flags; the duration counted from the
 # launch, not from the blocked wait), else a default from the arguments (run: ~40 s launch + analysis + the
-# route / quit-after seconds; mp 240; workshop 90; cmd 60; media 120). A job that has waited longer than
-# PZQ_MAX_WAIT (1800 s, 0 = never) goes first regardless, so tier 3 cannot starve a long job. `list` shows
-# the tier / estimate and `submit` counts the jobs that go before it.
+# route / quit-after seconds; mp 240; workshop 90; cmd 60; media 120).
+# Job start: a desktop notification (notify-send) with the label, the session name, the estimate and the intent.
+# Overrun: a job still running past its estimate (counted from the launch) sends its session an event
+# (`overrun: job ...`, wakes `watch --exit-on any|overrun`) and a notification, then again every further
+# estimate (at least 5 min) while it runs; result.txt records `overran=`.
 #
 # Media jobs (encode-av1-hdr.sh, the stitch scripts, ffmpeg): same desktop queue as the runs, so an encode
 # can never overlap a benchmark run; they are tier 1 and, like runs, wait for any game, run.sh or ffmpeg /
@@ -61,12 +75,13 @@
 # running job whose connection drops fails with exit 70 and its session is told.
 #
 # Layout of $PZQ_DIR (default ~/.local/state/pzopt-queue):
-#   jobs/<id>-<label>/  job (kind, label, machine, session, cwd, install, goal, against, first, size, size_from, sig, ...),
+#   jobs/<id>-<label>/  job (kind, label, machine, session, session_name, intent, progress, cwd, install, goal, against, size, size_from, sig, ...),
 #                       argv (NUL-separated), status (pending|running|done|failed|cancelled), blocked (reason,
 #                       while waiting), pid, output.log, took (s, whole job), ran (s, from the launch: the history
 #                       for the size estimates), result.txt (exit, run_dir, analyze.py, verdict= from Jev, parity=, ...), failure.png
-#   machines/<m>/       state (connected|disconnected|unknown), since, ssh.sock (the master)
-#   sessions/<sid>/     machine (affinity), events (append-only: job done/failed, machine connect/disconnect)
+#   machines/<m>/       state (connected|disconnected|unknown), since, ssh.sock (the master), plan (Jev's last order)
+#   sessions/<sid>/     machine (affinity), name, intent, progress, progress_at, first_seen,
+#                       events (append-only: job done/failed/overrun, machine connect/disconnect)
 #   events.log          every event; worker-<m>.pid / .log, monitor.pid / .log
 set -uo pipefail
 
@@ -86,7 +101,8 @@ GAME_PATTERN='^([^ ]*/)?ProjectZomboid64( |$)'
 BUSY_PATTERN='^(([^ ]*/)?(bash|sh|zsh) )?([^ ]*/)?harness/(mp/run|run|showcase-record)\.sh( |$)|^([^ ]*/)?python3? ([^ ]*/)?harness/ui-drive\.py workshop'
 ENCODE_PATTERN='^([^ ]*/)?(ffmpeg|gpu-screen-recorder|av1an|x265|SvtAv1EncApp)( |$)'   # an encode outside the queue skews a run, a run skews an encode's time
 MONITOR_PERIOD=${PZQ_MONITOR_PERIOD:-5}
-MAX_WAIT=${PZQ_MAX_WAIT:-1800}   # a pending job older than this goes before every tier (0 = never)
+JEV_FALLBACK=${PZQ_JEV_FALLBACK:-block}   # Jev unreachable: block (retry every 30 s) or fifo (oldest pending job)
+OVERRUN_REPEAT_MIN=300                     # an overrunning job re-notifies every max(estimate, this) seconds
 
 die() { echo "queue: $*" >&2; exit 2; }
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
@@ -171,52 +187,42 @@ estimate_size() { # <job dir>: prints "<seconds> <source>" (arg, history, defaul
 
 job_size() { local s; s=$(jget "$1" size); [[ -n "$s" ]] || s=$(default_size "$1"); echo "$s"; }   # jobs queued before the size field: a default
 
-job_age() { local t; t=$(jget "$1" submitted); [[ -n "$t" ]] && echo $(( $(date +%s) - $(date -d "$t" +%s 2>/dev/null || date +%s) )) || echo 0; }
-
-job_tier() { # <job dir>: 1 media, 2 a session's first job of a batch (or queued before the field existed), 3 the rest
-  local f; [[ "$(jget "$1" kind)" == media ]] && { echo 1; return; }
-  f=$(jget "$1" first); [[ "$f" == 0 ]] && echo 3 || echo 2
-}
-
-goes_before() { # <a> <b>: job a runs before job b (both pending on one machine): lower tier; tiers 1-2 oldest
-  local ta tb sa sb; ta=$(job_tier "$1"); tb=$(job_tier "$2")            # first, tier 3 smaller size, oldest on a tie
-  (( ta != tb )) && { (( ta < tb )); return; }
-  (( ta < 3 )) && { [[ "$1" < "$2" ]]; return; }
-  sa=$(job_size "$1"); sb=$(job_size "$2")
-  (( sa < sb )) || { (( sa == sb )) && [[ "$1" < "$2" ]]; }
-}
-
-session_busy_on() { # <sid> <machine>: the session has a non-media job pending or running there (the new job is not its first)
+pending_on() { # <machine>: the pending job dirs there, id order
   local d; for d in "$JOBS"/*/; do d=${d%/}
-    [[ -f "$d/job" && "$(jget "$d" session)" == "$1" && "$(jget "$d" machine)" == "$2" && "$(jget "$d" kind)" != media ]] || continue
-    [[ "$(status_of "$d")" =~ ^(pending|running)$ ]] && return 0
-  done; return 1
-}
-
-rank_pick() { # stdin: job dirs (id order) -> the one the worker takes: past MAX_WAIT oldest first, else goes_before
-  local d best="" starved=""
-  while read -r d; do [[ -n "$d" ]] || continue
-    if (( MAX_WAIT > 0 )) && (( $(job_age "$d") > MAX_WAIT )); then [[ -n "$starved" ]] || starved="$d"; fi
-    if [[ -z "$best" ]] || goes_before "$d" "$best"; then best="$d"; fi
+    [[ -f "$d/job" && "$(status_of "$d")" == pending && "$(jget "$d" machine)" == "$1" ]] && echo "$d"
   done
-  [[ -n "$starved" ]] && { echo "$starved"; return 0; }
-  [[ -n "$best" ]] && { echo "$best"; return 0; }
-  return 1
 }
 
-next_pending() { # [machine]: media, then the sessions' first jobs FIFO, then the rest shortest first; past MAX_WAIT first
-  local d
-  for d in "$JOBS"/*/; do d=${d%/}
-    [[ -f "$d/job" && "$(status_of "$d")" == pending ]] || continue
-    [[ -z "${1:-}" || "$(jget "$d" machine)" == "$1" ]] || continue
-    echo "$d"
-  done | rank_pick
+# Jev's order of a machine's pending jobs: "<dir>\t<p>\t<eta s>" lines, pick first; also writes machines/<m>/plan.
+# Exit 1 = nothing pending, 3 = Jev could not be asked.
+jev_py() { (cd "$REPO" && timeout 90 python3 harness/queue-jev.py "$@" 2>>"$Q/jev.log"); }
+jev_rank() { (cd "$REPO" && timeout 120 python3 harness/queue-jev.py rank --q "$Q" --machine "$1" 2>>"$Q/jev.log"); }
+
+next_pending() { # <machine>: the job Jev picks (fallback per PZQ_JEV_FALLBACK); 1 = none, 3 = Jev unreachable and blocking
+  local m="$1" out rc d
+  out=$(jev_rank "$m"); rc=$?
+  if (( rc == 0 )); then
+    for d in $(cut -f1 <<<"$out"); do grep -q '^waiting for Jev' "$d/blocked" 2>/dev/null && rm -f "$d/blocked"; done
+    head -1 <<<"$out" | cut -f1; return 0
+  fi
+  (( rc == 1 )) && return 1
+  [[ -n "$(pending_on "$m")" ]] || return 1
+  if [[ "$JEV_FALLBACK" == fifo ]]; then say "Jev unreachable (rc $rc, $Q/jev.log); fifo fallback" >&2; pending_on "$m" | head -1; return 0; fi
+  while read -r d; do [[ -n "$d" ]] && blocked_note "$d" "waiting for Jev to order the queue (unreachable: $Q/jev.log; PZQ_JEV_FALLBACK=fifo overrides)" >&2; done <<<"$(pending_on "$m")"
+  return 3
 }
 
 # --- sessions and events ---------------------------------------------------------------------------
 
 session_id() { printf '%s' "${PZQ_SESSION:-${CLAUDE_CODE_SESSION_ID:-$USER-pid$PPID}}" | tr -c 'A-Za-z0-9._-' '_'; }
 session_machine() { cat "$Q/sessions/$1/machine" 2>/dev/null; }
+session_name() { cat "$Q/sessions/$1/name" 2>/dev/null || printf '%s' "${1:0:8}"; }
+session_set() { # <sid> <key> <value>: name / intent / progress (progress also stamps progress_at)
+  mkdir -p "$Q/sessions/$1"; [[ -f "$Q/sessions/$1/first_seen" ]] || ts > "$Q/sessions/$1/first_seen"
+  printf '%s\n' "$3" > "$Q/sessions/$1/$2.tmp" && mv -f "$Q/sessions/$1/$2.tmp" "$Q/sessions/$1/$2"
+  [[ "$2" == progress ]] && ts > "$Q/sessions/$1/progress_at"; return 0
+}
+oneline() { printf '%s' "$1" | tr '\n\r' '  '; }   # job-file values are one line each
 notify_session() { # <sid> <event line>
   mkdir -p "$Q/sessions/$1"
   echo "$(ts) $2" >> "$Q/sessions/$1/events"
@@ -322,8 +328,12 @@ submit() {
   local kind="${1:-}"; shift || true
   [[ "$kind" =~ ^(run|mp|workshop|cmd|media)$ ]] || die "submit run|mp|workshop|cmd|media [options] -- <arguments>"
   local install=keep wait=0 start=1 notes="" label="" goal="" against=() parity_against="" cap="" machine="" rebind=0 outs=() size=""
+  local sname="${PZQ_SESSION_NAME:-}" intent="" progress="" resource="" bench="" sugg=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --name) sname="$2"; shift 2 ;;
+      --intent) intent="$2"; shift 2 ;;
+      --progress) progress="$2"; shift 2 ;;
       --machine) machine="$2"; shift 2 ;;
       --rebind) rebind=1; shift ;;
       --install) install="$2"; shift 2 ;;
@@ -337,12 +347,22 @@ submit() {
       --notes) notes="$2"; shift 2 ;;
       --label) label="$2"; shift 2 ;;
       --out) outs+=("$2"); shift 2 ;;
+      --resource) resource="$2"; shift 2 ;;
+      --bench) bench="$2"; shift 2 ;;
       --) shift; break ;;
       *) die "unknown submit option $1 (the job's own arguments go after --)" ;;
     esac
   done
   local argv=("$@") i sid bound
   sid=$(session_id); bound=$(session_machine "$sid")
+  # Jev orders the queue from what the sessions tell it: refuse a job without it
+  local missing=()
+  [[ -n "$sname" || -f "$Q/sessions/$sid/name" ]] || missing+=('--name "<this session'"'"'s ListAgents name>" (once per session)')
+  [[ -n "$intent" ]] || missing+=('--intent "<why this job, what it decides>"')
+  [[ -n "$progress" ]] || missing+=('--progress "<where your task stands, e.g. 3/5 A/B runs, last check before a commit>"')
+  (( ${#missing[@]} == 0 )) || die "Jev orders the queue from each session's context; add $(printf '%s, ' "${missing[@]}" | sed 's/, $//') before --"
+  [[ -n "$sname" ]] && session_set "$sid" name "$(oneline "$sname")"
+  session_set "$sid" intent "$(oneline "$intent")"; session_set "$sid" progress "$(oneline "$progress")"
   # affinity: mp / workshop / cmd are desktop-only; otherwise the session's machine, bound on first use
   if [[ "$kind" != run ]]; then
     [[ -z "$machine" || "$machine" == desktop ]] || die "$kind jobs run on the desktop only (stock server, Steam upload, recordings and NVENC, local commands)"
@@ -360,7 +380,24 @@ submit() {
   fi
   case "$kind" in
     run)
-      [[ ${#argv[@]} -gt 0 ]] || die "run needs the harness/run.sh arguments after --"
+      [[ -n "$resource" ]] || die "a run must name the resources it tests: --resource <r1,r2> (one of: $(jev_py resources | awk '{print $1}' | tr '\n' ' '))"
+      local rbad; rbad=$(tr ',' '\n' <<<"$resource" | while read -r r; do [[ -z "$r" ]] || jev_py resources | awk '{print $1}' | grep -qx "$r" || echo "$r"; done)
+      [[ -z "$rbad" ]] || die "unknown resource(s): $(echo $rbad) (harness/queue.sh resources)"
+      if [[ -n "$bench" ]]; then   # the catalog's arguments first, the session's after them (later options win in run.sh)
+        local bname="$bench" bargs
+        if [[ "$bench" == auto ]]; then
+          sugg=$(jev_py suggest --intent "$intent" --resource "$resource") || die "Jev could not suggest a bench: $(sed -n 's/^error=//p' <<<"$sugg")"
+          bname=$(sed -n 's/^bench=//p' <<<"$sugg")
+          [[ "$bname" != none && -n "$bname" ]] || die "Jev finds no standard bench for this intent and these resources (alternatives: $(sed -n 's/^alternatives=//p' <<<"$sugg")); give the run.sh arguments yourself"
+          echo "Jev picked bench $bname ($(sed -n 's/^confidence=//p' <<<"$sugg")) for: $intent"
+        fi
+        bargs=$(python3 -c 'import json,sys; b={x["name"]:x for x in json.load(open(sys.argv[1]))["benches"]}; print(b[sys.argv[2]]["args"]) if sys.argv[2] in b else sys.exit(1)' "$REPO/harness/queue/benches.json" "$bname") \
+          || die "no bench $bname in harness/queue/benches.json (harness/queue.sh suggest, or --bench auto)"
+        read -r -a barr <<<"$bargs"; argv=("${barr[@]}" "${argv[@]}"); bench="$bname"
+      else
+        [[ ${#argv[@]} -gt 0 ]] || die "run needs the harness/run.sh arguments after -- (or --bench <name>|auto)"
+        sugg=$(jev_py suggest --intent "$intent" --resource "$resource" --args "${argv[*]}") || sugg=""
+      fi
       for ((i = 0; i < ${#argv[@]}; i++)); do [[ "${argv[i]}" == --label ]] && label="${argv[i+1]:-}"; done
       [[ -n "$label" ]] || die "run.sh needs --label"
       [[ -x "$REPO/harness/run.sh" ]] || die "no harness/run.sh in $REPO" ;;
@@ -394,16 +431,18 @@ submit() {
     [[ "$install" =~ ^(opt|keep)$ ]] || die "--install $install is not available on $machine (opt = rsync build/classes + install there, keep)"
   fi
   label=$(sanitize "$label")
-  local id dir first=1
-  [[ "$kind" == media ]] || ! session_busy_on "$sid" "$machine" || first=0
+  local id dir
   id=$(next_id); dir="$JOBS/$id-$label"; mkdir -p "$dir"
   printf '%s\0' "${argv[@]}" > "$dir/argv"
   {
     echo "id=$id"; echo "kind=$kind"; echo "label=$label"; echo "machine=$machine"; echo "session=$sid"
+    echo "session_name=$(session_name "$sid")"; echo "intent=$(oneline "$intent")"; echo "progress=$(oneline "$progress")"
     echo "cwd=$REPO"; echo "submitter=${PZQ_SESSION:-$USER pid $PPID}"; echo "submitted=$(ts)"
-    echo "install=$install"; echo "notes=$notes"; echo "goal=$goal"; echo "against=${against[*]:-}"
-    echo "parity_against=$parity_against"; echo "cap=$cap"; echo "outs=${outs[*]:-}"; echo "args=${argv[*]}"
-    echo "sig=$(job_sig "$dir")"; echo "first=$first"
+    echo "install=$install"; echo "notes=$(oneline "$notes")"; echo "goal=$(oneline "$goal")"; echo "against=${against[*]:-}"
+    echo "parity_against=$parity_against"; echo "cap=$cap"; echo "outs=${outs[*]:-}"; echo "args=$(oneline "${argv[*]}")"
+    echo "resource=$resource"; echo "bench=$bench"
+    [[ -n "$sugg" ]] && echo "suggested=$(sed -n 's/^bench=//p' <<<"$sugg") fits=$(sed -n 's/^fits=//p' <<<"$sugg") matches=$(sed -n 's/^matches_suggestion=//p' <<<"$sugg")"
+    echo "sig=$(job_sig "$dir")"
     if [[ -n "$size" ]]; then echo "size=$size"; echo "size_from=arg"; fi
   } > "$dir/job"
   if [[ -z "$size" ]]; then   # after sig= is on disk: the history lookup matches on it
@@ -411,20 +450,28 @@ submit() {
     { echo "size=$size"; echo "size_from=${est#* }"; } >> "$dir/job"
   fi
   set_status "$dir" pending
-  echo "job $id queued on $machine: $kind $label"
-  case "$(job_tier "$dir")" in
-    1) echo "  order:  media, goes before every run (~$size s, $(jget "$dir" size_from))" ;;
-    2) echo "  order:  first job of this session's batch, FIFO among the sessions' first jobs (~$size s, $(jget "$dir" size_from))" ;;
-    3) echo "  order:  after every session's first job, shortest first: ~$size s ($(jget "$dir" size_from); --size <secs> overrides)" ;;
-  esac
+  echo "job $id queued on $machine: $kind $label (session $(session_name "$sid"), ~$size s estimate from $(jget "$dir" size_from); --size <secs> corrects it)"
+  if [[ "$kind" == run && -z "$bench" && -n "$sugg" ]]; then
+    local sb; sb=$(sed -n 's/^bench=//p' <<<"$sugg")
+    if [[ "$sb" == none ]]; then echo "  bench:  Jev: no standard bench fits this intent; your own arguments (fit $(sed -n 's/^fits=//p' <<<"$sugg"))"
+    else
+      echo "  bench:  Jev suggests '$sb' for this intent + $resource (confidence $(sed -n 's/^confidence=//p' <<<"$sugg")); your arguments $( [[ "$(sed -n 's/^matches_suggestion=//p' <<<"$sugg")" == yes ]] && echo "contain it" || echo "differ from it"), fit $(sed -n 's/^fits=//p' <<<"$sugg")"
+      [[ "$(sed -n 's/^matches_suggestion=//p' <<<"$sugg")" == yes ]] || echo "          $sb = $(sed -n 's/^args=//p' <<<"$sugg")   (--bench $sb; cancel and resubmit if that is what you meant)"
+    fi
+  fi
   echo "  dir:    $dir"
   echo "  status: $dir/status"
   echo "  result: $dir/result.txt"
-  echo "  events: $Q/sessions/$sid/events   (harness/queue.sh watch --exit-on any)"
-  local ahead
-  ahead=$(for d in "$JOBS"/*/; do d=${d%/}; [[ "$d" != "$dir" && -f "$d/job" && "$(jget "$d" machine)" == "$machine" ]] || continue
-    case "$(status_of "$d")" in running) echo x ;; pending) goes_before "$d" "$dir" && echo x ;; esac; done | wc -l)
-  echo "  ahead:  $ahead job(s) on $machine"
+  echo "  events: $Q/sessions/$sid/events   (harness/queue.sh watch --exit-on any: job ended, overrun, disconnect)"
+  local plan rc line pos eta
+  plan=$(jev_rank "$machine"); rc=$?
+  if (( rc == 0 )); then
+    line=$(grep -n -F "$dir"$'\t' <<<"$plan" | head -1)
+    pos=${line%%:*}; eta=$(cut -f3 <<<"${line#*:}")
+    echo "  order:  Jev puts it #$pos of $(wc -l <<<"$plan") pending on $machine, starts in ~$(( (eta + 59) / 60 )) min by the estimates (Jev re-decides at every pick; harness/queue.sh next $machine)"
+  else
+    echo "  order:  Jev decides when the worker is free (no plan now: $( (( rc == 3 )) && echo "Jev unreachable, $Q/jev.log" || echo "rank rc $rc"))"
+  fi
   if ! is_local "$machine" && [[ "$(mstate "$machine")" == disconnected ]]; then echo "  note:   $machine is disconnected (since $(cat "$Q/machines/$machine/since" 2>/dev/null)); the job waits for it" >&2; fi
   if (( start )); then start_worker "$machine"; is_local "$machine" || start_monitor; fi
   if (( wait )); then wait_job "$dir"; return $?; fi
@@ -441,30 +488,49 @@ unbind_cmd() { local sid; sid=$(session_id); rm -f "$Q/sessions/$sid/machine"; e
 
 # --- list / machines / status / wait / cancel / watch -------------------------------------------------
 
-next_cmd() { # <machine>: the pending jobs there in pick order (a repeated next_pending over the remaining set)
-  local m="$1" d skip=() n=0; is_machine "$m" || die "no machine $m"
-  while :; do
-    d=$(for d in "$JOBS"/*/; do d=${d%/}
-      [[ -f "$d/job" && "$(status_of "$d")" == pending && "$(jget "$d" machine)" == "$m" ]] || continue
-      printf '%s\n' "${skip[@]}" | grep -qx "$d" && continue; echo "$d"; done | rank_pick)
-    [[ -n "$d" ]] || break
-    n=$((n+1)); printf '%2d. %s %-7s %-30s session %s%s\n' "$n" "$(job_id "$d")" "$(order_of "$d")" "$(jget "$d" label | cut -c1-30)" "$(jget "$d" session | cut -c1-8)" "$( [[ -f "$d/blocked" ]] && echo "  blocked: $(cat "$d/blocked")")"
-    skip+=("$d")
-  done
-  (( n )) || echo "nothing pending on $m"
+next_cmd() { # <machine>: Jev's order of the pending jobs there right now (one request), with ETAs
+  local m="$1" rc; is_machine "$m" || die "no machine $m"
+  jev_rank "$m" >/dev/null; rc=$?
+  case "$rc" in
+    0) cat "$Q/machines/$m/plan" ;;
+    1) echo "nothing pending on $m" ;;
+    *) echo "Jev could not be asked (rc $rc, $Q/jev.log)$( [[ -f "$Q/machines/$m/plan" ]] && echo "; its last plan:")"; cat "$Q/machines/$m/plan" 2>/dev/null ;;
+  esac
 }
 
-order_of() { case "$(job_tier "$1")" in 1) echo media ;; 2) echo first ;; 3) echo "~$(job_size "$1")s" ;; esac; }
+session_cmd() { # [--name N] [--intent T] [--progress T]: set this session's context for Jev; always prints it
+  local sid s f; sid=$(session_id); s="$Q/sessions/$sid"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name|--intent|--progress) [[ -n "${2:-}" ]] || die "$1 needs a value"; session_set "$sid" "${1#--}" "$(oneline "$2")"; shift 2 ;;
+      --session) sid="$2"; s="$Q/sessions/$sid"; shift 2 ;;
+      *) die "session [--name N] [--intent T] [--progress T]" ;;
+    esac
+  done
+  echo "session $sid"
+  for f in name machine intent progress progress_at first_seen; do printf '  %-12s %s\n' "$f" "$(cat "$s/$f" 2>/dev/null || echo -)"; done
+  local d; for d in "$JOBS"/*/; do d=${d%/}; [[ -f "$d/job" && "$(jget "$d" session)" == "$sid" && "$(status_of "$d")" =~ ^(pending|running)$ ]] || continue
+    printf '  job %s %-8s %-8s %s\n' "$(job_id "$d")" "$(status_of "$d")" "$(jget "$d" machine)" "$(jget "$d" label)"; done
+}
+
+suggest_cmd() { # --intent T [--resource r1,r2] [-- run.sh args]: Jev's bench from the catalog, and the fit of your own arguments
+  local intent="" resource="" rest=()
+  while [[ $# -gt 0 ]]; do case "$1" in --intent) intent="$2"; shift 2 ;; --resource) resource="$2"; shift 2 ;; --) shift; rest=("$@"); break ;; *) die "suggest --intent \"...\" [--resource r1,r2] [-- <run.sh args>]" ;; esac; done
+  [[ -n "$intent" ]] || die "suggest needs --intent"
+  jev_py suggest --intent "$intent" --resource "$resource" ${rest[*]:+--args "${rest[*]}"}
+}
+
+order_of() { echo "~$(job_size "$1")s"; }
 
 list() {
   local d st note m
-  printf '%-5s %-9s %-8s %-9s %-7s %-30s %-12s %s\n' id status machine kind order label submitted note
+  printf '%-5s %-9s %-8s %-9s %-7s %-30s %-12s %s\n' id status machine kind est label submitted note
   for d in "$JOBS"/*/; do
     d=${d%/}; [[ -f "$d/job" ]] || continue
     st=$(status_of "$d"); note=""
     case "$st" in
-      running) note="since $(cut -c12-16 "$d/started" 2>/dev/null), pid $(cat "$d/pid" 2>/dev/null || echo -)"; [[ -f "$d/blocked" ]] && note="blocked: $(cat "$d/blocked")" ;;
-      pending) [[ -f "$d/blocked" ]] && note="blocked: $(cat "$d/blocked")" ;;
+      running) note="since $(cut -c12-16 "$d/started" 2>/dev/null), pid $(cat "$d/pid" 2>/dev/null || echo -)$( [[ -f "$d/overran" ]] && echo ", OVERRUN $(cat "$d/overran") s")"; [[ -f "$d/blocked" ]] && note="blocked: $(cat "$d/blocked")" ;;
+      pending) note="$(session_name "$(jget "$d" session)"): $(jget "$d" intent | cut -c1-60)"; [[ -f "$d/blocked" ]] && note="blocked: $(cat "$d/blocked")" ;;
       done|failed) note="exit $(cat "$d/exit" 2>/dev/null || echo ?), $(cat "$d/took" 2>/dev/null || echo ?) s$( [[ -f "$d/result.txt" ]] && sed -n 's/^verdict=\([a-z_]*\).*/, \1/p' "$d/result.txt" | head -1)" ;;
     esac
     printf '%-5s %-9s %-8s %-9s %-6s %-30s %-12s %s\n' "$(job_id "$d")" "$st" "$(jget "$d" machine)" "$(jget "$d" kind)" "$(order_of "$d")" "$(jget "$d" label | cut -c1-30)" "$(jget "$d" submitted | cut -c6-16)" "$note"
@@ -525,17 +591,18 @@ cancel() {
   esac
 }
 
-watch_cmd() { # blocking: this session's events as they happen; --exit-on disconnect|job|any ends it (exit 3 on a disconnect)
+watch_cmd() { # blocking: this session's events as they happen; --exit-on disconnect|job|overrun|any ends it (exit 3 on a disconnect, 4 on an overrun)
   local sid on="" f; sid=$(session_id)
-  while [[ $# -gt 0 ]]; do case "$1" in --exit-on) on="$2"; shift 2 ;; --session) sid="$2"; shift 2 ;; *) die "watch [--session S] [--exit-on disconnect|job|any]" ;; esac; done
+  while [[ $# -gt 0 ]]; do case "$1" in --exit-on) on="$2"; shift 2 ;; --session) sid="$2"; shift 2 ;; *) die "watch [--session S] [--exit-on disconnect|job|overrun|any]" ;; esac; done
   mkdir -p "$Q/sessions/$sid"; f="$Q/sessions/$sid/events"; touch "$f"
   echo "watching $f (session $sid, machine $(session_machine "$sid" || echo unbound))"
   tail -n0 -F "$f" 2>/dev/null | while IFS= read -r line; do
     echo "$line"
     case "$on" in
       disconnect) [[ "$line" == *disconnected* ]] && exit 3 ;;
-      job) [[ "$line" == *" job "* ]] && exit 0 ;;
-      any) [[ "$line" == *disconnected* ]] && exit 3; exit 0 ;;
+      job) [[ "$line" == *" job "* && "$line" != *" overrun: "* ]] && exit 0 ;;
+      overrun) [[ "$line" == *" overrun: "* ]] && exit 4 ;;
+      any) [[ "$line" == *disconnected* ]] && exit 3; [[ "$line" == *" overrun: "* ]] && exit 4; exit 0 ;;
     esac
   done
 }
@@ -903,16 +970,50 @@ result_media() { # <job> <rc> <cwd> <since>: ffprobe every output written by the
 
 # --- the worker ------------------------------------------------------------------------------------------
 
+desktop_notify() { # <title> <body> [urgency]
+  command -v notify-send >/dev/null && notify-send -a pzopt-queue -u "${3:-normal}" "$1" "$2" >/dev/null 2>&1 || true
+}
+
+job_sname() { local n; n=$(jget "$1" session_name); [[ -n "$n" ]] && echo "$n" || session_name "$(jget "$1" session)"; }
+
+mins() { local s="$1"; (( s < 90 )) && echo "${s} s" || echo "$(( (s + 30) / 60 )) min"; }
+
+announce_start() { # <job> <machine>: the desktop notification when a job really starts (after the preflight waits)
+  local d="$1" m="$2"
+  desktop_notify "pzopt queue: $(jget "$d" label) started on $m" \
+    "Session: $(job_sname "$d")
+Estimate: ~$(mins "$(job_size "$d")") ($(jget "$d" size_from))
+Intent: $(i=$(jget "$d" intent); echo "${i:-(not given; queued before the Jev queue)}")"
+}
+
+overrun_watch() { # <job> <machine> <worker pid>, background: tell the session when the job runs past its estimate
+  local d="$1" m="$2" wpid="$3" size next el launched n=0 sid label
+  size=$(job_size "$d"); next=$size; sid=$(jget "$d" session); label=$(jget "$d" label)
+  while sleep 10; do
+    [[ "$(status_of "$d")" == running ]] && kill -0 "$wpid" 2>/dev/null || return 0
+    launched=$(cat "$d/launched" 2>/dev/null) || continue          # still in the preflight wait: not counted
+    el=$(( $(date +%s) - launched ))
+    (( el > next )) || continue
+    n=$((n + 1)); echo "$el" > "$d/overran"
+    notify_session "$sid" "overrun: job $(job_id "$d") $label on $m still running after $(mins "$el"), estimate was ~$(mins "$size") (log: harness/queue.sh log $(job_id "$d") -f; cancel if it hangs)"
+    echo "[$(ts)] overrun: running $el s, estimate $size s" >> "$d/output.log"
+    desktop_notify "pzopt queue: $label over its estimate" "Session: $(job_sname "$d"), running $(mins "$el") of ~$(mins "$size") on $m" "$( (( n > 1 )) && echo critical || echo normal)"
+    next=$(( next + (size > OVERRUN_REPEAT_MIN ? size : OVERRUN_REPEAT_MIN) ))
+  done
+}
+
 run_job() {
-  local d="$1" m="$2" kind label cwd install notes rc since launched run=""
+  local d="$1" m="$2" kind label cwd install notes rc since launched run="" wpid=$BASHPID owpid
   kind=$(jget "$d" kind); label=$(jget "$d" label); cwd=$(jget "$d" cwd); install=$(jget "$d" install); notes=$(jget "$d" notes)
   local argv=(); mapfile -d '' argv < "$d/argv"
   set_status "$d" running; ts > "$d/started"; since=$(date +%s)
   say "job $(job_id "$d") start on $m: $kind $label (from $cwd)"
-  echo "[$(ts)] job $(job_id "$d") $kind $label on $m, session $(jget "$d" session)" >> "$d/output.log"
+  echo "[$(ts)] job $(job_id "$d") $kind $label on $m, session $(jget "$d" session) ($(jget "$d" session_name)), estimate $(job_size "$d") s" >> "$d/output.log"
+  rm -f "$d/launched" "$d/overran"
+  overrun_watch "$d" "$m" "$wpid" & owpid=$!
   if is_local "$m"; then
-    if ! wait_until_free "$d" "$kind"; then set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
-    launched=$(date +%s); rc=0
+    if ! wait_until_free "$d" "$kind"; then kill "$owpid" 2>/dev/null; set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
+    launched=$(date +%s); rc=0; echo "$launched" > "$d/launched"; announce_start "$d" "$m"
     if [[ "$kind" == workshop ]] && ! ensure_steam "$d"; then rc=1; fi
     if (( rc == 0 )) && ! apply_install "$d" "$install" "$cwd" "$kind"; then rc=1; fi
     if (( rc == 0 )); then
@@ -926,14 +1027,16 @@ run_job() {
     fi
     [[ "$kind" =~ ^(run|mp|cmd)$ ]] && run=$(newest_run_dir "$cwd" "$label" "$since")
   else
-    if ! wait_until_connected "$d" "$m"; then set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
-    launched=$(date +%s)
+    if ! wait_until_connected "$d" "$m"; then kill "$owpid" 2>/dev/null; set_status "$d" pending; rm -f "$d/started" "$d/blocked"; return 1; fi
+    launched=$(date +%s); echo "$launched" > "$d/launched"; announce_start "$d" "$m"
     remote_job "$d" "$m" "$cwd" "$label" "$install" "${argv[@]}"; rc=$?
     run="$REMOTE_RUN_DIR"
   fi
+  kill "$owpid" 2>/dev/null
   echo $(( $(date +%s) - since )) > "$d/took"; echo $(( $(date +%s) - launched )) > "$d/ran"; echo "$rc" > "$d/exit"
   {
     result_header "$d" "$rc"
+    [[ -f "$d/overran" ]] && echo "overran=yes: ran $(cat "$d/ran") s against an estimate of $(job_size "$d") s ($(jget "$d" size_from))"
     case "$kind" in
       run) result_run "$d" "$rc" "$cwd" "$run" ;;
       mp) result_mp "$d" "$rc" "$cwd" "$run" ;;
@@ -950,8 +1053,8 @@ run_job() {
   say "job $(job_id "$d") $(status_of "$d") (exit $rc, $(cat "$d/took") s${verdict:+, $verdict}): $d/result.txt"
   notify_session "$(jget "$d" session)" "job $(job_id "$d") $label $(status_of "$d") on $m (exit $rc${verdict:+, verdict $verdict}): $d/result.txt"
   if [[ "$kind" == mp ]]; then   # a stock dedicated server ticking its world would skew the next single-player run
-    local nxt; nxt=$(next_pending desktop || true)
-    if [[ -z "$nxt" || "$(jget "$nxt" kind)" != mp ]]; then (cd "$cwd" && harness/mp/server.sh stop) >> "$d/output.log" 2>&1 && say "dedicated server stopped"; fi
+    local nxt="" p; for p in $(pending_on desktop); do [[ "$(jget "$p" kind)" == mp ]] && nxt=$p; done   # no Jev request just for this
+    if [[ -z "$nxt" ]]; then (cd "$cwd" && harness/mp/server.sh stop) >> "$d/output.log" 2>&1 && say "dedicated server stopped"; fi
   fi
   return 0
 }
@@ -972,13 +1075,18 @@ worker() { # --machine <m>
   [[ -n "$m" ]] && is_machine "$m" || die "worker --machine <m> (one of: $(machines | tr '\n' ' '))"
   local pidfile="$Q/worker-$m.pid"
   ( flock 9; if worker_alive "$m"; then echo "queue: a worker for $m is already running (pid $(cat "$pidfile"))" >&2; exit 1; fi; echo $$ > "$pidfile" ) 9>"$Q/worker.lock" || exit 1
-  trap 'rm -f "$pidfile"' EXIT
+  trap "rm -f '$pidfile'" EXIT
   trap 'say "worker $m ($$) terminated"; exit 143' TERM INT
   say "worker $m ($$) up, queue dir $Q"
-  local d
+  local d rc
   while :; do
     if [[ -f "$Q/stop" ]]; then say "worker $m stopping"; break; fi
-    if d=$(next_pending "$m"); then run_job "$d" "$m"; else is_local "$m" && idle; sleep 5; fi
+    d=$(next_pending "$m"); rc=$?
+    case "$rc" in
+      0) run_job "$d" "$m" ;;
+      3) sleep 30 ;;                                   # Jev unreachable: the pending jobs say so in blocked
+      *) is_local "$m" && idle; sleep 5 ;;
+    esac
   done
 }
 
@@ -1016,6 +1124,9 @@ case "${1:-}" in
   list|ls) list ;;
   machines) machines_cmd ;;
   next) next_cmd "${2:-desktop}" ;;
+  session) shift; session_cmd "$@" ;;
+  resources) jev_py resources ;;
+  suggest) shift; suggest_cmd "$@" ;;
   bind) bind_cmd "${2:-}" ;;
   unbind) unbind_cmd ;;
   watch) shift; watch_cmd "$@" ;;
@@ -1030,5 +1141,5 @@ case "${1:-}" in
   worker) shift; worker "$@" ;;
   monitor) monitor ;;
   dir) echo "$Q" ;;
-  *) sed -n '2,48p' "$0"; exit 2 ;;
+  *) sed -n '2,/^set -uo pipefail/{/^set -uo/!p}' "$0"; exit 2 ;;
 esac

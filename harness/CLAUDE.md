@@ -126,6 +126,8 @@ ssh wrappers. State is machine-global under `~/.local/state/pzopt-queue/` (`PZQ_
 checkout whose `queue.sh` submitted it (its `run.sh`, `build/classes`, `harness/runs/`).
 
 ```
+# every submit (Jev orders the queue from it): --name "<ListAgents name>" (once per session) --intent "..." --progress "..."
+# every run also: --resource <r1,r2> [--bench <name>|auto]   ·   harness/queue.sh suggest --intent "..." [--resource ...] | resources
 harness/queue.sh submit run      [--machine desktop|flip|dell|mac] [--install opt|stock|keep|<repo>]
                                  [--goal "<what the change should do>"] [--against <run|baseline.json>]...
                                  [--parity-against <recorded run>] [--cap N] [--wait] -- <harness/run.sh args>
@@ -133,23 +135,40 @@ harness/queue.sh submit mp       [--goal ...] [--against ...] [--wait] -- <label
 harness/queue.sh submit workshop [--wait] --notes "<change notes>" -- --tag win-<rev>-<commit>   # desktop only
 harness/queue.sh submit cmd      [--install ...] [--wait] --label <name> -- <showcase-record.sh ...>   # desktop only
 harness/queue.sh submit media    [--out <file>]... [--wait] --label <name> -- <encode-av1-hdr.sh | stitch-*.sh | ffmpeg ...>   # desktop only
-harness/queue.sh list | machines | bind <machine> | unbind | watch [--exit-on disconnect|job|any] | events [N]
+harness/queue.sh session [--name N] [--intent T] [--progress T]   # this session's context for Jev
+harness/queue.sh list | machines | next [machine] | bind <machine> | unbind | watch [--exit-on disconnect|job|overrun|any] | events [N]
 harness/queue.sh status | wait | result | log [-f] | cancel <id|label>
 harness/queue.sh start [machine...] | stop [--now]   # monitor + workers (transient user units pzq-monitor, pzq-<m>)
 ```
 
 **Machines** (`harness/queue/machines.conf`: desktop = local; flip, dell, mac = ssh host, key, checkout,
 `PZ_ROOT`, `run_args`, display-env source, inhibit / steam_shutdown flags, installer, `runner=`). One worker
-unit per machine runs that machine's jobs in three tiers (2026-09-22, was FIFO): **media first** (oldest
-first; an encode / stitch normally means a session is wrapping up), then **each session's first job of a
-batch** FIFO (a job submitted while its session had nothing pending or running on that machine; a batch takes
-one place in the line, a newcomer never waits behind a peer's whole batch), then **every other job shortest
-first** (oldest on a tie). The size is estimated at submit time: `--size <secs>`, else the median `ran` of the
+unit per machine runs that machine's jobs; **Jev is the only sorter** (2026-09-22 evening, replacing the media /
+first-of-batch / shortest-first tiers): whenever a worker is free, `harness/queue-jev.py rank` hands Jev (TypeSafe)
+every pending job of the machine with the facts: the job's `--intent`, the session's `--progress` and name
+(`--name`, once per session: its ListAgents name), the session's age (first timestamp of its Claude Code transcript),
+how long the job and the session have waited in all, the size estimate and its source, the job's place in its
+session's batch, what is running. One choice question; its probabilities are the whole order: the pick runs,
+the order is the plan (`machines/<m>/plan`, `next [machine]` with an ETA per job; `submit` prints the new job's
+place and ETA). The policy (fairness between sessions, short jobs first when equal, wrap-up / media / release
+work unblocked, no starvation past ~30 min, a session's batch kept in order) is text in `queue-jev.py`, not code.
+Jev unreachable: pending jobs show `blocked: waiting for Jev` and the worker retries every 30 s
+(`PZQ_JEV_FALLBACK=fifo` takes the oldest instead); `$PZQ_DIR/jev.log`. `submit` refuses a job without
+`--intent` / `--progress` (and `--name` on a session's first submit); `queue.sh session [--progress "..."]`
+updates the session's context between submits. A `run` must name the resources it tests (`--resource`, vocabulary in
+`harness/queue/benches.json`, `queue.sh resources`); the same file is the **bench catalog** (spin, spin-uncapped, bench-100,
+walk-hitch, drive-120, drive-60, storm, fog, storm-fog, night-torch, louisville, helicopter, alarm-storm, zoom-cycle,
+flicker, shot, load; each with the resources it tests, what it exercises and its run.sh args). `queue-jev.py suggest` =
+Jev's pick from the catalog for an intent + resources (and `fits=` of a session's own args, `matches_suggestion=` in
+code); `submit run --bench <name>|auto` expands the entry's args before the session's; a run with its own args gets the
+suggestion printed and stored (`suggested= fits= matches=` in the job file), never overridden; Jev's ranking sees
+`resources_tested` / `bench` too. `queue.sh suggest --intent ... [--resource ...] [-- args]` asks without submitting. The size is estimated at submit time: `--size <secs>`, else the median `ran` of the
 finished jobs with the same signature (kind + arguments minus `--label` / `--prop` / `--option` / `--env`),
 else a default from the arguments (run: 40 s + route / quit-after seconds; mp 240; workshop 90; cmd 60;
-media 120). A job pending longer than `PZQ_MAX_WAIT` (1800 s) goes first regardless. `submit` prints the
-tier and estimate, `list` has an `order` column (`media` / `first` / `~85s`), `next [machine]` prints the
-pending jobs in pick order. A remote `run` job: rsync `harness/` (+ `build/classes` with
+media 120). **Job start** = a desktop notification (label, session name, estimate, intent). **Overrun**: a job
+still running past its estimate (counted from the launch, not the preflight wait) sends its session an event
+`overrun: job ...` (wakes `watch --exit-on any|overrun`, exit 4) and a notification, again every further
+estimate (≥ 5 min); `result.txt` gets `overran=yes`, `list` shows `OVERRUN <s>`. A remote `run` job: rsync `harness/` (+ `build/classes` with
 `--install opt`, installed there with `install.sh --uninstall` + `install.sh --from` (2026-09-22: install.sh refuses
 over an existing manifest, so a laptop's second `--install opt` job used to die in 1 s) / `run-mac.sh install`) to the machine's checkout →
 a generated wrapper (`<job>/remote-job.sh`) exports the desktop session's display env from plasmashell's

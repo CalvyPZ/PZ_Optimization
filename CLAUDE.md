@@ -24,7 +24,7 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
   SendMessage) before reinstalling or starting a batch. See `.claude/skills/bench-run`.
   **Preferred since 2026-09-21: submit through the run queue** (`harness/queue.sh submit run|mp|workshop|cmd
   [--machine desktop|flip|dell|mac] ... -- <args>`, `harness/CLAUDE.md` "Run queue"): one worker per machine
-  runs its jobs media-first, then each session's first job FIFO, then the rest shortest-first (`next` shows the order), waits for a game or run.sh outside the queue, routes laptop jobs over a monitored ssh
+  runs its jobs in the order Jev picks (2026-09-22 evening: every submit carries `--intent`, `--progress`, and `--name` once per session; a run also `--resource` and optionally `--bench <name>|auto` from `harness/queue/benches.json`, Jev suggests the bench for the intent; Jev weighs them with waits, session age and the size estimate; `next` shows the plan; job start = desktop notification; a job past its estimate sends an `overrun:` event), waits for a game or run.sh outside the queue, routes laptop jobs over a monitored ssh
   connection, keeps a session on the machine it first used, notifies sessions (`watch`, `events`) when a
   machine drops or a job ends, and writes each job's `result.txt` with Jev's verdict; `--wait` blocks on it.
   No pgrep dance, no peer messages, no hand-rolled ssh wrappers for a run.

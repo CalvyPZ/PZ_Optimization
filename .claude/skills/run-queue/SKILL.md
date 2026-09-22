@@ -18,7 +18,8 @@ its readings and the benchmark stretches the encode.
 harness/queue.sh machines        # every machine: connected / disconnected / local, queue depth, running job, bound sessions,
                                  # and "this session: <id> -> <machine>" (your affinity)
 harness/queue.sh list            # every job: machine, status, order (media / first / ~85s), label, note (blocked reason / exit + Jev verdict)
-harness/queue.sh next [machine]  # the pending jobs of a machine in the order the worker will take them
+harness/queue.sh next [machine]  # Jev's plan for a machine: order, estimates, ETAs, each job's intent
+harness/queue.sh session         # your session's name / intent / progress as Jev sees them, your pending jobs
 harness/queue.sh events          # the last 20 events for this session (jobs ended, machine dropped / came back)
 ```
 
@@ -28,15 +29,44 @@ machine (default `desktop`); after that **every run of this session goes to that
 
 ## 2. Submit
 
-Always say in the message that a run is queued and on which machine. The order on a machine is not
-FIFO (2026-09-22): media jobs go first, then every session's *first* job of a batch in submission order,
-then the remaining jobs shortest first (estimate from history of the same arguments, else from the route /
-quit-after seconds; `--size <secs>` to correct it). So one job of yours gets its place in the line at once;
-a batch of five fills the gaps after the other sessions' first jobs, short ones before long ones. Then:
+Always say in the message that a run is queued and on which machine. **Jev is the only sorter**
+(2026-09-22 evening): when a worker is free, Jev picks the next job from every pending one on that machine,
+reading each job's intent, your session's progress and name, how long the job and your session have waited,
+your session's age and the job's size estimate (history of the same arguments, else the route / quit-after
+seconds; `--size <secs>` corrects it). There is no FIFO or tier rule: tell Jev the truth, it is how it decides.
+Every submit **must** carry:
+
+- `--name "<your ListAgents session name>"` — once per session (the name peers message you by);
+- `--intent "<why this job, what it decides>"` — e.g. "stock half of the fog A/B; decides whether fogPass ships";
+- `--progress "<where your task stands>"` — e.g. "3/5 A/B runs", "last verification before the release commit".
+
+A **`run` also names the resources it tests**: `--resource <r1,r2>` (required; `harness/queue.sh resources`
+lists them: game-thread, render-thread, other-cores, gpu, vram, ram, disk, load-time, chunk-arrival, gc,
+frame-pacing, visual-parity). Take the arguments from the bench catalog (`harness/queue/benches.json`, every entry
+names the resources it tests) instead of writing them by hand:
+
+```bash
+harness/queue.sh suggest --intent "does puddleVbo cut the storm frame time" --resource gpu      # Jev: bench=storm, its args
+harness/queue.sh submit run --intent "..." --progress "..." --resource gpu --bench auto -- --label <name> --prop puddleVbo=false
+harness/queue.sh submit run --intent "..." --progress "..." --resource vram --bench zoom-cycle -- --label <name>
+```
+`--bench auto` lets Jev pick from the intent + resources; `--bench <name>` takes that entry; the arguments after `--`
+are appended (label, A/B `--prop` keys, `--record`; later options win in run.sh). A run with its own arguments still
+goes in, and `submit` prints Jev's suggestion beside it (`bench: Jev suggests 'louisville' ... your arguments differ,
+fit 0.15`): read it, and cancel + resubmit when the catalog run is what you meant. When a one-off rig becomes a
+standard, add it to `benches.json` with honest `resources`.
+
+Keep your progress current between submits with `harness/queue.sh session --progress "..."` (Jev reads the
+session's latest). `submit` prints Jev's current place and ETA for the job; `harness/queue.sh next [machine]`
+prints the whole plan. When a job starts, the desktop shows a notification (label, session, estimate, intent).
+If your job runs past its estimate you get an `overrun: job ...` event (see §3) — look at `log <id> -f`, cancel it
+if it hangs. Then:
 
 ```bash
 # desktop bench / preset / drive (the run.sh arguments go after --, unchanged from the bench-run skill)
-harness/queue.sh submit run -- --label <name> --mode bench --flag zoom=max --prop instrument=true --no-dashboard
+harness/queue.sh submit run --name pz-optimization-b9 --intent "baseline of the zoom pass" --progress "1/4 runs" --resource chunk-arrival \
+    -- --label <name> --mode bench --flag zoom=max --prop instrument=true --no-dashboard
+# (the examples below leave out --name / --intent / --progress / --resource for brevity; submit refuses them without)
 harness/queue.sh submit run -- --label <name> --preset storm --prop instrument=true --no-dashboard
 harness/queue.sh submit run -- --label <name> --mode drive --flag route=E:1200 --route-seconds 90 --prop instrument=true --no-dashboard --record
 
@@ -82,7 +112,7 @@ Pick one:
 - `harness/queue.sh submit ... --wait` — blocks, prints `result.txt`, exit code = the job's (0 = done).
 - `harness/queue.sh watch --exit-on any` in a **background Bash** — returns the moment something happens
   to this session: exit 0 = one of your jobs ended (the line names it and its result path), exit 3 = your
-  machine disconnected. Re-run it after each wake-up.
+  machine disconnected, exit 4 = a job of yours is running past its estimate (`overrun:`; it keeps running). Re-run it after each wake-up.
 - `Monitor` the job's `status` file (`pending → running → done|failed|cancelled`) or
   `~/.local/state/pzopt-queue/sessions/<your id>/events`.
 
