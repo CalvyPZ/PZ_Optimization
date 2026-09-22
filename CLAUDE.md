@@ -83,7 +83,7 @@ coordinates and pitfalls: `.claude/skills/release-windows` ("Steam Workshop depl
 | Layout detection | `scripts/pz-env.sh` (PZ_DIR / ZOMBOID env override) |
 | Desktop | 5120x2160, 240 Hz; the game renders windowed at desktop resolution |
 | Decompiler | CFR at `~/.local/share/java/cfr.jar` for reading; Vineflower for overrides |
-| Code index | `.codegraph/` exists; use `codegraph_explore` before grep/Read |
+| Code index | `.codegraph/` exists; use `codegraph_explore` before grep/Read. Since 2026-09-22 `codegraph.json` (`include: ["decompiled/"]`) indexes the game source too (3,402 of 3,407 classes: `build/`, `obj/` dirs are hard-ignored by codegraph, so `BuildLogic` and `zombie.erosion.obj.*` are not indexed; the three >1 MB `generation/*ScriptGenerator` are skipped). Rebuild after a re-decompile: `codegraph index` (~30 s, DB ~1.7 GB) |
 | Java LSP | `jdtls` not installed (check `command -v jdtls` before relying on the LSP tool) |
 
 ## Reading game code
