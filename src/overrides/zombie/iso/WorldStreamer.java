@@ -940,6 +940,13 @@ public final class WorldStreamer {
             Vector2 pos = this.pos[playerIndex];
             pos.x = pos.y = -1.0F;
             IsoPlayer player = IsoPlayer.players[playerIndex];
+            if (player == null && playerIndex == 0 && IsoPlayer.players[1] == null && IsoPlayer.players[2] == null && IsoPlayer.players[3] == null) {
+               float[] c = pzopt.CenterFirstLoad.center(); // pzopt: centerFirstLoad, no player during the load: the load's center
+               if (c != null) {
+                  pos.x = c[0];
+                  pos.y = c[1];
+               }
+            }
             if (player != null) {
                if (player.getLastX() == player.getX() && player.getLastY() == player.getY()) {
                   pos.x = player.getX();

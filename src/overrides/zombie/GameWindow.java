@@ -1065,6 +1065,7 @@ public final class GameWindow {
 
    private static void exit() {
       DebugType.ExitDebug.debugln("GameWindow.exit 1");
+      pzopt.ResumeShot.exitSave = true; // pzopt: resumeShot, the save below is the exit save (floor capture)
       if (GameClient.client) {
          WorldStreamer.instance.stop();
          GameClient.instance.doDisconnect("exit");

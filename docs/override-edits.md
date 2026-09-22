@@ -2630,3 +2630,49 @@ it 30 % of all allocation on the Dell drive (~240 MB in 40 s, mostly on the Worl
 the map's own arrays in `forEachEntry`'s order, the former lambda body is a method. With `GameThreadProfile.flame` no
 longer re-splitting its folded stacks on every overlay refresh, route allocation 0.80 -> 0.50 GB, G1 pauses in the
 route 5-8 -> 4-5, frames over 50 ms 48-57 -> 38 per minute (two runs each).
+
+## World entry: centre-outward load and the resume shot (2026-09-22 night; `centerFirstLoad`, `resumeShot`, `noLoadingScreen`)
+
+The maintainer asked for no loading screen, a world that builds itself from the centre outwards, and the illusion of an
+instant load (the ground around the player, captured at exit, while loading). Measured with new load-trace markers ("world visible": the
+player's chunk is lit, so drawn; "world complete": every loaded chunk lit) because the harness's "world ready" fires
+inside `IngameState.enter`, ~0.65 s before the first world frame (stock runs included).
+
+- `zombie.iso.WorldStreamer` (comparator): while no player exists (the load) the job order uses the load's centre
+  (`pzopt.CenterFirstLoad.center`), so the initial chunks load nearest first; stock served them in no particular order.
+- `zombie.iso.IsoWorld` (initial chunk wait): the streamer loop also ends once every valid chunk within 3 of the centre
+  is loaded (`CenterFirstLoad.nearLoaded`); the rest keeps streaming. `GameLoadingState.update` then no longer waits for
+  the streamer either. The 2 ms poll (instead of 100 ms) is under `loaderCpuFixes`.
+- `zombie.iso.IsoChunkMap.processAllLoadGridSquare` (called only by `IngameState.enter`): after an early entry only the
+  chunks within 3 of the centre are handed over there; the others go back on the queue in the same order and
+  `update()` hands them over a few per frame as it does while walking (0.44 s of main-thread boundary recalc before the
+  first world frame otherwise).
+- `zombie.iso.LightingJNI.update`: chunks are handed to the lighting engine nearest the chunk map's centre first (same
+  chunks, same calls, `CenterFirstLoad.gridOrder`); a chunk is only drawn once lit (`lightingNeverDone`), and the row
+  order made the world appear in diagonal bands.
+- `zombie.gameStates.GameLoadingState.exit`: under `noLoadingScreen` the fader loop is skipped; the loading screen's
+  fade from black (started in `enter`) is only advanced by the stock `render`, so the loop played all of it here
+  (0.36 s of renders and sleeps before the world).
+- `zombie.savefile.SavefileThumbnail.create`, exit saves only (`ResumeShot.exiting`: `Core.exiting`, `GameWindow.exit`
+  setting `ResumeShot.exitSave`, or `PlayerDB.canSavePlayers` already false, which both quit paths clear right before
+  their last save; autosaves never capture): after the stock thumbnail, `pzoptCaptureFloor` invalidates every chunk
+  level, sets `ResumeShot.floorOnly`, turns occlusion off, renders the world once at the player's zoom and composites
+  it, and a render-thread drawer reads the back buffer; floorOnly is then cleared and the chunks invalidated again. A
+  daemon thread scales the image to 1920 px wide and writes `pzopt-resume.jpg` plus `pzopt-resume.properties` (the
+  screen position of the player's chunk corner and one chunk step in world x / y) into the save folder.
+- `zombie.iso.fboRenderChunk.FBORenderCell` under `ResumeShot.floorOnly`: only ground-level floors are baked (level
+  loop capped at 0, `renderMinusFloor` for objects, the tree pass, both translucent passes, characters, players,
+  corpses, items and moving objects skipped) and the bake budget is 0 so every level bakes in that one frame.
+  `pzoptSetOcclusion` flips the package-private occlusion switch; `pzoptFrameBakeCounters` logs the capture frame.
+- `zombie.gameStates.GameLoadingState`: `enter` starts decoding the save's shot; `render` draws a black frame plus
+  `ResumeShot.draw` when the save has a shot (no error screens pending), else the stock loading screen. The shot shows
+  the 7 x 7 chunks around the player tile by tile at full brightness, the rest black: the player's chunk from the
+  first frame, every other tile popping in (no fade) at a delay that is 60 % a random draw per tile and 40 % its
+  distance from the player, over 85 % of this save's last loading time (`pzopt-resume-load.txt`, written at world
+  entry, averaged with the previous value; 3 s before the first measured Continue), so the square is whole just
+  before the world appears. `org.lwjglx.opengl.Display.imguiEndFrame` keeps drawing it over the world (tiles the load
+  outran pop in within 0.3 s), its opacity falling as the chunk map lights up (full up to 20 % lit, gone at 80 % or
+  after 3 s); the texture is freed a few frames later.
+- `zombie.GameWindow.exit` sets `ResumeShot.exitSave` before its save.
+- `pzopt.NoLoadingScreen` also runs the lighting thread at 240 fps (the player's `lightFPS`, 15 by default, otherwise)
+  from world entry until the world is complete or 3 s, by writing the field, so options never save the boosted value.

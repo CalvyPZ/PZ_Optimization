@@ -37,6 +37,8 @@ PHASES = [
     ("E  gameLoaded, physics meshes, SendDone", r"bWaitForAssetLoadingToFinish2 end", r"game loading took"),
     ("E2 click-to-start -> IngameState", r"game loading took", r"STATE: exit zombie\.gameStates\.GameLoadingState|Game Mode:"),
     ("F  IngameState.enter -> world ready", r"STATE: exit zombie\.gameStates\.GameLoadingState|Game Mode:", r"harness: world ready"),
+    ("V  Continue -> world visible (player's chunk lit)", r"continuing latest save", r"load step: world visible"),
+    ("V2 Continue -> world complete (loaded chunks lit)", r"continuing latest save", r"load step: world complete"),
 ]
 TOTALS = [
     ("boot: launch -> Continue", None, r"continuing latest save"),

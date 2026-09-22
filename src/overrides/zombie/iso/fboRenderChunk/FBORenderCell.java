@@ -1453,14 +1453,17 @@ public final class FBORenderCell {
       FBORenderChunkManager.instance.endFrame();
       pzopt.GpuSections.end("composite");
       FBORenderShadows.getInstance().clear();
+      boolean pzoptFloorOnly = pzopt.ResumeShot.floorOnly; // pzopt: resumeShot's exit capture: no players, shadows, corpses, items
+      if (!pzoptFloorOnly) {
       this.renderPlayers(playerIndex);
       this.renderCorpseShadows(playerIndex);
       this.renderMannequinShadows(playerIndex);
-      if (!DebugOptions.instance.fboRenderChunk.corpsesInChunkTexture.getValue()) {
+      }
+      if (!DebugOptions.instance.fboRenderChunk.corpsesInChunkTexture.getValue() && !pzoptFloorOnly) {
          this.renderCorpsesInWorld(playerIndex);
       }
 
-      if (!DebugOptions.instance.fboRenderChunk.itemsInChunkTexture.getValue()) {
+      if (!DebugOptions.instance.fboRenderChunk.itemsInChunkTexture.getValue() && !pzoptFloorOnly) {
          SpriteRenderer.instance.beginProfile(itemsProbe);
          pzopt.GpuSections.begin("items"); /* pzopt: GPU section */ this.renderItemsInWorld(playerIndex); pzopt.GpuSections.end("items");
          SpriteRenderer.instance.endProfile(itemsProbe);
@@ -1490,7 +1493,9 @@ public final class FBORenderCell {
 
       this.renderOpaqueObjectsEvent(playerIndex);
       SpriteRenderer.instance.beginProfile(movingObjectsProbe);
+      if (!pzopt.ResumeShot.floorOnly) { // pzopt: resumeShot's exit capture: no vehicles or characters
       pzopt.GpuSections.begin("moving"); /* pzopt: GPU section */ this.renderMovingObjects(); pzopt.GpuSections.end("moving");
+      }
       SpriteRenderer.instance.endProfile(movingObjectsProbe);
       AbstractPerformanceProfileProbe var30 = water.profile();
 
@@ -1522,7 +1527,9 @@ public final class FBORenderCell {
          AbstractPerformanceProfileProbe var34 = translucentFloor.profile();
 
          try {
+            if (!pzopt.ResumeShot.floorOnly) { // pzopt: resumeShot capture, no translucent objects (per-frame trees)
             pzopt.GpuSections.begin("translucentFloor"); /* pzopt: GPU section */ this.renderTranslucentFloorObjects(playerIndex, z, floorRenderShader, wallRenderShader, currentTimeMillis); pzopt.GpuSections.end("translucentFloor");
+            }
          } catch (Throwable var25) {
             if (var34 != null) {
                try {
@@ -1601,7 +1608,9 @@ public final class FBORenderCell {
          var34 = translucentNonFloor.profile();
 
          try {
+            if (!pzopt.ResumeShot.floorOnly) { // pzopt: resumeShot capture, no translucent objects (per-frame trees)
             pzopt.GpuSections.begin("translucent"); /* pzopt: GPU section */ this.renderTranslucentObjects(playerIndex, z, floorRenderShader, wallRenderShader, currentTimeMillis); pzopt.GpuSections.end("translucent");
+            }
          } catch (Throwable var22) {
             if (var34 != null) {
                try {
@@ -1658,7 +1667,9 @@ public final class FBORenderCell {
             renderLevels.prevMinZ = c.minLevel;
             renderLevels.prevMaxZ = c.maxLevel;
 
-            for (int zza = c.minLevel; zza <= c.maxLevel; zza++) {
+            boolean pzoptFloorOnly = pzopt.ResumeShot.floorOnly; // pzopt: resumeShot's exit capture draws ground level only
+            // (levels below 0 still run: a basement shares its texture with ground level and bakes from its lowest level)
+            for (int zza = c.minLevel; zza <= (pzoptFloorOnly ? Math.min(c.maxLevel, 0) : c.maxLevel); zza++) {
                AbstractPerformanceProfileProbe var10 = renderOneChunkLevel.profile();
 
                try {
@@ -1732,7 +1743,7 @@ public final class FBORenderCell {
          // (26 % of slow-frame samples, attr-jfr-all). Past the budget a dirty level is deferred: if it was baked
          // before, its previous texture is drawn as if it were clean; if never (DIRTY_CREATE still set) it is simply
          // not drawn this frame. Deferred levels are retried next frame in the same chunk order.
-         int pzoptBudget = pzopt.Overrides.enabled() ? pzopt.Config.BAKE_BUDGET : 0;
+         int pzoptBudget = pzopt.Overrides.enabled() && !pzopt.ResumeShot.floorOnly ? pzopt.Config.BAKE_BUDGET : 0; // pzopt: the resume-shot capture frame bakes everything at once
          int pzoptRebakeMs = pzopt.Overrides.enabled() ? pzopt.Config.LIGHTING_REBAKE_MS : 0;
          // pzopt: zoomRetain. A level never made at all (its slot was never dirtied: a chunk streamed in while zoomed in and
          // not seen since) has no dirt to enter this block with and baked at once; during a zoom flood it takes the plan too.
@@ -2329,7 +2340,7 @@ public final class FBORenderCell {
                      }
                   }
 
-                  if (DebugOptions.instance.terrain.renderTiles.minusFloorCharacters.getValue()) {
+                  if (DebugOptions.instance.terrain.renderTiles.minusFloorCharacters.getValue() && !pzopt.ResumeShot.floorOnly) { // pzopt: resumeShot capture, no characters / vehicles
                      ProfileArea var63 = profiler.profile("Minus Floor Chars");
 
                      try {
@@ -3052,7 +3063,24 @@ public final class FBORenderCell {
     * changed since its last bake (a tree chopped, grown, gone per-frame or back), that neighbour is re-baked so it
     * does not keep a stale copy.
     */
+   /** pzopt: resumeShot's floor capture: this frame's bake counters, for its log line. */
+   public String pzoptFrameBakeCounters() {
+      return "bakes=" + this.pzoptBakesThisFrame + " creations=" + this.pzoptCreatesThisFrame + " creationsDeferred=" + this.pzoptCreatesDeferredThisFrame
+         + " zoomDeferred=" + this.pzoptZoomDeferredThisFrame + " rebakes=" + this.pzoptRebakesThisFrame;
+   }
+
+   /** pzopt: resumeShot's floor capture turns occlusion culling off for its frame (FBORenderOcclusion.enabled is package-private). */
+   public static boolean pzoptSetOcclusion(boolean on) {
+      FBORenderOcclusion occlusion = FBORenderOcclusion.getInstance();
+      boolean was = occlusion.enabled;
+      occlusion.enabled = on;
+      return was;
+   }
+
    private void pzoptBakeTrees(IsoChunk c, int playerIndex, float zoom) {
+      if (pzopt.ResumeShot.floorOnly) {
+         return; // pzopt: resumeShot's exit capture: floors only
+      }
       FBORenderChunk rc = FBORenderChunkManager.instance.renderChunk;
       int minLevel = rc.getMinLevel();
       int topLevel = rc.getTopLevel();
@@ -3881,6 +3909,9 @@ public final class FBORenderCell {
    }
 
    private void renderMinusFloor(IsoObject object) {
+      if (pzopt.ResumeShot.floorOnly) {
+         return; // pzopt: resumeShot's exit capture: floors only (no walls, doors, objects, trees)
+      }
       if (object instanceof IsoTree && pzopt.Config.TREES_IN_CHUNK_TEXTURE && pzopt.Overrides.enabled() && pzopt.Config.TREE_BAKE_DIRECT) {
          // pzopt: bake the tree through the plain sprite path (IsoTree.render without a FBORenderTrees batch)
          FBORenderTrees batch = FBORenderTrees.current;

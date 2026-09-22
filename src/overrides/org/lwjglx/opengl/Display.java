@@ -742,6 +742,7 @@ public class Display {
    }
 
    public static ImDrawData imguiEndFrame() {
+      pzopt.ResumeShot.drawOverWorld(); // pzopt: resumeShot, the last view stays over the world until it is lit, then fades out
       pzopt.Overlay.draw(); // pzopt: performance overlay; Core.EndFrameUI calls this after the UI composite and right before it hands the frame to the render thread
       if (!Core.isImGui()) {
          return null;

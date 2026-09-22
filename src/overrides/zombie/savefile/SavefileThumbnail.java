@@ -87,6 +87,9 @@ public final class SavefileThumbnail {
 
       setZoom(playerIndex, oldZoom, oldTargetZoom);
       IsoCamera.cameras[playerIndex].center();
+      if (pzopt.ResumeShot.exiting()) {
+         pzoptCaptureFloor(playerIndex); // pzopt: resumeShot, the ground around the player for the next Continue (exit saves only)
+      }
       restoreScreenImage();
       core.RenderOffScreenBuffer();
       if (core.StartFrameUI()) {
@@ -94,6 +97,47 @@ public final class SavefileThumbnail {
       }
 
       core.EndFrameUI();
+   }
+
+   /**
+    * pzopt: resumeShot. One extra world render at the player's zoom with FBORenderCell drawing ground-level floors only
+    * (every chunk level invalidated before, so they re-bake that way, and after, so they re-bake whole), composited to the
+    * back buffer and read back by pzopt.ResumeShot's drawer. Exit saves only: the re-bakes are a long frame.
+    */
+   private static void pzoptCaptureFloor(int playerIndex) {
+      pzoptInvalidateChunks(playerIndex);
+      pzopt.ResumeShot.floorOnly = true;
+      creatingThumbnail = true;
+      // the ground under a building's upper floors is occlusion-culled (drawn black) and the building is not drawn here
+      boolean pzoptOcclusionWas = zombie.iso.fboRenderChunk.FBORenderCell.pzoptSetOcclusion(false);
+      try {
+         SpriteRenderer.instance.drawGeneric(pzopt.RenderScale.SUSPEND);
+         renderWorld(playerIndex, true, false);
+         pzopt.Log.info("resume shot: floor capture frame " + zombie.iso.fboRenderChunk.FBORenderCell.instance.pzoptFrameBakeCounters());
+         SpriteRenderer.instance.drawGeneric(pzopt.RenderScale.RESUME);
+         Core.getInstance().RenderOffScreenBuffer();
+         pzopt.ResumeShot.queueCapture(playerIndex);
+      } catch (Throwable t) {
+         pzopt.Log.warn("resume shot: floor capture failed: " + t);
+      } finally {
+         creatingThumbnail = false;
+         pzopt.ResumeShot.floorOnly = false;
+         zombie.iso.fboRenderChunk.FBORenderCell.pzoptSetOcclusion(pzoptOcclusionWas);
+         pzoptInvalidateChunks(playerIndex);
+      }
+   }
+
+   private static void pzoptInvalidateChunks(int playerIndex) {
+      zombie.iso.IsoChunkMap cm = zombie.iso.IsoWorld.instance.currentCell.chunkMap[playerIndex];
+      int w = zombie.iso.IsoChunkMap.chunkGridWidth;
+      for (int y = 0; y < w; y++) {
+         for (int x = 0; x < w; x++) {
+            zombie.iso.IsoChunk c = cm.getChunk(x, y);
+            if (c != null) {
+               c.invalidateRenderChunkLevels(256L); // DIRTY_OBJECT_MODIFY: re-baked at once, never held by a budget
+            }
+         }
+      }
    }
 
    private static void renderWorld(int playerIndex, boolean bClear, boolean bFixCamera) {

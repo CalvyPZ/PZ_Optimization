@@ -153,7 +153,15 @@ public final class IsoChunkMap {
    }
 
    public void processAllLoadGridSquare() {
+      // pzopt: centerFirstLoad, at world entry only the chunks around the player are handed over here (the rest go back
+      // on the queue for update(), which hands chunks over a few per frame as it does while walking): 0.44 s of
+      // boundary recalc on the main thread before the first world frame otherwise
+      java.util.ArrayList<IsoChunk> pzoptLater = pzopt.CenterFirstLoad.enteredEarly() ? new java.util.ArrayList<>() : null;
       for (IsoChunk chunk = (IsoChunk)IsoChunk.loadGridSquare.poll(); chunk != null; chunk = (IsoChunk)IsoChunk.loadGridSquare.poll()) {
+         if (pzoptLater != null && !pzopt.CenterFirstLoad.nearCenter(chunk.wx, chunk.wy)) {
+            pzoptLater.add(chunk);
+            continue;
+         }
          bSettingChunk.lock();
 
          try {
@@ -173,6 +181,11 @@ public final class IsoChunkMap {
             }
          } finally {
             bSettingChunk.unlock();
+         }
+      }
+      if (pzoptLater != null) {
+         for (IsoChunk chunk : pzoptLater) {
+            IsoChunk.loadGridSquare.add(chunk); // same order: nearest first (the streamer served them that way)
          }
       }
    }

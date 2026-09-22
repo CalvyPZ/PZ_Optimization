@@ -2230,6 +2230,7 @@ public final class IsoWorld {
          WorldStreamer.instance.create();
          DebugType.General.println("WorldStreamer.create() end");
          DebugType.General.println("CellLoader.LoadCellBinaryChunk start");
+         pzopt.CenterFirstLoad.setCenter(worldX, worldY); // pzopt: centerFirstLoad, the initial chunks nearest-first
          this.currentCell = CellLoader.LoadCellBinaryChunk(spriteManager, worldX, worldY);
          DebugType.General.println("CellLoader.LoadCellBinaryChunk start");
          ClimateManager.getInstance().postCellLoadSetSnow();
@@ -2252,7 +2253,7 @@ public final class IsoWorld {
          DebugType.General.println("WorldStreamer.isBusy() loop start");
 
          long pzoptPollMs = pzopt.Config.LOADER_CPU_FIXES && pzopt.Overrides.enabled() ? 2L : 100L; // pzopt: the loader notices the last initial chunk within 2 ms instead of up to 100
-         while (WorldStreamer.instance.isBusy()) {
+         while (WorldStreamer.instance.isBusy() && !pzopt.CenterFirstLoad.nearLoaded()) { // pzopt: centerFirstLoad, enter once the chunks around the player are in
             try {
                Thread.sleep(pzoptPollMs);
             } catch (InterruptedException var17) {

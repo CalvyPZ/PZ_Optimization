@@ -1018,8 +1018,14 @@ public final class LightingJNI {
                      pzopt.VisionBatch.prepare(dirty, n, playerIndex, DIRECTIONS); // pzopt
                   } // pzopt
 
-                  for (int cy = 0; cy < IsoChunkMap.chunkGridWidth; cy++) {
-                     for (int cx = 0; cx < IsoChunkMap.chunkGridWidth; cx++) {
+                  // pzopt: centerFirstLoad, chunks handed to the lighting engine nearest the centre first (same chunks, same
+                  // calls): the engine lights them in about that order, so the world appears from the player outwards
+                  // instead of in the grid's row bands
+                  int[] pzoptOrder = pzopt.CenterFirstLoad.gridOrder(IsoChunkMap.chunkGridWidth);
+                  for (int pzoptI = 0; pzoptI < pzoptOrder.length; pzoptI++) {
+                     int cx = pzoptOrder[pzoptI] % IsoChunkMap.chunkGridWidth;
+                     int cy = pzoptOrder[pzoptI] / IsoChunkMap.chunkGridWidth;
+                     {
                         IsoChunk mchunk = cm.getChunk(cx, cy);
                         if (mchunk != null && mchunk.loaded) {
                            if (mchunk.lightCheck[playerIndex]) {

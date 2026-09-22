@@ -128,6 +128,7 @@ public final class GameLoadingState extends GameState {
    private static final int BOTTOM_SCREEN = 40;
 
    public void enter() {
+      pzopt.ResumeShot.startLoad(); // pzopt: resumeShot, decode the save's last view for the loading screen
       if (GameWindow.fileSystem instanceof zombie.fileSystem.FileSystemImpl) {
          pzopt.BootPump.onLoadStart(((zombie.fileSystem.FileSystemImpl)GameWindow.fileSystem).pzoptExecutor()); // pzopt: file pool back to its play width
       }
@@ -421,7 +422,9 @@ public final class GameLoadingState extends GameState {
          screenFader.startFadeToBlack();
       }
 
-      while (screenFader.isFading()) {
+      // pzopt: noLoadingScreen, the loading screen's own fade from black (enter) is advanced by the stock render only; with
+      // the black frame it never ran, and this loop would play all of it here (0.36 s of renders and 33 ms sleeps)
+      while (screenFader.isFading() && !(pzopt.NoLoadingScreen.active() && pzopt.ResumeShot.hasShot())) {
          screenFader.preRender();
          screenFader.postRender();
          if (screenFader.isFading()) {
@@ -484,15 +487,17 @@ public final class GameLoadingState extends GameState {
    }
 
    public void render() {
-      if (pzopt.NoLoadingScreen.active() && !unexpectedError && !GameWindow.serverDisconnected
+      if (pzopt.NoLoadingScreen.active() && pzopt.ResumeShot.hasShot() && !unexpectedError && !GameWindow.serverDisconnected
          && !playerWrongIP && !worldVersionError && !mapDownloadFailed && !convertingWorld) {
-         // pzopt: noLoadingScreen, a plain black frame instead of the loading screen (text, tips, progress)
+         // pzopt: noLoadingScreen + resumeShot, the save's cached ground view with its tile effect on black instead of the
+         // loading screen (text, tips, progress); a save without a cached view keeps the stock loading screen
          Core.getInstance().StartFrame();
          Core.getInstance().EndFrame();
          boolean useUIFBO = UIManager.useUiFbo;
          UIManager.useUiFbo = false;
          Core.getInstance().StartFrameUI();
          SpriteRenderer.instance.renderi(null, 0, 0, Core.getInstance().getScreenWidth(), Core.getInstance().getScreenHeight(), 0.0F, 0.0F, 0.0F, 1.0F, null);
+         pzopt.ResumeShot.draw(); // pzopt: resumeShot, the square of cached ground with random tiles fading to black and back
          Core.getInstance().EndFrameUI();
          UIManager.useUiFbo = useUIFBO;
          return;
@@ -1012,7 +1017,7 @@ public final class GameLoadingState extends GameState {
             return StateAction.Remain;
          }
 
-         if (WorldStreamer.instance.isBusy()) {
+         if (WorldStreamer.instance.isBusy() && !pzopt.CenterFirstLoad.enteredEarly()) { // pzopt: centerFirstLoad, the rest streams in during play
             return StateAction.Remain;
          }
 

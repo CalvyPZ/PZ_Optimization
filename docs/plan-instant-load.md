@@ -165,3 +165,20 @@ JVM refuses to dump with the non-empty "." on the class path: `Error: non-empty 
 What is left above 2 s: Lua `OnLoadMapZones` (0.26 s: `objects.lua`, 4 MB, executed and registered zone by zone),
 `ItemPickerJava.Parse` (0.17 s), `MapCollisionData.init` (0.13 s), `OnLoadedMapZones` (0.11 s), the texture binding of
 the preloaded sprites (0.1 s).
+
+### World entry (2026-09-22 night)
+
+The harness's "world ready" is logged inside `IngameState.enter`; the first world frame came ~0.65 s later (the
+main-thread hand-off of every loaded chunk, 0.44 s, and the Lua `OnGameStart` / `OnLoad`), and the world is only drawn
+once lit. New `loadtime.py` rows V ("world visible": the player's chunk lit) and V2 ("world complete"). Without the AOT
+cache (harness runs), bench save:
+
+| run | world ready | world visible | world complete |
+|---|---|---|---|
+| `vis-on` (fader loop still playing) | 2.93 s | 3.66 s | 4.18 s |
+| `vis-fix` (fader loop skipped) | 2.58 s | 3.51 s | 3.95 s |
+| `vis-hand` (+ centre-first load, lighting and entry hand-off) | 2.31 s | 3.02 s | 4.64 s (the rest streams in during play) |
+
+The world now appears from the player outwards over ~0.9 s. With `resumeShot` the loading frame shows the ground around
+the player captured at the last exit (7 x 7 chunks, floors only), tiles popping in over the save's measured load time,
+and it dissolves into the live world (Mac runs `mac-v11*` / `mac-v12`: filled in over 6.4 s of an 8.4 s load).
