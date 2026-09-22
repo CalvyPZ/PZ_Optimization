@@ -93,7 +93,11 @@ captures `docs/media/updater-menu-current.png`, `updater-menu.png`, `updater-dia
 `updater-dialog-installed.png`; 2026-09-22; the two earlier "New!" sections lost their "New!" with it), `16` the
 "New! Smooth zoom" card (`docs/media/zoom-card.png` from `harness/zoom-card.py`: the worst-frame table of the four zoom
 cases, stock vs `zoomRetain` + `zoomEase`, from `docs/results.md` "Camera zoom changes"; 2026-09-22 evening; the updater
-section lost its "New!" with it).
+section lost its "New!" with it), `17` the "New! Upscaler: FSR 1.0 and DLSS" card (`docs/media/upscaler-card.png` from
+`harness/upscaler-card.py`: the per-mode table of the 120 km/h drive — off, FSR 1.0 50 %, bicubic 50 %, DLSS 50 % preset F
+and default — from `docs/plan-upscalers.md`; 2026-09-22 night; the zoom section lost its "New!" with it, and the "Better
+profiling" heading went: its image `13` now sits inside the "Performance overlay (F9)" section, which kept the page under
+the limit).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
