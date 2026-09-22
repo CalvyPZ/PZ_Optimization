@@ -279,7 +279,8 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   26.4 → 32.2 fps (p50 30 ms), GPU 46 %, batch flush 1 % of the game thread, zombie postupdate 19 → 14.5 %.
   Runs right after a peer's `update-*` / `release-updater` cmd job showed GPU 75-80 % with the game's own gpu_ms
   tripled (a leftover game / Steam UI client; a game at the main menu alone is ~40 % GPU here) — re-run those.
-- Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`.
+- Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
+  `docs/plan-zombie-multithread.md` (2026-09-22: the rest of the zombie simulation on all cores, phased).
   The game-thread optimization plans were dropped on 2026-09-21 at the maintainer's request.
 - Native Wayland works via `--env JAVA_TOOL_OPTIONS=-Dzomboid.wayland=1`; A/B on 2026-09-19 is a
   wash at the 240 cap (XWayland stays default; the NVIDIA GL worker thread only exists under

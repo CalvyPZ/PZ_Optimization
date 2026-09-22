@@ -13,6 +13,7 @@ classes are described in words.
 | `plan-resource-use.md` | 2026-09-19 verdict on why the uncapped game idles (Zink swap stall; NVIDIA GL is GPU-bound) |
 | `plan-game-load.md` | the load after "Continue" (LoadTrace, loadtime.py) |
 | `plan-vulkan-renderer.md` | plan to move from OpenGL to Vulkan |
+| `plan-zombie-multithread.md` | 2026-09-22: the zombie simulation on all cores after the Louisville pass — where the game thread's 31 ms go, the six hazards (static scratch, pools, global toggles, events, cross-entity reads, determinism), phases in order of gain per risk (LOS read pass, action-context evaluation, character render prep, lighting JNI reads per chunk, reductions), the shared batch / checksum rigs, ~32 → ~45 fps ceiling; sharding the zombie update itself is out |
 | `plan-wayland.md` | 2026-09-19 native Wayland vs XWayland A/B: a wash at the cap, XWayland stays default |
 | `findings-scene-presets-2026-09-20.md` | the night / torch / thunderstorm presets: night and torch free, storm 83 fps with p99 43 ms and nothing saturated (chunk lighting rebakes ×5); capture rig blind to the player light; next steps |
 | `findings-fog-2026-09-21.md` | heavy fog at no cost: where stock `ImprovedFog` spent 1.5 ms of GPU and a game-thread square walk, the fog pass (one draw call, scaled fog buffer, in-place scene depth, min-depth reduction + depth-aware composite, mipmapped noise, chunk fog masks + segment cache), laptop and desktop run tables, what is left |
