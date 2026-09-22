@@ -2676,3 +2676,13 @@ inside `IngameState.enter`, ~0.65 s before the first world frame (stock runs inc
 - `zombie.GameWindow.exit` sets `ResumeShot.exitSave` before its save.
 - `pzopt.NoLoadingScreen` also runs the lighting thread at 240 fps (the player's `lightFPS`, 15 by default, otherwise)
   from world entry until the world is complete or 3 s, by writing the field, so options never save the boosted value.
+
+### zombie.iso.weather.fx.WeatherParticleDrawer (`weatherNoGlGet`)
+
+`render` (once a frame, rain or not) asked the driver for the current shader program with
+`glGetInteger(GL_CURRENT_PROGRAM)` to restore it afterwards. A glGet makes the NVIDIA driver wait for its command
+queue: on the Dell (PRIME offload) that was 3.3 s of the render thread's wall time in a 40 s walk, and the game thread
+then waited at the frame hand-off. `pzopt.GlState` takes the program from `ShaderHelper`'s own record of what it bound
+(`currentlyBound`), falling back to the query when that is unknown. Exact on the walk (`devGlStateCheck`: 1,791 calls,
+0 disagreements with the driver, 0 fallbacks). Walk bench, two runs each: frames over 50 ms 33-40 -> 25-27 per minute,
+p99 53-58 -> 47-50 ms, p99.9 298-342 -> 231-244 ms.

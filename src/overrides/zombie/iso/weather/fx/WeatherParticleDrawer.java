@@ -58,7 +58,7 @@ public final class WeatherParticleDrawer extends GenericDrawer {
 
    public void render() {
       boolean bDefaultShaderActive = DefaultShader.isActive;
-      int shaderID = GL11.glGetInteger(35725);
+      int shaderID = pzopt.GlState.currentProgram(); // pzopt: ShaderHelper's record instead of a driver round trip (weatherNoGlGet)
       int lastTextureID = Texture.lastTextureID;
       GL11.glPushAttrib(1048575);
       GL11.glPushClientAttrib(-1);
