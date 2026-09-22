@@ -30,7 +30,8 @@ local MASTER = { key = "enabled", label = "Optimizations enabled (master switch)
 -- Colour names pzopt.Overlay.color knows (a RRGGBB hex typed into options.ini also works).
 local FPS_COLOURS = { "blue", "green", "yellow", "red", "white", "cyan", "lime", "orange", "magenta", "purple" }
 
--- Keys, labels and tooltips. `choices` makes a combo (integer or string); `note[value]` annotates an entry.
+-- Keys, labels and tooltips. `choices` makes a combo (integer or string); `note[value]` annotates an entry;
+-- `bezier` adds the curve sliders and plot under the combo (addBezierOption).
 local SECTIONS = {
     {
         title = "Chunk textures: what bakes", clip = "drive",
@@ -86,7 +87,8 @@ local SECTIONS = {
             { key = "zoomEase", label = "Zoom motion curve",
               choices = { "0.25,0.1,0.25,1.0", "0.42,0,0.58,1", "0,0,0.58,1", "0.42,0,1,1", "0.333,0.333,0.667,0.667" },
               note = { ["0.25,0.1,0.25,1.0"] = "ease", ["0.42,0,0.58,1"] = "ease-in-out", ["0,0,0.58,1"] = "ease-out", ["0.42,0,1,1"] = "ease-in", ["0.333,0.333,0.667,0.667"] = "linear" },
-              tip = "The cubic Bezier control points (x1,y1,x2,y2) of the zoom motion, as in CSS transitions." },
+              bezier = true,
+              tip = "The cubic Bezier control points (x1,y1,x2,y2) of the zoom motion, as in CSS transitions: pick a preset or drag the four sliders under it (the plot beside them shows the zoom's progress over the motion time). x is the share of the time, y the share of the zoom change; y stays within 0-1 so the zoom never overshoots its target." },
             { key = "zoomFrameMs", label = "Zoom bake frame limit (ms)",
               choices = { "6", "8", "10", "14", "20" },
               tip = "A frame longer than this halves the zoom bakes per frame; frames under three quarters of it grow the count back." },
@@ -1207,7 +1209,9 @@ local function relayout(S)
                     placeRow(row, y)
                     y = y + row.step
                     shown[row] = true
-                    table.insert(joy, { row.option.control })
+                    for _, line in ipairs(row.option.pzoptJoyLines or { { row.option.control } }) do
+                        table.insert(joy, line)
+                    end
                 end
             end
         end
@@ -1480,6 +1484,203 @@ local function addIntOption(self, entry, splitpoint, y, comboWidth)
     return option
 end
 
+-- The zoom curve (`bezier` entries, key zoomEase; 2026-09-22): the preset combo, then one slider per control-point
+-- coordinate (x1, y1, x2, y2 as in CSS cubic-bezier(), each 0..1 so the zoom never overshoots its target) with a
+-- plot of the curve in the label column beside them. A slider move selects the preset it matches, else "custom";
+-- picking a preset moves the sliders. The option's value is always what the sliders say.
+local BEZIER_AXES = { "Point 1 time (x1)", "Point 1 zoom (y1)", "Point 2 time (x2)", "Point 2 zoom (y2)" }
+
+local function parseBezier(spec)
+    local v = {}
+    for part in string.gmatch(spec or "", "[^,; ]+") do
+        table.insert(v, tonumber(part))
+    end
+    if #v ~= 4 then return nil end
+    for i = 1, 4 do
+        if v[i] == nil then return nil end
+    end
+    return v
+end
+
+local function sameBezier(a, b)
+    if not a or not b then return false end
+    for i = 1, 4 do
+        if math.abs(a[i] - b[i]) > 0.005 then return false end
+    end
+    return true
+end
+
+local function formatBezier(v)
+    local parts = {}
+    for i = 1, 4 do parts[i] = string.format("%.2f", v[i]) end
+    return table.concat(parts, ",")
+end
+
+-- The curve with its two handles, sampled like pzopt.ZoomEase: x(t) and y(t) share the parameter t.
+PzoptBezierPlot = ISPanel:derive("PzoptBezierPlot")
+
+function PzoptBezierPlot:render()
+    local w, h = self.width, self.height
+    self:drawRect(0, 0, w, h, 1, 0.06, 0.06, 0.07)
+    self:drawLine(nil, 0, h, w, 0, 1, 1, 0.22, 0.22, 0.26) -- linear, for reference (drawLine2 draws nothing in B42 menus)
+    local v = {}
+    for i = 1, 4 do v[i] = self.sliders[i]:getCurrentValue() end
+    local function px(x) return x * (w - 1) end
+    local function py(y) return (1 - y) * (h - 1) end
+    self:drawLine(nil, px(0), py(0), px(v[1]), py(v[2]), 1, 1, C_GREY.r, C_GREY.g, C_GREY.b)
+    self:drawLine(nil, px(1), py(1), px(v[3]), py(v[4]), 1, 1, C_GREY.r, C_GREY.g, C_GREY.b)
+    local function b(t, a, c)
+        local u = 1 - t
+        return 3 * u * u * t * a + 3 * u * t * t * c + t * t * t
+    end
+    local lx, ly = px(0), py(0)
+    for s = 1, 32 do
+        local t = s / 32
+        local x, y = px(b(t, v[1], v[3])), py(b(t, v[2], v[4]))
+        self:drawLine(nil, lx, ly, x, y, 2, 1, C_OPT.r, C_OPT.g, C_OPT.b)
+        lx, ly = x, y
+    end
+    self:drawRect(px(v[1]) - 2, py(v[2]) - 2, 5, 5, 1, C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    self:drawRect(px(v[3]) - 2, py(v[4]) - 2, 5, 5, 1, C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    self:drawRectBorder(0, 0, w, h, 1, 0.31, 0.31, 0.35)
+end
+
+local function addBezierOption(self, entry, splitpoint, y, comboWidth, BUTTON_HGT)
+    local p = perf()
+    local pinnedBy = p:getPzoptOptionPinnedBy(entry.key)
+    local default = p:getPzoptOptionDefault(entry.key)
+    local labels, values = comboLabels(entry, default, "")
+    table.insert(labels, "custom (the sliders below)")
+    local customIndex = #labels
+    local combo = self:addCombo(splitpoint, y, comboWidth, 20, entry.label, labels, 1)
+    combo:setToolTipMap({ defaultTooltip = tooltipFor(entry, pinnedBy) })
+    if pinnedBy ~= "" then
+        combo.disabled = true
+    end
+    local spacing = MainOptions.style.borderSpacing
+    local top = y + self.addY
+    local valueW = getTextManager():MeasureStringX(UIFont.Small, "0.00") + 8
+    local labelW = 0
+    local sliders = {}
+    for i, name in ipairs(BEZIER_AXES) do
+        local rowY = y + self.addY
+        local label = ISLabel:new(splitpoint, rowY, BUTTON_HGT, name, C_GREY.r, C_GREY.g, C_GREY.b, 1, UIFont.Small)
+        label:initialise()
+        self.mainPanel:addChild(label)
+        labelW = math.max(labelW, getTextManager():MeasureStringX(UIFont.Small, name))
+        local value = ISLabel:new(splitpoint + 20, rowY, BUTTON_HGT, "", 1, 1, 1, 1, UIFont.Small, true)
+        value:initialise()
+        self.mainPanel:addChild(value)
+        local slider = ISSliderPanel:new(splitpoint + 20 + valueW, rowY, comboWidth - valueW, BUTTON_HGT)
+        slider:initialise()
+        slider:setValues(0, 1, 0.01, 0.1)
+        slider.doToolTip = false -- its own tooltip is the radio's "increase step size"
+        slider.valueLabel = value
+        self.mainPanel:addChild(slider)
+        self.mainPanel:insertNewLineOfButtons(slider)
+        self.addY = self.addY + BUTTON_HGT + spacing
+        sliders[i] = slider
+    end
+    local size = y + self.addY - spacing - top
+    local plot = PzoptBezierPlot:new(math.max(16, splitpoint - labelW - 12 - size), top, size, size)
+    plot:initialise()
+    plot.sliders = sliders
+    self.mainPanel:addChild(plot)
+
+    local function current()
+        local v = {}
+        for i = 1, 4 do v[i] = sliders[i]:getCurrentValue() end
+        return v
+    end
+    -- the sliders to a value; setCurrentValue ignores a disabled slider, so a pinned value is written directly
+    local function setSliders(spec)
+        local v = parseBezier(spec) or parseBezier(default)
+        for i = 1, 4 do
+            local s = sliders[i]
+            s.currentValue = math.max(0, math.min(1, v[i]))
+            s.valueLabel:setName(string.format("%.2f", s.currentValue))
+            s.disabled = pinnedBy ~= ""
+        end
+    end
+    -- the combo entry the sliders match: the default, a preset, or "custom"
+    local function syncCombo()
+        local v = current()
+        if combo.selected == 1 and sameBezier(v, parseBezier(default)) then return end
+        for i, value in ipairs(values) do
+            if sameBezier(v, parseBezier(value)) then
+                combo.selected = i + 1
+                return
+            end
+        end
+        combo.selected = customIndex
+    end
+
+    local option = GameOption:new("pzopt." .. entry.key, combo)
+    for _, slider in ipairs(sliders) do
+        slider.target = option
+        slider.onValueChange = function(opt, value, s)
+            s.valueLabel:setName(string.format("%.2f", value))
+            syncCombo()
+            opt:invokeOnChangeEvent()
+        end
+    end
+    function option.onChange(self, box)
+        if box.selected == 1 then
+            setSliders(default)
+        elseif values[box.selected - 1] then
+            setSliders(values[box.selected - 1])
+        end
+    end
+    function option.toUI(self)
+        local pp = perf()
+        local saved = pp:getPzoptOptionSaved(entry.key)
+        if pinnedBy ~= "" then
+            setSliders(pp:getPzoptOption(entry.key))
+            syncCombo()
+        elseif saved == "" then
+            self.control.selected = 1
+            setSliders(default)
+        else
+            setSliders(saved)
+            self.control.selected = 0
+            syncCombo()
+        end
+    end
+    function option.apply(self)
+        if pinnedBy ~= "" then return end
+        local value = ""
+        if self.control.selected ~= 1 then
+            local v = current()
+            value = sameBezier(v, parseBezier(default)) and "" or formatBezier(v)
+        end
+        perf():setPzoptOption(entry.key, value)
+        local effective = value ~= "" and value or default
+        self:restartRequired(perf():getPzoptOption(entry.key), effective)
+    end
+    function option.pzoptReset(self)
+        if pinnedBy ~= "" then return end
+        self.control.selected = 1
+        setSliders(default)
+    end
+    function option.pzoptSet(self, value)
+        if pinnedBy ~= "" then return end
+        if value == nil then return self:pzoptReset() end
+        setSliders(value)
+        self.control.selected = 0
+        syncCombo()
+    end
+    function option.pzoptCurrent(self)
+        if self.control.selected == 1 then
+            return default .. " (default)"
+        end
+        return formatBezier(current())
+    end
+    option.pzoptKey = entry.key
+    option.pzoptJoyLines = { { combo }, { sliders[1] }, { sliders[2] }, { sliders[3] }, { sliders[4] } }
+    self.gameOptions:add(option)
+    return option
+end
+
 -- "Enable all": master on, every other control back to the build's default. "Disable all (stock)":
 -- master off, the other controls untouched (they are ignored while the master is off). Neither writes
 -- anything: the controls are marked changed and Apply / Accept saves them through the options above.
@@ -1691,6 +1892,9 @@ function MainOptions:pzoptAddOptimizationsPanel()
         for _, entry in ipairs(section.entries) do
             if p:isPzoptOptionKnown(entry.key) then
                 local row, option, top = capture(function()
+                    if entry.bezier then
+                        return addBezierOption(self, entry, splitpoint, y, comboWidth, BUTTON_HGT)
+                    end
                     if entry.choices then
                         return addIntOption(self, entry, splitpoint, y, comboWidth)
                     end
@@ -1700,6 +1904,8 @@ function MainOptions:pzoptAddOptimizationsPanel()
                 addRow(entry, option, KEY_CLIP[entry.key] or section.clip or "drive")
                 local r = rows[#rows]
                 r.elems, r.step, r.controlDy, r.index = row.elems, row.step, option.control:getY() - top, #managed + 1
+                -- a multi-line control (the curve sliders) picks its preview row over its whole height
+                if option.pzoptJoyLines then r.h = r.step - r.controlDy end
                 table.insert(sec.rows, r)
                 table.insert(managed, r)
                 sectionOf[r] = sec
