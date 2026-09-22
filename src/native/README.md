@@ -7,6 +7,10 @@
 
 ## Building the shim
 
+The player-facing steps (packages per distribution, the SDK checkout, the one g++ line, the two files under the
+game's `natives/`, the console lines to expect) are in the README, "Enabling DLSS (Linux, RTX)" under
+"Upscaling: FSR 1.0 and DLSS"; releases ship no natives (2026-09-22).
+
 Linux (`scripts/build.sh` does this when `~/.local/share/nvidia-dlss-sdk` holds a checkout of
 https://github.com/NVIDIA/DLSS and the Vulkan headers are installed):
 

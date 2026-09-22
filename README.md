@@ -581,7 +581,7 @@ motion to NVIDIA's network, which accumulates detail across frames (1-px power l
 lettering come back at 50 %); `bicubic` is the plain stretch the stock screen shader already does.
 
 **Turning it on.** Options > Optimizations > Upscaling: set **Upscaler** to `fsr1` (or `dlss` on an
-RTX card with the shim under `natives/`), pick **Upscaler quality** (`quality` keeps most of the
+RTX card once the shim is under `natives/`, see "Enabling DLSS" below), pick **Upscaler quality** (`quality` keeps most of the
 detail, `performance` halves both axes), optionally an explicit percentage, the FSR sharpening
 and the DLSS preset, then restart the game — the tab shows the stock "restart required" dialog.
 `console.txt` confirms it with one line, `[pzopt] upscaler: fsr1 at 50 % (performance)`; a mode
@@ -598,10 +598,61 @@ when the verdict says `game thread bound` (a horde, chunk streaming, the zombie 
 so at 4K and above prefer `fsr1` or `dlssPreset=f`; DLSS pays off at 1440p and below, or whenever
 its reconstructed detail matters more than the frame rate.
 
+**Enabling DLSS (Linux, RTX).** The release zip and the Workshop item carry no native libraries,
+so `upscaler=dlss` on a fresh install logs `upscaler: dlss unavailable (dlss: .../natives/libpzopt_ngx64.so
+not found); using fsr1 at 50 %` and runs as FSR 1.0. DLSS needs two files under the game's `natives/`
+folder (next to `libLighting64.so`): the shim `libpzopt_ngx64.so`, built from `src/native/pzopt_ngx.cpp`
+against NVIDIA's DLSS SDK, and NVIDIA's DLSS library `libnvidia-ngx-dlss.so.<version>` from that SDK.
+You build both yourself, on top of any install method (Workshop, installer, zip); it takes a minute:
+
+1. Requirements: an RTX card on the proprietary NVIDIA driver (it ships `libnvidia-ngx.so.1`: Arch
+   `nvidia-utils`, elsewhere the `nvidia-driver-<version>` packages; check with
+   `ls /usr/lib*/libnvidia-ngx.so.1 /usr/lib/x86_64-linux-gnu/libnvidia-ngx.so.1`), the game running on
+   that driver's OpenGL (the default; not Mesa / Zink), `g++`, `git`, the Vulkan loader and headers.
+   ```sh
+   sudo pacman -S gcc git vulkan-headers vulkan-icd-loader     # Arch / CachyOS
+   sudo apt install g++ git libvulkan-dev                       # Debian / Ubuntu
+   sudo dnf install gcc-c++ git vulkan-headers vulkan-loader-devel   # Fedora
+   ```
+2. Get NVIDIA's DLSS SDK (public on GitHub, under NVIDIA's SDK license; ~600 MB) and the repository:
+   ```sh
+   git clone --depth 1 https://github.com/NVIDIA/DLSS ~/.local/share/nvidia-dlss-sdk
+   git clone --depth 1 https://github.com/xD3I/PZ_Optimization.git
+   ```
+3. Build the shim and copy it, with the DLSS library, into the game's `natives/` folder
+   (`PZ` below is the folder that holds `projectzomboid.jar`; on this machine
+   `/games/steamapps/common/ProjectZomboid/projectzomboid`, usually
+   `~/.local/share/Steam/steamapps/common/ProjectZomboid/projectzomboid`):
+   ```sh
+   SDK=~/.local/share/nvidia-dlss-sdk
+   PZ=~/.local/share/Steam/steamapps/common/ProjectZomboid/projectzomboid
+   cd PZ_Optimization
+   g++ -O2 -shared -fPIC -std=c++17 -fvisibility=hidden -I$SDK/include -o "$PZ/natives/libpzopt_ngx64.so" \
+       src/native/pzopt_ngx.cpp $SDK/lib/Linux_x86_64/libnvsdk_ngx.a -ldl -lpthread
+   cp $SDK/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.* "$PZ/natives/"
+   ```
+   (Deprecation warnings from the SDK headers are normal.) With a source build, `scripts/build.sh` does
+   the same when the SDK checkout is at that path — `PZOPT_DLSS_SDK=<dir>` names another one,
+   `PZOPT_DLSS=0` skips it — and `scripts/pzopt.sh install` copies both files in with the classes.
+4. Options > Optimizations > Upscaling: **Upscaler** = `dlss`, a quality (`performance` = 50 %, or
+   `native` for DLAA anti-aliasing at full size), optionally a **DLSS model preset** (`f` is the
+   cheap one at 4K), restart the game. `console.txt` then has `[pzopt] upscaler: dlss at 50 % (performance)`
+   followed a few frames later by `[pzopt] dlss: ready, 2560x1080 -> 5120x2160 (performance, preset default,
+   ...)`. If it says `upscaler: dlss unavailable (...)` instead, the reason is in the parentheses: the
+   shim or the library not under `natives/`, no NVIDIA Vulkan device, a driver without
+   `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` (Mesa / Zink, or an old driver), or NGX refusing the
+   card; the game keeps running with FSR 1.0 at the same scale.
+
+The two hand-copied files are not in `pzopt-installed.txt`, so an uninstall leaves them behind: delete
+`natives/libpzopt_ngx64.so` and `natives/libnvidia-ngx-dlss.so.*` by hand (the game does not touch them
+without the overrides). NGX writes its own cache under `Zomboid/pzopt/ngx/`. Split screen falls back to
+FSR 1.0 (one DLSS feature per screen). Windows: the same shim needs an MSVC build (`src/native/README.md`);
+until someone builds and tests that DLL, `upscaler=dlss` on Windows runs as FSR 1.0.
+
 | `upscaler` | What runs | Where |
 |---|---|---|
 | `fsr1` | AMD FidelityFX Super Resolution 1.0 (EASU + RCAS, MIT) as GLSL passes on the low-res frame | every GPU, Linux / Windows / macOS |
-| `dlss` | NVIDIA DLSS Super Resolution: a Vulkan device runs NGX on the GPU the game's GL context uses, sharing the colour / depth / motion-vector images and the output through `GL_EXT_memory_object` + `GL_EXT_semaphore`; the world is drawn with a sub-pixel jitter (a float viewport offset), the camera's motion and each character's and vehicle's own motion (stencil ids) go in as motion vectors | RTX cards; Linux now (`natives/libpzopt_ngx64.so` + the DLSS library from NVIDIA's SDK), Windows once the shim DLL is built with MSVC (`src/native/README.md`). The release zip and the Workshop item ship no natives (decided 2026-09-22: 58 MB of NVIDIA's library, Windows cannot use the .so, the Workshop bans the extension): build them yourself with `scripts/build.sh` and the SDK checkout; anything that cannot run continues as `fsr1` |
+| `dlss` | NVIDIA DLSS Super Resolution: a Vulkan device runs NGX on the GPU the game's GL context uses, sharing the colour / depth / motion-vector images and the output through `GL_EXT_memory_object` + `GL_EXT_semaphore`; the world is drawn with a sub-pixel jitter (a float viewport offset), the camera's motion and each character's and vehicle's own motion (stencil ids) go in as motion vectors | RTX cards on the NVIDIA driver; Linux now, Windows once the shim DLL is built with MSVC (`src/native/README.md`). The release zip and the Workshop item ship no natives (2026-09-22: 58 MB of NVIDIA's library, Windows cannot use the .so, the Workshop bans the extension): build the shim yourself, see "Enabling DLSS" above; anything that cannot run continues as `fsr1` |
 | `bicubic` | the stock screen shader's bicubic filter stretches the low-res frame | every GPU (the plain baseline) |
 | `xess` | Intel XeSS: not written yet (Windows-only SDK); runs as `fsr1` | – |
 
