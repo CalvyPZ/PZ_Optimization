@@ -143,6 +143,7 @@ PzoptOptionClasses = {
     rainTiles = { "pzopt.RainTiles" },
     rebakeBudget = { "FBORenderCell" },
     rebakeMaxFrames = { "FBORenderCell" },
+    renderChunkPrewarm = { "FBORenderCell" },
     resumeShot = { "pzopt.ResumeShot" },
     roofHideDebounceFrames = { "FBORenderCutaways" },
     saveCellAsync = { "ZombiePopulationManager" },

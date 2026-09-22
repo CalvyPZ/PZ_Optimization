@@ -351,7 +351,22 @@ public final class GameLoadingState extends GameState {
                      }
                   }
 
-                  ChatUtility.InitAllowedChatIcons();
+                  for (int pzoptTry = 0; ; pzoptTry++) { // pzopt: with centerFirstLoad the world already renders (and lazily registers textures in the shared table this scan iterates) while the loader runs; retry the read-only scan
+                     try { // pzopt
+                        ChatUtility.InitAllowedChatIcons();
+                        break; // pzopt
+                     } catch (java.util.ConcurrentModificationException pzoptCme) { // pzopt
+                        if (pzoptTry >= 50) { // pzopt
+                           throw pzoptCme; // pzopt
+                        } // pzopt
+                        try { // pzopt
+                           Thread.sleep(5L); // pzopt
+                        } catch (InterruptedException pzoptIe) { // pzopt
+                           Thread.currentThread().interrupt(); // pzopt
+                           throw pzoptCme; // pzopt
+                        } // pzopt
+                     } // pzopt
+                  } // pzopt
                   ChatManager.getInstance().init(true, IsoPlayer.getInstance());
                   Bullet.startLoadingPhysicsMeshes();
                   Texture.getSharedTexture("media/textures/NewShadow.png");
@@ -416,6 +431,7 @@ public final class GameLoadingState extends GameState {
 
    public void exit() {
       pzopt.JitGovernor.onWorldStart(); // pzopt: C2 off for play on few-core machines (jitMode)
+      zombie.iso.fboRenderChunk.FBORenderCell.pzoptPrewarmRenderChunks(); // pzopt: render-chunk textures made on the loading screen (renderChunkPrewarm)
       boolean useUIFBO = UIManager.useUiFbo;
       UIManager.useUiFbo = false;
       if (!(pzopt.Config.NO_LOAD_FADE && pzopt.Overrides.enabled())) { // pzopt: skip the 350 ms fade to black before the world (docs/plan-instant-load.md L8)

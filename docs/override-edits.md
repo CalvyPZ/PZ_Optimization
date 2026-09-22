@@ -2697,3 +2697,24 @@ then waited at the frame hand-off. `pzopt.GlState` takes the program from `Shade
 (`currentlyBound`), falling back to the query when that is unknown. Exact on the walk (`devGlStateCheck`: 1,791 calls,
 0 disagreements with the driver, 0 fallbacks). Walk bench, two runs each: frames over 50 ms 33-40 -> 25-27 per minute,
 p99 53-58 -> 47-50 ms, p99.9 298-342 -> 231-244 ms.
+
+### zombie.iso.fboRenderChunk.FBORenderCell + zombie.gameStates.GameLoadingState (`renderChunkPrewarm`)
+
+A chunk level's first bake creates its render chunk (colour and depth textures and an FBO). On the Dell the driver's
+`glGenTextures` / `glCheckFramebufferStatus` stall the render thread for tens of ms each, and the pool of recycled
+render chunks (keyed by texture height) only fills as the view first fills, so the first minute of play paid it while
+walking and turning (render-thread wall profile of the walk's long frames: 13 % in `glGenTextures`). `GameLoadingState.exit`
+now fills the pool from the loading screen: with `renderChunkPrewarm=-1` (default) as many render chunks as were in
+use at once in the previous session plus 5 % (the peak is sampled every 10 s and kept in `Zomboid/pzopt/renderchunk-pool.txt`;
+96 when there is no history, clamped 32-400). A fixed size sized from the chunk grid (252) over-provisioned the Dell's
+4 GB of VRAM and doubled its swap-ins; the learned size settles at the machine's own demand (Dell walk: 114). The
+texture width does not depend on the level count and the scale only on a debug option, so the height key is exact.
+Dell walk: render chunks created during play 114 -> 4-9, p99.9 241 -> 148-197 ms; load time unchanged (the prewarm
+takes ~1.3 s of the loading screen).
+
+### zombie.gameStates.GameLoadingState (chat-icon scan retry)
+
+Since `centerFirstLoad` (d36540a) the world renders, and lazily registers textures in `Texture.s_sharedTextureTable`,
+while the loader thread is still running; its `ChatUtility.InitAllowedChatIcons` iterates that table and threw a
+`ConcurrentModificationException` in two of three Dell loads, hanging the game on the error. The call is retried (up
+to 50 x 5 ms); the scan only clears and refills its two icon maps.

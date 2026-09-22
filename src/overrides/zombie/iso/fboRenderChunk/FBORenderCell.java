@@ -1299,7 +1299,94 @@ public final class FBORenderCell {
       }
    }
 
+   // pzopt: renderChunkPrewarm (2026-09-23, the Dell hitch pass). A chunk level's first bake creates its render chunk:
+   // two textures and an FBO, whose glGenTextures / glCheckFramebufferStatus stall the NVIDIA driver on the Dell for
+   // tens of ms; the pool (sizeChunkStore, keyed by texture height) only fills as the view first fills, so the first
+   // minute of play pays it while walking and turning. This fills the pool for the current zoom from the loading screen.
+   private static long pzoptPoolLogNs;
+
+   public static void pzoptPrewarmRenderChunks() { // pzopt
+      int n = pzopt.Config.RENDER_CHUNK_PREWARM;
+      if (n < 0) {
+         int peak = pzoptReadPoolPeak(); // pzopt: auto = the most render chunks in use at once last session, + 5 %
+         n = peak > 0 ? Math.max(32, Math.min(400, peak + peak / 20)) : 96;
+      }
+      if (n <= 0 || !pzopt.Overrides.enabled()) {
+         return;
+      }
+      long t0 = System.nanoTime();
+      float zoom = Core.getInstance().getZoom(0);
+      FBORenderChunkManager m = FBORenderChunkManager.instance;
+      int one = n * 2 / 3; // most chunks have one level (flat ground); the rest pair two
+      int made = 0;
+      for (int levels = 1; levels <= 2; levels++) {
+         int count = levels == 1 ? one : n - one;
+         int w = FBORenderLevels.calculateTextureWidthForLevels(0, levels - 1, zoom);
+         int h = FBORenderLevels.calculateTextureHeightForLevels(0, levels - 1, zoom);
+         ArrayList<FBORenderChunk> st = m.sizeChunkStore.computeIfAbsent(h, k -> new ArrayList<>());
+         for (int i = 0; i < count; i++) {
+            FBORenderChunk rc = new FBORenderChunk();
+            rc.w = w;
+            rc.h = h;
+            rc.index = m.rcIndex++;
+            rc.preInit();
+            rc.init();
+            st.add(rc);
+            made++;
+         }
+      }
+      pzopt.Log.info("renderChunkPrewarm: " + made + " render chunks for zoom " + zoom + " in " + (System.nanoTime() - t0) / 1_000_000L + " ms");
+   }
+
+   static void pzoptLogRenderChunkPool() { // pzopt: every 10 s, how many render chunks exist and how many wait in the pool
+      long now = System.nanoTime();
+      if (now - pzoptPoolLogNs < 10_000_000_000L || pzopt.Config.RENDER_CHUNK_PREWARM >= 0 && !pzopt.Config.INSTRUMENT) {
+         return;
+      }
+      pzoptPoolLogNs = now;
+      FBORenderChunkManager m = FBORenderChunkManager.instance;
+      StringBuilder sb = new StringBuilder("renderChunks: created=").append(m.rcIndex).append(" pooled");
+      int pooled = 0;
+      for (java.util.Map.Entry<Integer, ArrayList<FBORenderChunk>> e : m.sizeChunkStore.entrySet()) {
+         sb.append(' ').append(e.getKey()).append(':').append(e.getValue().size());
+         pooled += e.getValue().size();
+      }
+      int inUse = m.rcIndex - pooled - m.toRecycle.size();
+      if (inUse > pzoptPoolPeak) {
+         pzoptPoolPeak = inUse;
+         pzoptWritePoolPeak(inUse);
+      }
+      if (pzopt.Config.INSTRUMENT) {
+         pzopt.Log.info(sb.append(" inUse=").append(inUse).append(" peak=").append(pzoptPoolPeak).toString());
+      }
+   }
+
+   private static int pzoptPoolPeak; // pzopt
+
+   private static java.io.File pzoptPoolFile() { // pzopt
+      return new java.io.File(zombie.ZomboidFileSystem.instance.getCacheDir() + java.io.File.separator + "pzopt", "renderchunk-pool.txt");
+   }
+
+   private static int pzoptReadPoolPeak() { // pzopt
+      try {
+         return Integer.parseInt(java.nio.file.Files.readString(pzoptPoolFile().toPath()).trim());
+      } catch (Exception e) {
+         return 0;
+      }
+   }
+
+   private static void pzoptWritePoolPeak(int peak) { // pzopt: a session's peak, so the next load prewarms what this machine / resolution / zoom needs
+      try {
+         java.io.File f = pzoptPoolFile();
+         f.getParentFile().mkdirs();
+         java.nio.file.Files.writeString(f.toPath(), Integer.toString(peak));
+      } catch (Exception e) {
+         // pzopt: best effort
+      }
+   }
+
    private boolean checkNewlyOnScreenChunks(int playerIndex) {
+      pzoptLogRenderChunkPool(); // pzopt
       boolean bForceCutawaysUpdate = false;
       float cameraZoom = Core.getInstance().getZoom(playerIndex);
       FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
