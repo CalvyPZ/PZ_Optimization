@@ -10,12 +10,11 @@ https://github.com/xD3I/PZ_Optimization
 
 [h1]New! In-game updater[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/15-updater.jpg[/img]
-UPDATE PZ OPTIMIZATION in the main menu, greyed out while your build is current: when a newer build for your game revision is out it downloads and installs it, then asks to restart.
 
-[h1]New! See what every setting does[/h1]
+[h1]See what every setting does[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/14-options-preview.jpg[/img]
 
-[h1]New! Better profiling[/h1]
+[h1]Better profiling[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/13-profiler.jpg[/img]
 
 [h1]What it does[/h1]

@@ -87,7 +87,10 @@ profiling" card (`docs/media/profiler-card.png` from `harness/profiler-card.py`:
 recorded run, `docs/media/profiler-overlay-full.png`, with the caption lines; 2026-09-22), `14` the "New! See what
 every setting does" card (`docs/media/preview-card.png` from `harness/preview-card.py`: the Optimizations tab with its
 preview panel, `docs/media/options-preview-full.png`; 2026-09-22; the macOS section left the page with it, macOS stays
-in the intro line).
+in the intro line), `15` the "New! In-game updater" card (`docs/media/updater-card.png` from `harness/updater-card.py`:
+the main menu with the item greyed out and enabled plus the dialog before and after the install, from the desktop
+captures `docs/media/updater-menu-current.png`, `updater-menu.png`, `updater-dialog-available.png`,
+`updater-dialog-installed.png`; 2026-09-22; the two earlier "New!" sections lost their "New!" with it).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
