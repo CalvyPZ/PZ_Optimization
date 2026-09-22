@@ -131,6 +131,7 @@ PzoptOptionClasses = {
     preloadAnimSets = { "pzopt.BootAsync" },
     profileHandshake = { "pzopt.GameThreadProfile" },
     profilerThreadMemo = { "GameProfiler" },
+    propertySurfaceNoAlloc = { "PropertyContainer" },
     puddleCache = { "pzopt.PuddleCache" },
     puddleCacheFrames = { "pzopt.PuddleCache" },
     puddleEarlyZ = { "IsoPuddles", "pzopt.PuddleVbo" },

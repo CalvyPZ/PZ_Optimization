@@ -2610,3 +2610,13 @@ square of every dirty chunk level on the FrameBatch workers; `updateChunk` then 
 Where the street is wider than the 15-tile scan the controller held course, keeping the heading error of the last
 curve; at the Dell's ~30 fps the car drifted off the route line through the wide stretch after the Rosewood start,
 overcorrected at 100 km/h and stopped in a yard (three drive timeouts). It now steers back to the route line there.
+
+### zombie.core.properties.PropertyContainer (new override, `propertySurfaceNoAlloc`)
+
+`initSurface` (surface height, table flags, sloped-surface data, re-derived after every property recalculation) walked
+its entries through `forEachEntry` with a capturing lambda. C2 removed that allocation; with C2 excluded during play on
+few cores (`jitMode`) C1 allocated one per call, and chunk loading's `CalculateCollide -> getSlopedSurfaceDirection` made
+it 30 % of all allocation on the Dell drive (~240 MB in 40 s, mostly on the World Streamer). The same loop now runs over
+the map's own arrays in `forEachEntry`'s order, the former lambda body is a method. With `GameThreadProfile.flame` no
+longer re-splitting its folded stacks on every overlay refresh, route allocation 0.80 -> 0.50 GB, G1 pauses in the
+route 5-8 -> 4-5, frames over 50 ms 48-57 -> 38 per minute (two runs each).

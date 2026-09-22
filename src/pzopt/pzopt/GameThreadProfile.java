@@ -650,6 +650,22 @@ public final class GameThreadProfile {
     * seconds under a synthetic root whose count is the window's samples. Null with the profile off
     * or before the first second.
     */
+   // the folded keys repeat from second to second: split each once instead of substring-ing it on every overlay refresh
+   // (the flame rebuild was ~80 MB of garbage on the game thread in a 40 s Dell drive, 2026-09-22)
+   private static final HashMap<String, String[]> splitCache = new HashMap<>();
+
+   private static String[] split(String key) {
+      String[] f = splitCache.get(key);
+      if (f == null) {
+         if (splitCache.size() > 20000) {
+            splitCache.clear();
+         }
+         f = key.split(";");
+         splitCache.put(key, f);
+      }
+      return f;
+   }
+
    static Node flame() {
       if (!ENABLED || sampler == null) {
          return null;
@@ -665,17 +681,9 @@ public final class GameThreadProfile {
          for (Map.Entry<String, int[]> e : s.stacks.entrySet()) {
             int c = e.getValue()[0];
             Node n = root;
-            String key = e.getKey();
-            int from = 0;
-            while (from <= key.length()) {
-               int semi = key.indexOf(';', from);
-               String frame = semi < 0 ? key.substring(from) : key.substring(from, semi);
+            for (String frame : split(e.getKey())) {
                n = n.kid(frame);
                n.count += c;
-               if (semi < 0) {
-                  break;
-               }
-               from = semi + 1;
             }
          }
       }
