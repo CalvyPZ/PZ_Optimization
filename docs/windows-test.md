@@ -45,6 +45,7 @@ the game runs as stock, so the worst case of a mismatch is "no effect".
 2026-09-20 release from `aa9482b` is 606 KB, 114 files plus the manifest
 2026-09-20 release from `2d34aa9` is 543 KB, 104 files plus the manifest
 2026-09-23 release from `cbcd436` (fixes a hang while loading a save since the faster Continue: the chat-icon scan raced the early world entry; plus the Dell hitching rounds 2-5: chunk-map lookups without helper calls, allocation-free tile-surface scan, no glGet per frame in the weather drawer, learned render-chunk prewarm) is 43.7 MB, 385 files plus the manifest (386 lines); tag `win-b0bbce05d5-cbcd436`.
+2026-09-23 release from `76755df` (Continue: the boot backlog of file tasks drains in parallel, Mac Continue to world ready 8.2 -> 6.3 s; PNG Paeth rows ~40 % faster; the load steps touching the shared texture table run on the main thread, replacing the cbcd436 retry; the Continue view fills top-left to bottom-right) is 41.7 MB, 389 files, sha256 `52ec1b019dda8496132e5db08c7d349bff8e8d524a95a70dc3df4d25d87b56c8`, tag `win-b0bbce05d5-76755df`.
 `pzopt-files.txt`; the 2026-09-19 test build from `a202778` had 97) for game
 revision `b0bbce05d5` (Build 42.20.4).
 
@@ -100,7 +101,7 @@ touches `projectzomboid.jar`.
 
 ```powershell
 Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 386 on the 102ccf9 release, 385 on the e5d025a release, 384 on the d36540a release, 381 on the da3cdea release, 345 on the 1555855 release, 244 on the 2980cf3 and 3441a1c releases, 224 on the db825a0 release, 220 on the cd1a8de and cb48693 releases, 189 on the 0029f16 and 8bbc11a releases, 184 on the 51a6f78 release, 178 on the d434cde release, 177 on the 31f27f4 and c69c085 releases, 162 on the dcc0ce9 release, 161 on the 8889f72 release, 152 on the 1cf5080 and 667b210 releases, 146 on the 75f9365, f93158f, 4dbe655 and cc99c05 releases (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
+Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 389 on the 76755df release, 386 on the 102ccf9 release, 385 on the e5d025a release, 384 on the d36540a release, 381 on the da3cdea release, 345 on the 1555855 release, 244 on the 2980cf3 and 3441a1c releases, 224 on the db825a0 release, 220 on the cd1a8de and cb48693 releases, 189 on the 0029f16 and 8bbc11a releases, 184 on the 51a6f78 release, 178 on the d434cde release, 177 on the 31f27f4 and c69c085 releases, 162 on the dcc0ce9 release, 161 on the 8889f72 release, 152 on the 1cf5080 and 667b210 releases, 146 on the 75f9365, f93158f, 4dbe655 and cc99c05 releases (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
 Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
 ```
 
