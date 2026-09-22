@@ -87,6 +87,24 @@ function Get-JarRevision {
   if ($m.Success) { $m.Value } else { $null }
 }
 function Get-Sha256($path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLower() }
+
+# A launcher JSON that pzopt's AOT-cache mode (pzopt.AotCache) switched to its jar form goes back to the loose
+# classes ("." first, no AOT options), and the jar and cache go: the loose files are about to change.
+function Reset-Aot {
+  if (Test-Path -LiteralPath $Json) {
+    $j = Get-Content -LiteralPath $Json -Raw | ConvertFrom-Json
+    $jar = 'pzopt/aot/pzopt.jar'
+    $aot = @($j.vmArgs | Where-Object { $_ -like '-XX:AOTCache*' -or $_ -like '-Xlog:aot=info:file=pzopt/aot/*' })
+    if ((@($j.classpath) -contains $jar) -or $aot.Count -gt 0) {
+      $j.classpath = @('.') + @($j.classpath | Where-Object { $_ -ne '.' -and $_ -ne $jar })
+      $j.vmArgs = @($j.vmArgs | Where-Object { $aot -notcontains $_ })
+      [IO.File]::WriteAllText($Json, ($j | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
+      Write-Host 'launcher: AOT-cache form put back to the loose classes'
+    }
+  }
+  $aotDir = Join-Path $Dir 'pzopt\aot'
+  if (Test-Path -LiteralPath $aotDir) { Remove-Item -LiteralPath $aotDir -Recurse -Force }
+}
 $Rev = Get-JarRevision
 
 # --- status / uninstall ----------------------------------------------------------------
@@ -113,6 +131,7 @@ if ($Status) {
 }
 
 if ($Uninstall) {
+  Reset-Aot
   $filesTxt = Join-Path $Dir 'pzopt-files.txt'
   if (Test-Path $Manifest) { $list = Get-Content $Manifest | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split ' ')[0] } }
   elseif (Test-Path $filesTxt) { $list = Get-Content $filesTxt | Where-Object { $_ } }
@@ -139,6 +158,7 @@ if ($running) { Fail "the game is running from $Dir; close it first" }
 if (Test-Path $Manifest) { Fail 'already installed (see -Status); run -Uninstall first' }
 if (-not $Rev) { Fail "could not read the game revision from $Jar" }
 
+Reset-Aot
 # the launcher must search "." before the jar or loose classes never load
 $cp = @((Get-Content $Json -Raw | ConvertFrom-Json).classpath)
 if (($cp.IndexOf('.') -lt 0) -or ($cp.IndexOf('projectzomboid.jar') -lt 0) -or ($cp.IndexOf('.') -gt $cp.IndexOf('projectzomboid.jar'))) {

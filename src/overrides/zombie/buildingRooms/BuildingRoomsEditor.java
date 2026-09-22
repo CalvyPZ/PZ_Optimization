@@ -1,5 +1,7 @@
 package zombie.buildingRooms;
 
+import zombie.core.Core;
+
 import java.util.ArrayList;
 import java.util.function.Consumer;
 import se.krka.kahlua.vm.KahluaTable;
@@ -272,6 +274,9 @@ public final class BuildingRoomsEditor {
    }
 
    public void checkBuildingAndRoomIDs() {
+      if (pzopt.Config.SKIP_ID_CHECKS && pzopt.Overrides.enabled() && !Core.debug) { // pzopt: skipIdChecks, a log-only consistency walk over every room (six per load)
+         return;
+      }
       for (LotHeader lotHeader : IsoLot.InfoHeaders.values()) {
          IsoMetaCell metaCell = IsoWorld.instance.getMetaGrid().getCellData(lotHeader.cellX, lotHeader.cellY);
          if (metaCell != null) {

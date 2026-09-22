@@ -2454,3 +2454,89 @@ zombie's thump probe — the grid test for something thumpable in front of it �
 method writes `isVisibleToPlayer[]`, which decides whether the zombie is drawn at all and feeds the scheduler's own
 LOD, so spreading it stopped most of the horde from rendering and produced a large fake frame-rate win (138 and
 152 fps where the same scene runs at 64). It is called every frame again, with a comment saying why.
+
+## Instant Continue pass (2026-09-22 evening; `tileDefPreload`, `skipIdChecks`, `voronoiFast`, `noLoadFade`, `noClickToStart`)
+
+Goal: Continue → world ready from ~4 s to under 2 s on the bench save. Profiled with `harness/phaseprof.py` on
+`load-now-jfr`; numbers per step are in `docs/plan-instant-load.md` ("Addendum 2026-09-22").
+
+### zombie.iso.IsoWorld (tile definitions, `tileDefPreload`)
+
+Stock disposes every tile sprite at the start of each world load and parses the seven `.tiles` files plus the mods'
+again (property strings, alias table, ~61k sprites; 0.6 s of the loader thread). A new public method builds the same
+thing into a caller-supplied private `IsoSpriteManager` from a boot thread (`pzopt.TileDefPreload`, started from
+`GameWindow.enter` right after the tile packs register): same files, same order, same property passes, the mod files
+resolved as `ZomboidFileSystem.loadModTileDefs` does. While it runs, a new instance field names that manager: sprite
+creation in `LoadTileDefinitions` and `registerFakeJumboTree` goes through a texture-less copy of
+`IsoSpriteManager.AddSprite` (the texture table is a plain HashMap the main thread fills during boot), the door lookup
+in `setOpenDoorProperties` reads that manager instead of the global one, and `LoadTileDefinitionsPropertyStrings`
+skips its loading-screen frame pump. In `init`, the whole stock tile-definition block (after stock's own `Dispose`)
+is skipped when `TileDefPreload.install` succeeds: it binds each sprite's texture by name exactly as `AddSprite`
+does, moves the sprites into the global manager and returns the tile image list. Used once per boot, only with the
+same mod list and language, never in debug or multiplayer; otherwise the stock block runs. Also: load-trace step
+markers around the map-zone section (logged only with the trace installed).
+
+### zombie.GameWindow (fourth edit)
+
+`enter` starts the tile-definition preload after the tile texture packs are registered. `exit` ends with
+`pzopt.AotCache.onGameExit`: a JVM started with `-XX:AOTCacheOutput` exits through `System.exit`, because HotSpot
+writes the AOT cache only on an orderly JVM exit and the native launcher ends the process without one.
+
+### zombie.buildingRooms.BuildingRoomsEditor (second edit, `skipIdChecks`)
+
+`checkBuildingAndRoomIDs()` walks every building and room of every lot-header cell and only logs ids that disagree with
+their position. Stock runs it six times per load (0.37 s even with the identity index); it now runs in debug mode only.
+
+### zombie.iso.IsoMetaGrid (loader thread, `voronoiFast`)
+
+The meta-grid loader threads multiply each cell's zombie intensity by the zombie-density voronoi layers
+(`ZombieVoronoi.evaluateCellCutoff`), which re-seeds a Random for nine sectors, allocates a point object per sector and
+sorts the boxed squared distances through a stream for each of a cell's 1024 samples: 89 % of the eight loader
+threads, 1.2 s of wall time the loader waited for. The call goes to `pzopt.ZombieNoise.cellCutoff`, which generates
+each sector's points once per cell with the same seeding and draws and keeps the smallest and second smallest of the
+same double expressions (the only elements stock reads from the sorted list). `tests/pzopt/ZombieNoiseTest` compares
+it bit for bit with the game's own method over 1,080 cells, every selection type and several seeds and scales. Any
+reflection failure falls back to the stock call.
+
+### zombie.gameStates.MainScreenState (new override, `noLoadFade`)
+
+`exit` faded the main menu to black over 250 ms (render, sleep 33 ms, repeat) before the load could begin. With
+`noLoadFade` the fade starts at full black: one black frame, then the stock cleanup (video, music). Vineflower's output
+recompiles unchanged. This is the launcher's main class, so its marker is the quiet one.
+
+### zombie.gameStates.GameLoadingState (`noClickToStart`)
+
+`update` returned to the world only after the "click to start" prompt had been drawn and a click or A was seen. With
+`noClickToStart` it continues at the same point a click would (loading done, streamer idle, animations loaded, player
+created; a new game still waits for its intro unless `noIntroWait`), without the click sound.
+
+### zombie.GameWindow (fifth edit, `earlyTilePacks`, `aotCache`)
+
+The tile-pack block of `enter()` is a method now; with `earlyTilePacks` `initShared` calls it right after the tile
+geometry / depth assignment managers initialise (after the UI packs and the script load, before the boot Lua load),
+queues the 218 depth-map loads there (`TileDepthTextureManager.init`, skipped in `enter()` then) and starts the
+tile-definition preload. `enter()` then only re-runs the pack lookup. Same packs, flags and order. `enter()` also
+starts `pzopt.AotCache`, which decides the next launch's launcher form on a daemon thread.
+
+### zombie.gameStates.MainScreenState (second edit)
+
+The `noLoadFade` skip draws three black frames, not one: a frame push waits while the render thread is behind, so
+the menu frames queued before the skip are drawn before the menu destroys its background video texture. With one
+frame, a queued menu frame was sometimes drawn after the destroy and showed the missing-texture checkerboard for one
+frame (reported by the maintainer; reproduced in the recording of run `flash-all`, gone in `flash-fix`).
+
+### zombie.gameStates.GameLoadingState (`noLoadingScreen`) and zombie.GameWindow (sixth edit)
+
+At the maintainer's request (2026-09-22) single player shows a plain black frame while the world loads: `render` draws
+a black quad and returns before the loading screen (text, quick tips, progress dots) unless an error, a world-version
+dialog, a map download or a save conversion needs the stock screen. `GameWindow.logic` calls
+`pzopt.NoLoadingScreen.afterStateUpdate` after the state machine's update; on the frame the state machine enters
+`IngameState` it zeroes the UI fade (`fadeInTime`, `fadeAlpha`) that `IngameState.enter` started, so the world appears
+without the fade from black. Multiplayer keeps the stock screen.
+
+### zombie.MapCollisionData (third edit, `loaderCpuFixes`)
+
+`init` passed every cell of the 500 x 500 world grid to the native side with the path looked up as
+`infoFileNames.get("chunkdata_" + cx + "_" + cy + ".bin")`, one string built and hashed per cell and map folder. The
+chunkdata entries of each map folder are indexed by cell once (only keys in exactly that form); the same path, or
+null, reaches the same native call for every cell in the same order.

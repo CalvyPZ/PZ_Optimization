@@ -54,6 +54,13 @@ public final class LoadTrace {
       }
    }
 
+   /** A load-phase step marker, logged only when the trace is installed (harness runs, instrument=true). */
+   public static void step(String what) {
+      if (installed) {
+         Log.info("load step: " + what);
+      }
+   }
+
    /** Stamp an event of our own into the trace (e.g. state changes seen by the auto-start thread). */
    public static void mark(String what) {
       Log.info(what); // DebugLog echoes it into the trace with the stamp

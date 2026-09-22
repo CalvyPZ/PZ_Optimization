@@ -41,6 +41,9 @@ print("\n".join(d.get("classpath",[])))' "$LAUNCHER_JSON") || die "could not par
     [[ "$e" == "." && -z "$dot" ]] && dot=$n
     [[ "$e" == "projectzomboid.jar" && -z "$jar" ]] && jar=$n
   done <<< "$cp"
+  if [[ "$(head -1 <<< "$cp")" == "pzopt/aot/pzopt.jar" && -n "$jar" ]]; then
+    return 0  # pzopt.AotCache's cache form: the installed classes run from pzopt/aot/pzopt.jar (install/uninstall reset it)
+  fi
   if [[ -z "$dot" || -z "$jar" || "$dot" -gt "$jar" ]]; then
     echo "refusing: $LAUNCHER_JSON classpath does not put \".\" ahead of projectzomboid.jar" >&2
     echo "  found classpath: [$(echo "$cp" | paste -sd, -)]" >&2
@@ -81,7 +84,26 @@ check() {
 
 # --- install / uninstall -----------------------------------------------------
 
+# A launcher JSON in pzopt's AOT-cache form (pzopt.AotCache: the overrides from pzopt/aot/pzopt.jar, -XX:AOTCache*)
+# goes back to the loose classes, and the jar and cache go: the loose files are about to change.
+reset_aot() {
+  if [[ -f "$LAUNCHER_JSON" ]]; then
+    python3 - "$LAUNCHER_JSON" <<'PYEOF'
+import json,sys
+p=sys.argv[1]; j=json.load(open(p)); jar="pzopt/aot/pzopt.jar"
+cp=j.get("classpath",[]); args=j.get("vmArgs",[])
+aot=[a for a in args if a.startswith("-XX:AOTCache") or a.startswith("-Xlog:aot=info:file=pzopt/aot/")]
+if jar in cp or aot:
+    j["classpath"]=["."]+[e for e in cp if e not in (".",jar)]
+    j["vmArgs"]=[a for a in args if a not in aot]
+    json.dump(j,open(p,"w"),indent="\t"); print("launcher: AOT-cache form put back to the loose classes")
+PYEOF
+  fi
+  rm -rf "$PZ_DIR/pzopt/aot"
+}
+
 install_overrides() {
+  reset_aot
   check
   [[ -f "$MANIFEST" ]] && { echo "already installed (see: $0 status); uninstall first" >&2; exit 1; }
   local jar_before jar_after
@@ -109,6 +131,7 @@ install_overrides() {
 }
 
 uninstall_overrides() {
+  reset_aot
   [[ -f "$MANIFEST" ]] || { echo "not installed (no $MANIFEST)"; return 0; }
   local n=0
   while read -r rel sha; do
@@ -162,7 +185,7 @@ status() {
 case "${1:-}" in
   install)   install_overrides ;;
   uninstall) uninstall_overrides ;;
-  reinstall) check >/dev/null; uninstall_overrides; install_overrides ;;  # check first: a failed check must leave the old install in place
+  reinstall) reset_aot; check >/dev/null; uninstall_overrides; install_overrides ;;  # check first: a failed check must leave the old install in place
   status)    status ;;
   check)     check ;;
   *) echo "usage: $0 install|uninstall|reinstall|status|check" >&2; exit 2 ;;

@@ -318,6 +318,10 @@ public final class IsoWorld {
    private final HashMap<String, ArrayList<UUID>> spawnedZombieZone = new HashMap<>();
    private final HashMap<String, ArrayList<String>> allTiles = new HashMap<>();
    private final ArrayList<String> tileImages = new ArrayList<>();
+   /** pzopt: tileDefPreload. Set while pzopt.TileDefPreload builds the tile sprites into a private manager at boot: sprites
+    *  are created without their texture (the texture table is not thread-safe during boot; the loader binds them), door
+    *  lookups use that manager, and the loading-screen frame pump is skipped. */
+   IsoSpriteManager pzoptTileMgr;
    private float flashIsoCursorA = 1.0F;
    private boolean flashIsoCursorInc;
    public SkyBox sky;
@@ -708,7 +712,7 @@ public final class IsoWorld {
                      continue;
                   }
                } else {
-                  spr = sprMan.AddSprite(tileName, this.getSpriteID(fileNumber, tilesetNumber, m));
+                  spr = this.pzoptTileMgr != null ? pzopt.TileDefPreload.addSprite(sprMan, tileName, this.getSpriteID(fileNumber, tilesetNumber, m)) : sprMan.AddSprite(tileName, this.getSpriteID(fileNumber, tilesetNumber, m)); // pzopt: tileDefPreload, texture bound at load
                }
 
                if (Core.debug) {
@@ -1353,7 +1357,7 @@ public final class IsoWorld {
 
    public void LoadTileDefinitionsPropertyStrings(IsoSpriteManager sprMan, String filename, int fileNumber) {
       DebugType.DetailedInfo.trace("tiledef: loading " + filename);
-      if (!GameServer.server) {
+      if (!GameServer.server && this.pzoptTileMgr == null) { // pzopt: tileDefPreload runs on a boot thread, no loading screen to pump
          Thread.yield();
          Core.getInstance().DoFrameReady();
       }
@@ -1486,7 +1490,7 @@ public final class IsoWorld {
                      spr.getProperties().set(IsoFlagType.open);
                   }
                } else {
-                  IsoSprite openSprite = (IsoSprite)IsoSpriteManager.instance.namedMap.get(tilesheetName + "_" + (spr.tileSheetIndex + 2));
+                  IsoSprite openSprite = (IsoSprite)(this.pzoptTileMgr != null ? this.pzoptTileMgr : IsoSpriteManager.instance).namedMap.get(tilesheetName + "_" + (spr.tileSheetIndex + 2)); // pzopt: tileDefPreload builds into its own manager
                   if (openSprite != null) {
                      openSprite.setTileType(spr.getTileType());
                      openSprite.getProperties().set(spr.getTileType() == IsoObjectType.doorN ? IsoFlagType.doorN : IsoFlagType.doorW);
@@ -1579,9 +1583,48 @@ public final class IsoWorld {
       }
    }
 
+   /**
+    * pzopt: tileDefPreload. The tile definition load of init() into the given private manager, from a boot thread (see
+    * pzopt.TileDefPreload): the same files, order and property passes, mod tile definitions resolved as
+    * ZomboidFileSystem.loadModTileDefs does. The tile image list is copied into the given list.
+    */
+   public void pzoptPreloadTileDefs(IsoSpriteManager pm, java.util.List<String> modTileFiles, java.util.List<Integer> modFileNumbers, java.util.List<String> tileImagesOut) {
+      this.pzoptTileMgr = pm;
+      try {
+         this.tileImages.clear();
+         ZomboidFileSystem zfs = ZomboidFileSystem.instance;
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("newtiledefinitions.tiles"), 1);
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("tiledefinitions_erosion.tiles"), 2);
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("tiledefinitions_overlays.tiles"), 4);
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("tiledefinitions_b42chunkcaching.tiles"), 5);
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("tiledefinitions_noiseworks.patch.tiles"), -1);
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("jumbo_trees_big.tiles"), 6);
+         this.LoadTileDefinitionsPropertyStrings(pm, zfs.getMediaPath("jumbo_trees.tiles"), 8);
+         for (int i = 0; i < modTileFiles.size(); i++) {
+            this.LoadTileDefinitionsPropertyStrings(pm, modTileFiles.get(i), modFileNumbers.get(i));
+         }
+         this.SetCustomPropertyValues();
+         this.GenerateTilePropertyLookupTables();
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("newtiledefinitions.tiles"), 1);
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("tiledefinitions_erosion.tiles"), 2);
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("tiledefinitions_overlays.tiles"), 4);
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("tiledefinitions_b42chunkcaching.tiles"), 5);
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("tiledefinitions_noiseworks.patch.tiles"), -1);
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("jumbo_trees_big.tiles"), 6);
+         this.LoadTileDefinitions(pm, zfs.getMediaPath("jumbo_trees.tiles"), 8);
+         this.registerFakeJumboTree(pm, 7);
+         for (int i = 0; i < modTileFiles.size(); i++) {
+            this.LoadTileDefinitions(pm, modTileFiles.get(i), modFileNumbers.get(i));
+         }
+         tileImagesOut.addAll(this.tileImages);
+      } finally {
+         this.pzoptTileMgr = null;
+      }
+   }
+
    private void registerFakeJumboTree(IsoSpriteManager sprMan, int fileNumber) {
       int tileNum = 0;
-      IsoSprite spr = sprMan.AddSprite("jumbo_tree_01_0", fileNumber * 512 * 512 + 6144 + 0);
+      IsoSprite spr = this.pzoptTileMgr != null ? pzopt.TileDefPreload.addSprite(sprMan, "jumbo_tree_01_0", fileNumber * 512 * 512 + 6144 + 0) : sprMan.AddSprite("jumbo_tree_01_0", fileNumber * 512 * 512 + 6144 + 0); // pzopt: tileDefPreload
       spr.setName("jumbo_tree_01_0");
       spr.setTileType(IsoObjectType.tree);
       spr.getProperties().set("tree", "4");
@@ -1941,6 +1984,7 @@ public final class IsoWorld {
       this.tileImages.clear();
       DebugType.General.println("LoadTileDefinitions start");
       ZomboidFileSystem zfs = ZomboidFileSystem.instance;
+      if (!pzopt.TileDefPreload.install(spriteManager, this.tileImages)) { // pzopt: tileDefPreload, the sprites built at boot (stock below otherwise)
       this.LoadTileDefinitionsPropertyStrings(spriteManager, zfs.getMediaPath("newtiledefinitions.tiles"), 1);
       this.LoadTileDefinitionsPropertyStrings(spriteManager, zfs.getMediaPath("tiledefinitions_erosion.tiles"), 2);
       this.LoadTileDefinitionsPropertyStrings(spriteManager, zfs.getMediaPath("tiledefinitions_overlays.tiles"), 4);
@@ -1960,6 +2004,7 @@ public final class IsoWorld {
       this.LoadTileDefinitions(spriteManager, zfs.getMediaPath("jumbo_trees.tiles"), 8);
       this.registerFakeJumboTree(spriteManager, 7);
       ZomboidFileSystem.instance.loadModTileDefs();
+      } // pzopt: end of the stock tile definition load
       GameLoadingState.gameLoadingString = "";
       DebugType.General.println("LoadTileDefinitions end");
       spriteManager.AddSprite("media/ui/missing-tile.png");
@@ -2032,6 +2077,7 @@ public final class IsoWorld {
          VehicleManager.instance = new VehicleManager();
          GameLoadingState.gameLoadingString = Translator.getText("IGUI_MP_InitMap", new Object[0]);
          this.metaGrid.CreateStep2();
+         pzopt.LoadTrace.step("CreateStep2 end"); // pzopt: load-trace step markers (only with the trace installed)
          ClimateManager.getInstance().init(this.metaGrid);
          SafeHouse.init();
          VirtualZombieManager.instance.init();
@@ -2040,16 +2086,25 @@ public final class IsoWorld {
          }
 
          Basements.getInstance().beforeOnLoadMapZones();
+         pzopt.LoadTrace.step("OnLoadMapZones start");
          LuaEventManager.triggerEvent("OnLoadMapZones");
+         pzopt.LoadTrace.step("OnLoadMapZones end");
          if (!GameClient.client) {
             Basements.getInstance().beforeLoadMetaGrid();
+            pzopt.LoadTrace.step("Basements.beforeLoadMetaGrid end");
             BuildingRoomsEditor.getInstance().load();
+            pzopt.LoadTrace.step("BuildingRoomsEditor.load end");
             this.metaGrid.load();
+            pzopt.LoadTrace.step("metaGrid.load end");
             Basements.getInstance().afterLoadMetaGrid();
+            pzopt.LoadTrace.step("Basements.afterLoadMetaGrid end");
             this.metaGrid.load("map_zone.bin", this.metaGrid::loadZone);
+            pzopt.LoadTrace.step("map_zone.bin end");
             this.metaGrid.loadCells("metagrid", "metacell_(-?[0-9]+)_(-?[0-9]+)\\.bin", IsoMetaCell::load);
+            pzopt.LoadTrace.step("metacells end");
             this.metaGrid.load("map_animals.bin", this.metaGrid::loadAnimalZones);
             this.metaGrid.processZones();
+            pzopt.LoadTrace.step("processZones end");
          } else {
             Basements.getInstance().beforeLoadMetaGrid();
          }
@@ -2196,9 +2251,10 @@ public final class IsoWorld {
 
          DebugType.General.println("WorldStreamer.isBusy() loop start");
 
+         long pzoptPollMs = pzopt.Config.LOADER_CPU_FIXES && pzopt.Overrides.enabled() ? 2L : 100L; // pzopt: the loader notices the last initial chunk within 2 ms instead of up to 100
          while (WorldStreamer.instance.isBusy()) {
             try {
-               Thread.sleep(100L);
+               Thread.sleep(pzoptPollMs);
             } catch (InterruptedException var17) {
             }
          }

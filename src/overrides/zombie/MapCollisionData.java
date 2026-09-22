@@ -141,6 +141,11 @@ public final class MapCollisionData {
          n_setGameState("World.ZombiesDisabled", IsoWorld.getZombiesDisabled());
          n_setGameState("PAUSED", this.paused = true);
          n_initMetaGrid(minX, minY, width, height);
+         // pzopt: loaderCpuFixes, each map folder's chunkdata files indexed by cell once instead of a string built and
+         // hashed per cell of the whole world grid (500 x 500); the same file (or null) reaches the same native call
+         java.util.List<java.util.HashMap<Long, String>> pzoptChunkData = pzopt.Config.LOADER_CPU_FIXES && pzopt.Overrides.enabled()
+            ? pzoptIndexChunkData()
+            : null;
 
          for (int cy = minY; cy < minY + height; cy++) {
             for (int cx = minX; cx < minX + width; cx++) {
@@ -148,7 +153,13 @@ public final class MapCollisionData {
 
                for (int i = 0; i < IsoLot.MapFiles.size(); i++) {
                   MapFiles mapFiles = (MapFiles)IsoLot.MapFiles.get(i);
-                  n_initMetaCell(cx, cy, (String)mapFiles.infoFileNames.get("chunkdata_" + cx + "_" + cy + ".bin"));
+                  n_initMetaCell(
+                     cx,
+                     cy,
+                     pzoptChunkData != null
+                        ? pzoptChunkData.get(i).get(((long)cx << 32) ^ (cy & 0xFFFFFFFFL))
+                        : (String)mapFiles.infoFileNames.get("chunkdata_" + cx + "_" + cy + ".bin")
+                  );
                }
 
                if (metaCell != null) {
@@ -171,6 +182,31 @@ public final class MapCollisionData {
 
          n_init(minX, minY, width, height);
       }
+   }
+
+   /** pzopt: per map folder, cell (cx << 32 ^ cy) -> the "chunkdata_<cx>_<cy>.bin" path, only for keys in that exact form. */
+   private static java.util.List<java.util.HashMap<Long, String>> pzoptIndexChunkData() {
+      java.util.List<java.util.HashMap<Long, String>> out = new java.util.ArrayList<>();
+      java.util.regex.Pattern p = java.util.regex.Pattern.compile("chunkdata_(-?[0-9]+)_(-?[0-9]+)\\.bin");
+      for (int i = 0; i < IsoLot.MapFiles.size(); i++) {
+         MapFiles mapFiles = (MapFiles)IsoLot.MapFiles.get(i);
+         java.util.HashMap<Long, String> m = new java.util.HashMap<>();
+         for (java.util.Map.Entry<String, String> e : mapFiles.infoFileNames.entrySet()) {
+            java.util.regex.Matcher mm = p.matcher(e.getKey());
+            if (mm.matches()) {
+               try {
+                  int cx = Integer.parseInt(mm.group(1));
+                  int cy = Integer.parseInt(mm.group(2));
+                  if (e.getKey().equals("chunkdata_" + cx + "_" + cy + ".bin")) {
+                     m.put(((long)cx << 32) ^ (cy & 0xFFFFFFFFL), e.getValue());
+                  }
+               } catch (NumberFormatException ignored) {
+               }
+            }
+         }
+         out.add(m);
+      }
+      return out;
    }
 
    public void start() {

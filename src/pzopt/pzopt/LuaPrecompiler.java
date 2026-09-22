@@ -7,7 +7,6 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -143,14 +142,18 @@ public final class LuaPrecompiler {
       }
    }
 
-   private static String key(String name, String content) throws Exception {
-      MessageDigest md = MessageDigest.getInstance("SHA-256");
-      md.update(content.getBytes(StandardCharsets.UTF_16BE));
-      StringBuilder sb = new StringBuilder(name).append('|').append(content.length()).append('|');
-      for (byte b : md.digest()) {
-         sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+   private static String key(String name, String content) {
+      // pzopt: two independent 64-bit hashes over the chars (was SHA-256 over a UTF-16 copy: 0.06 s at Continue alone,
+      // the map objects.lua files are megabytes); name and length are part of the key as before
+      long h1 = 0xcbf29ce484222325L;
+      long h2 = 0x9e3779b97f4a7c15L;
+      for (int i = 0, n = content.length(); i < n; i++) {
+         char c = content.charAt(i);
+         h1 = (h1 ^ c) * 0x100000001b3L;
+         h2 = (h2 + c) * 0xff51afd7ed558ccdL;
+         h2 ^= h2 >>> 29;
       }
-      return sb.toString();
+      return name + '|' + content.length() + '|' + Long.toHexString(h1) + Long.toHexString(h2);
    }
 
    /**

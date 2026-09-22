@@ -155,6 +155,28 @@ import java.util.Properties;
  *                            game's LuaCompiler.loadis takes the prototype from that cache (default true)
  *   preloadAnimSets true/false   the player/zombie animation-set XML trees parse on a boot thread (1.1 s of the
  *                            loader thread otherwise) (default true)
+ *   tileDefPreload  true/false   the tile definitions (~100k sprites and their properties, 0.6 s of the loader thread)
+ *                            are built on a boot thread into a private sprite manager right after the tile packs
+ *                            register; the first world load binds their textures and moves them in instead of parsing
+ *                            the .tiles files again. Used once per boot, only when the mod list and language are
+ *                            unchanged (pzopt.TileDefPreload) (default true)
+ *   skipIdChecks    true/false   BuildingRoomsEditor.checkBuildingAndRoomIDs, a walk over every building and room of the
+ *                            map that only logs ids that disagree with their position (never changes anything), runs in
+ *                            debug mode only; stock runs it six times per world load, 0.37 s (default true)
+ *   voronoiFast     true/false   the zombie-density voronoi noise of every map cell (IsoMetaGrid's loader threads, 1.2 s of
+ *                            every world load) generates each sector's points once per cell and keeps the two smallest
+ *                            distances instead of re-seeding and sorting boxed doubles per sample; identical values
+ *                            (pzopt.ZombieNoise, tests/pzopt/ZombieNoiseTest) (default true)
+ *   earlyTilePacks  true/false   the tile texture packs register and the 218 tile depth-map loads are queued right after the
+ *                            UI packs and the script load instead of after the boot Lua load, so their decode (12-14 +
+ *                            ~4 thread-s) runs during boot; with a warm load the loader used to wait 0.4-0.6 s for the
+ *                            depth maps at the end of the load (default true)
+ *   aotCache        true/false   JDK AOT cache (classes + method profiles of a whole session) so launches start warm: the
+ *                            overrides run from pzopt/aot/pzopt.jar and the launcher JSON records the cache on one launch
+ *                            and uses it from the next (pzopt.AotCache; the JSON is backed up once as
+ *                            ProjectZomboid64.json.pzopt-backup). Continue -> world 2.64 -> 2.02 s, launch -> menu -0.6 s
+ *                            on 2026-09-22. false puts the launcher back to the loose classes on the next boot (default true, the
+ *                            maintainer's decision of 2026-09-22; harness runs leave it inert unless devAotCacheHarness)
  *   animClipCache   true/false   imported animation clips are written to <cache>/pzopt/anims/ after a stock import and
  *                            read from there on later boots instead of parsing the .X files with jassimp (default true)
  *   packIndex       true/false   version-0 texture packs keep their page end offsets in <cache>/pzopt/packs/*.idx so the
@@ -169,14 +191,22 @@ import java.util.Properties;
  *   bootFileThreads int          file pool width while the boot pump runs (default cores - 6: with cores - 2 the 16 cores
  *                            saturated and the main thread's Lua load ran 1.6x slower); shrinks to fileThreads at the load
  *   noLoadFade      true/false   GameLoadingState.exit does not fade the loading screen to black (350 ms of sleeps) before
- *                            the world's own 2 s fade-in (default true)
+ *                            the world's own 2 s fade-in, and MainScreenState.exit does not fade the main menu to black
+ *                            (250 ms of renders and 33 ms sleeps) after Continue (default true)
+ *   noClickToStart  true/false   the loading screen goes into the world the moment loading is done instead of waiting for
+ *                            "click to start" / A (new games still honour noIntroWait) (default true)
+ *   noLoadingScreen true/false   single player: a plain black screen while the world loads instead of the loading screen
+ *                            (text, tips, progress), and the world then appears with no fade from black
+ *                            (pzopt.NoLoadingScreen; errors, conversions and multiplayer keep the stock screen) (default true)
  *   fmodAsync       true/false   FMODManager.init (system + 12 banks, ~1.6 s) runs on a thread from the top of
  *                            GameWindow.mainThreadInit and is joined before the scripts load; the sound managers
  *                            (whose FMOD global parameters need the banks) are built at the join (default true)
  *   loadWorkers     int          recalc pool width while a world is loading (GameLoadingState.loader alive): the 361
  *                            chunks of the initial chunk map recalc on this many threads, then the pool shrinks back
- *                            to `workers` (default max(workers, cores / 2); clamped like workers; cores - 2 tripled the per-chunk
- *                            recalc time through contention and gained nothing, load-s3)
+ *                            to `workers` (default max(workers, cores / 2); clamped like workers. More is slower while the
+ *                            recalc code is not C2-compiled yet: the interpreter / C1 profile counters are shared, so 15
+ *                            workers made the first chunks 26 -> 48-65 ms each and the recalc CPU 4.5 -> 6.6-11 s,
+ *                            load-b1-w15 / load-b2 2026-09-22; cores - 2 tripled it on 2026-09-19, load-s3)
  *   shaderCache     true/false   Model.CreateShader takes a shader an earlier model already created from pzopt.ModelShaders
  *                            instead of posting to the render thread and waiting one render step per model; the 73
  *                            animal models of AnimalDefinitions were 16.5 s of the load on a laptop whose loading-screen
@@ -367,10 +397,21 @@ public final class Config {
    public static final boolean NO_LOAD_FADE = bool("noLoadFade", true);
    /** new game: show click-to-start as soon as loading is done instead of after the 33 s intro text. */
    public static final boolean NO_INTRO_WAIT = bool("noIntroWait", true);
+   /** the loading screen enters the world as soon as it is loaded instead of waiting for "click to start". */
+   public static final boolean NO_CLICK_TO_START = bool("noClickToStart", true);
+   /** single player: a black screen instead of the loading screen, then the world with no fade from black. */
+   public static final boolean NO_LOADING_SCREEN = bool("noLoadingScreen", true);
    public static final boolean BOOT_PUMP = bool("bootPump", true);
    public static final boolean EARLY_MODELS = bool("earlyModels", true);
    public static final boolean LUA_PRECOMPILE = bool("luaPrecompile", true);
    public static final boolean PRELOAD_ANIM_SETS = bool("preloadAnimSets", true);
+   public static final boolean TILE_DEF_PRELOAD = bool("tileDefPreload", true);
+   public static final boolean SKIP_ID_CHECKS = bool("skipIdChecks", true);
+   public static final boolean VORONOI_FAST = bool("voronoiFast", true);
+   public static final boolean EARLY_TILE_PACKS = bool("earlyTilePacks", true);
+   public static final boolean AOT_CACHE = bool("aotCache", true);
+   /** dev: let a harness run drive the aotCache cycle (normally inert there: run.sh owns the launcher JSON). */
+   public static final boolean DEV_AOT_CACHE_HARNESS = bool("devAotCacheHarness", false);
    public static final boolean ANIM_CLIP_CACHE = bool("animClipCache", true);
    /** auto = honour options.ini (frameRate / uncappedFPS); true / false force the frame cap off / on for a run. */
    public static final String UNCAPPED_FPS = string("uncappedFps", "auto");
@@ -548,7 +589,7 @@ public final class Config {
       return "parallel=" + PARALLEL + " workers=" + WORKERS + " (effective " + effectiveWorkers() + ", cores "
             + Runtime.getRuntime().availableProcessors() + ") wake=" + WAKE + " (effective " + effectiveWake() + ") instrument=" + INSTRUMENT + " dev=" + DEV + " luaChecksumExempt=" + LUA_CHECKSUM_EXEMPT
             + " translucentCache=" + TRANSLUCENT_CACHE + " hotsaveIntervalSec=" + HOTSAVE_INTERVAL_SEC + " persistentVbo=" + PERSISTENT_VBO + " treesInChunkTexture=" + TREES_IN_CHUNK_TEXTURE + " windowsInChunkTexture=" + WINDOWS_IN_CHUNK_TEXTURE + " translucentTilesInChunkTexture=" + TRANSLUCENT_TILES_IN_CHUNK_TEXTURE + " treeBakePass=" + TREE_BAKE_PASS + " curtainDepthNudgePct=" + Math.round(CURTAIN_DEPTH_NUDGE * 100.0F) + " bakeBudget=" + BAKE_BUDGET + " lightingBudget=" + LIGHTING_BUDGET + " lightingRebakeMs=" + LIGHTING_REBAKE_MS + " rebakeBudget=" + REBAKE_BUDGET + " rebakeMaxFrames=" + REBAKE_MAX_FRAMES + " lightingRebakeBudget=" + LIGHTING_REBAKE_BUDGET + " lightingRebakeMaxFrames=" + LIGHTING_REBAKE_MAX_FRAMES + " zoomRetain=" + ZOOM_RETAIN + " zoomRebakeBudget=" + ZOOM_REBAKE_BUDGET + " zoomFrameMs=" + Math.round(ZOOM_FRAME_MS) + " zoomPlaceholder=" + ZOOM_PLACEHOLDER + " zoomEaseMs=" + ZOOM_EASE_MS + " zoomEase=" + ZOOM_EASE + " lightingStrongDelta=" + LIGHTING_STRONG_DELTA + " lightingStrongBudget=" + LIGHTING_STRONG_BUDGET + " lightingStrongFrameMs=" + Math.round(LIGHTING_STRONG_FRAME_MS) + " lightingGlobalDeltaPct=" + Math.round(LIGHTING_GLOBAL_DELTA * 100.0F) + " lightingFlush=" + LIGHTING_FLUSH + " lightSwitchCheckFrames=" + LIGHT_SWITCH_CHECK_FRAMES + " cutawayFast=" + CUTAWAY_FAST + " cutawayRadius=" + CUTAWAY_RADIUS + " gridStackInterval=" + GRID_STACK_INTERVAL + " roofHideDebounceFrames=" + ROOF_HIDE_DEBOUNCE_FRAMES + " weatherMaskIdleSkip=" + WEATHER_MASK_IDLE_SKIP + " worldSoundFast=" + WORLD_SOUND_FAST + " vehicleCull=" + VEHICLE_CULL + " playerLosFast=" + PLAYER_LOS_FAST + " zombieSpotFast=" + ZOMBIE_SPOT_FAST + " playerLosNative=" + PLAYER_LOS_NATIVE + " animBonesParallel=" + ANIM_BONES_PARALLEL + " frameThreads=" + FRAME_THREADS + " actionEvalParallel=" + ACTION_EVAL_PARALLEL + " actionSnapshotFilter=" + ACTION_SNAPSHOT_FILTER + " emitterParamSkip=" + EMITTER_PARAM_SKIP + " separateFast=" + SEPARATE_FAST + " separateParallel=" + SEPARATE_PARALLEL + " actionGroupCache=" + ACTION_GROUP_CACHE + " profilerThreadMemo=" + PROFILER_THREAD_MEMO + " sleepCheckMemo=" + SLEEP_CHECK_MEMO + " stateParamMemo=" + STATE_PARAM_MEMO + " zombieSimLodTiles=" + ZOMBIE_SIM_LOD_TILES + " zombieSimLodSteps=" + ZOMBIE_SIM_LOD_STEPS + " zombieCheckSpread=" + ZOMBIE_CHECK_SPREAD + " lightingReadParallel=" + LIGHTING_READ_PARALLEL + " zombieCullSortFast=" + ZOMBIE_CULL_SORT_FAST + " skinTransformsPrecompute=" + SKIN_TRANSFORMS_PRECOMPUTE + " skinPalettePrecompute=" + SKIN_PALETTE_PRECOMPUTE + " shadowPrep=" + SHADOW_PREP + " boneIndexCache=" + BONE_INDEX_CACHE + " ecsLookupFast=" + ECS_LOOKUP_FAST + " actionConditionFast=" + ACTION_CONDITION_FAST + " charDrawPrep=" + CHAR_DRAW_PREP + " zombieAtlasFast=" + ZOMBIE_ATLAS_FAST + " charDrawThreads=" + CHAR_DRAW_THREADS
-            + " fileThreads=" + FILE_THREADS + " fileInflight=" + FILE_INFLIGHT + " textureBufferMb=" + TEXTURE_BUFFER_MB + " parallelDepthMaps=" + PARALLEL_DEPTH_MAPS + " loaderCpuFixes=" + LOADER_CPU_FIXES + " loadWorkers=" + LOAD_WORKERS + " scriptParserFast=" + SCRIPT_PARSER_FAST + " fmodAsync=" + FMOD_ASYNC + " noLoadFade=" + NO_LOAD_FADE + " noIntroWait=" + NO_INTRO_WAIT + " bootPump=" + BOOT_PUMP + " earlyModels=" + EARLY_MODELS + " luaPrecompile=" + LUA_PRECOMPILE + " preloadAnimSets=" + PRELOAD_ANIM_SETS + " animClipCache=" + ANIM_CLIP_CACHE + " packIndex=" + PACK_INDEX + " itemParamSwitch=" + ITEM_PARAM_SWITCH + " bootFileThreads=" + BOOT_FILE_THREADS + " shaderCache=" + SHADER_CACHE + " mipmapArrays=" + MIPMAP_ARRAYS + " puddleCache=" + PUDDLE_CACHE + " puddleCacheFrames=" + PUDDLE_CACHE_FRAMES + " puddleVbo=" + PUDDLE_VBO + " treeAppend=" + TREE_APPEND + " puddleEarlyZ=" + PUDDLE_EARLY_Z + " rainSplashesFast=" + RAIN_SPLASHES_FAST + " rainTiles=" + RAIN_TILES + " vboBatchKb=" + VBO_BATCH_KB + " vboFastQuads=" + VBO_FAST_QUADS + " fogPass=" + FOG_PASS + " fogScalePct=" + FOG_SCALE_PCT + " fogMaskFrames=" + FOG_MASK_FRAMES
+            + " fileThreads=" + FILE_THREADS + " fileInflight=" + FILE_INFLIGHT + " textureBufferMb=" + TEXTURE_BUFFER_MB + " parallelDepthMaps=" + PARALLEL_DEPTH_MAPS + " loaderCpuFixes=" + LOADER_CPU_FIXES + " loadWorkers=" + LOAD_WORKERS + " scriptParserFast=" + SCRIPT_PARSER_FAST + " fmodAsync=" + FMOD_ASYNC + " noLoadFade=" + NO_LOAD_FADE + " noIntroWait=" + NO_INTRO_WAIT + " noClickToStart=" + NO_CLICK_TO_START + " noLoadingScreen=" + NO_LOADING_SCREEN + " bootPump=" + BOOT_PUMP + " earlyModels=" + EARLY_MODELS + " luaPrecompile=" + LUA_PRECOMPILE + " preloadAnimSets=" + PRELOAD_ANIM_SETS + " tileDefPreload=" + TILE_DEF_PRELOAD + " skipIdChecks=" + SKIP_ID_CHECKS + " voronoiFast=" + VORONOI_FAST + " earlyTilePacks=" + EARLY_TILE_PACKS + " aotCache=" + AOT_CACHE + " animClipCache=" + ANIM_CLIP_CACHE + " packIndex=" + PACK_INDEX + " itemParamSwitch=" + ITEM_PARAM_SWITCH + " bootFileThreads=" + BOOT_FILE_THREADS + " shaderCache=" + SHADER_CACHE + " mipmapArrays=" + MIPMAP_ARRAYS + " puddleCache=" + PUDDLE_CACHE + " puddleCacheFrames=" + PUDDLE_CACHE_FRAMES + " puddleVbo=" + PUDDLE_VBO + " treeAppend=" + TREE_APPEND + " puddleEarlyZ=" + PUDDLE_EARLY_Z + " rainSplashesFast=" + RAIN_SPLASHES_FAST + " rainTiles=" + RAIN_TILES + " vboBatchKb=" + VBO_BATCH_KB + " vboFastQuads=" + VBO_FAST_QUADS + " fogPass=" + FOG_PASS + " fogScalePct=" + FOG_SCALE_PCT + " fogMaskFrames=" + FOG_MASK_FRAMES
             + " upscaler=" + UPSCALER + " upscalerQuality=" + UPSCALER_QUALITY + " upscalerScalePct=" + UPSCALER_SCALE_PCT + " fsrSharpnessPct=" + FSR_SHARPNESS_PCT + " dlssSharpen=" + DLSS_SHARPEN + " upscalerObjectMv=" + UPSCALER_OBJECT_MV;
    }
 }

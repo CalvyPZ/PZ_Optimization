@@ -127,3 +127,41 @@ first model per shader pays. `harness/loadtime.py` now prints the
 for the laptop: why its loading-screen render step is ~220 ms (texture uploads
 on radeonsi under the 6 W GPU power cap is the guess); a mains-powered run
 would separate power-limited from game-limited.
+
+## Addendum 2026-09-22 (evening): Continue → world under 2 s
+
+Target set by the maintainer: Continue → world ready under 2 s on the bench save (it was ~4 s). Profiled first
+(`load-now` 3.95 s, `load-now-jfr` at 1 ms; `harness/phaseprof.py`, `harness/loadtime.py`, new `[pzopt] load step:`
+markers around the map-zone section). Keys, all with a stock fallback (`docs/override-edits.md`, "Instant Continue pass"):
+
+| step | change | key | effect |
+|---|---|---|---|
+| tile definitions | ~61k sprites built on a boot thread into a private sprite manager, textures bound at Continue | `tileDefPreload` | C1 0.76 → ~0.2 s |
+| meta-grid loaders | the zombie voronoi noise per sector instead of per sample (bit-identical, `ZombieNoiseTest`); was 89 % of the eight loader threads | `voronoiFast` | loaders 1.5 → 0.7 s, no longer waited for |
+| room-id checks | log-only walk, six per load, debug mode only | `skipIdChecks` | −0.37 s CPU |
+| menu fade | `MainScreenState.exit` 250 ms fade → black frames (three: the render thread must drain the menu frames before the video texture goes, else a one-frame missing-texture checkerboard, run `flash-all`) | `noLoadFade` | A 0.51 → 0.15 s |
+| click to start | the world is entered the moment it is loaded | `noClickToStart` | the wait for input |
+| Lua cache key | 64-bit char hash instead of SHA-256 over a UTF-16 copy | (`luaPrecompile`) | small |
+| tile packs + depth maps | registered / queued before the boot Lua load instead of after it | `earlyTilePacks` | removes the 0.2-0.6 s end-of-load wait (phase D) a warm load hit |
+| JIT warm-up | JDK 25 AOT cache: classes + method profiles recorded in one session, used by the next (`pzopt.AotCache`, overrides from `pzopt/aot/pzopt.jar`, the launcher JSON switched record → use) | `aotCache` (default off, see below) | C6 0.70 → 0.30-0.40 s, launch → menu −0.6 s |
+
+Results (desktop, bench save, drive mode, `--launcher direct`, `--no-dashboard`):
+
+| run | Continue → world | boot |
+|---|---|---|
+| `load-now` (start) | 3.95 s | 5.41 s |
+| `load-b2` (tile preload, voronoi, id checks, menu fade) | 3.37 s | 5.80 s |
+| `load-aot-train2` (+ no click, all above) | 2.75 s | 6.45 s |
+| `load-jar3-ctl` (+ early packs, overrides from a jar, no AOT cache) | 2.64 s | 5.41 s |
+| **`load-jar3-aot` / `load-jar3-aot2`** (+ AOT cache) | **2.02 / 2.03 s** | 4.88 / 4.72 s |
+
+Dead ends: `-XX:CompileThresholdScaling` 0.25 / 0.1 (no gain: the chunk recalc's cost is C2 deopt churn —
+`CalculateCollide` deoptimised 12 times inside the 0.7 s window, `unstable_if` — not compile thresholds); 15 recalc
+workers instead of 8 (the first chunks 26 → 48-65 ms each: the interpreter / C1 profile counters are shared, so more
+threads contend until C2 has compiled; `loadWorkers` stays cores / 2). The AOT cache needs the overrides in a jar (the
+JVM refuses to dump with the non-empty "." on the class path: `Error: non-empty directory '.'`) and an orderly JVM exit
+(the native launcher never does one; a recording session ends in `System.exit`).
+
+What is left above 2 s: Lua `OnLoadMapZones` (0.26 s: `objects.lua`, 4 MB, executed and registered zone by zone),
+`ItemPickerJava.Parse` (0.17 s), `MapCollisionData.init` (0.13 s), `OnLoadedMapZones` (0.11 s), the texture binding of
+the preloaded sprites (0.1 s).

@@ -82,6 +82,28 @@ jar_revision() {
 }
 REV=$(jar_revision || true)
 
+# A launcher JSON that pzopt's AOT-cache mode (pzopt.AotCache) switched to its jar form goes back to the loose
+# classes ("." first, no AOT options), and the jar and cache go: the loose files are about to change.
+reset_aot() {
+  if [[ -f "$JSON" ]]; then
+    if command -v python3 >/dev/null; then
+      python3 - "$JSON" <<'PYEOF'
+import json,sys
+p=sys.argv[1]; j=json.load(open(p)); jar="pzopt/aot/pzopt.jar"
+cp=j.get("classpath",[]); args=j.get("vmArgs",[])
+aot=[a for a in args if a.startswith("-XX:AOTCache") or a.startswith("-Xlog:aot=info:file=pzopt/aot/")]
+if jar in cp or aot:
+    j["classpath"]=["."]+[e for e in cp if e not in (".",jar)]
+    j["vmArgs"]=[a for a in args if a not in aot]
+    json.dump(j,open(p,"w"),indent="\t"); print("launcher: AOT-cache form put back to the loose classes")
+PYEOF
+    elif [[ -f "$JSON.pzopt-backup" ]] && grep -q 'pzopt/aot/' "$JSON"; then
+      cp "$JSON.pzopt-backup" "$JSON"; echo "launcher: restored $JSON.pzopt-backup"
+    fi
+  fi
+  rm -rf "$dir/pzopt/aot"
+}
+
 # --- status / uninstall -------------------------------------------------------------------
 
 if [[ $mode == status ]]; then
@@ -104,6 +126,7 @@ if [[ $mode == status ]]; then
 fi
 
 if [[ $mode == uninstall ]]; then
+  reset_aot
   list=""
   if [[ -f "$MANIFEST" ]]; then list=$(grep -v '^#' "$MANIFEST" | cut -d' ' -f1)
   elif [[ -f "$dir/pzopt-files.txt" ]]; then list=$(cat "$dir/pzopt-files.txt")
@@ -133,6 +156,7 @@ fi
 [[ -f "$MANIFEST" ]] && die "already installed (see --status); run --uninstall first"
 [[ -n "$REV" ]] || die "could not read the game revision from $JAR"
 
+reset_aot
 # the launcher must search "." before the jar or loose classes never load
 if [[ ! -f "$JSON" && -x "$MAC_LAUNCHER" ]]; then
   : # macOS: JavaAppLauncher builds -Djava.class.path=<Contents/Java>/ and appends the jars after it (verified 42.20.4)

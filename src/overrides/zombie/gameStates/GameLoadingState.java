@@ -483,6 +483,19 @@ public final class GameLoadingState extends GameState {
    }
 
    public void render() {
+      if (pzopt.NoLoadingScreen.active() && !unexpectedError && !GameWindow.serverDisconnected
+         && !playerWrongIP && !worldVersionError && !mapDownloadFailed && !convertingWorld) {
+         // pzopt: noLoadingScreen, a plain black frame instead of the loading screen (text, tips, progress)
+         Core.getInstance().StartFrame();
+         Core.getInstance().EndFrame();
+         boolean useUIFBO = UIManager.useUiFbo;
+         UIManager.useUiFbo = false;
+         Core.getInstance().StartFrameUI();
+         SpriteRenderer.instance.renderi(null, 0, 0, Core.getInstance().getScreenWidth(), Core.getInstance().getScreenHeight(), 0.0F, 0.0F, 0.0F, 1.0F, null);
+         Core.getInstance().EndFrameUI();
+         UIManager.useUiFbo = useUIFBO;
+         return;
+      }
       float fontHeightSmall = TextManager.instance.getFontHeight(UIFont.NewSmall);
       float fontHeightMedium = TextManager.instance.getFontHeight(UIFont.NewMedium);
       this.loadingDotTick = this.loadingDotTick + GameTime.getInstance().getMultiplierInMenu();
@@ -1004,6 +1017,13 @@ public final class GameLoadingState extends GameState {
 
          if (ModelManager.instance.isLoadingAnimations()) {
             return StateAction.Remain;
+         }
+
+         if (pzopt.Config.NO_CLICK_TO_START && pzopt.Overrides.enabled() && playerCreated
+            && (!newGame || this.time >= 33.0F || Core.isLastStand() || "Tutorial".equals(Core.gameMode) || pzopt.Config.NO_INTRO_WAIT)) {
+            showedClickToSkip = true; // pzopt: noClickToStart, enter the world the moment it is loaded (same point a click would)
+            this.forceDone = false;
+            return StateAction.Continue;
          }
 
          if (!showedClickToSkip) {

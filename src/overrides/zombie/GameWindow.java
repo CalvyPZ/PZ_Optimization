@@ -230,6 +230,15 @@ public final class GameWindow {
       Mouse.initCustomCursor();
       TileGeometryManager.getInstance().init();
       TileDepthTextureAssignmentManager.getInstance().init();
+      if (pzopt.Config.EARLY_TILE_PACKS && pzopt.Overrides.enabled()) {
+         // pzopt: earlyTilePacks, the tile packs register here (same flags, same order after the UI packs) and the 218
+         // depth-map loads are queued here, instead of in enter() after the Lua load: their ~12 + 4 thread-s of decode
+         // run during the Lua load and not into Continue
+         loadTilePacks();
+         pzoptTilePacksLoaded = true;
+         TileDepthTextureManager.getInstance().init();
+         pzopt.TileDefPreload.start(); // needs the mods and the translations only; starts as early as it can
+      }
       SeamManager.getInstance().init();
       SeatingManager.getInstance().init();
       if (!Core.debug || !DebugOptions.instance.uiDisableLogoState.getValue()) {
@@ -453,6 +462,7 @@ public final class GameWindow {
       Mouse.setCursorVisible(Core.getInstance().displayCursor);
       if (doUpdate) {
          states.update();
+         pzopt.NoLoadingScreen.afterStateUpdate(states.current); // pzopt: noLoadingScreen, no fade from black into the world
       } else {
          IsoCamera.updateAll();
          if (isIngameState()) {
@@ -800,9 +810,11 @@ public final class GameWindow {
       }
    }
 
-   private static void enter() {
+   private static boolean pzoptTilePacksLoaded; // pzopt: earlyTilePacks
+
+   /** pzopt: the tile-pack block of enter(), callable from initShared (earlyTilePacks). */
+   private static void loadTilePacks() {
       Core.tileScale = Core.getInstance().getOptionTexture2x() ? 2 : 1;
-      IsoCamera.init();
       int flags = TextureID.useCompression ? 4 : 0;
       flags |= 64;
       if (Core.tileScale == 1) {
@@ -824,6 +836,36 @@ public final class GameWindow {
       }
 
       setTexturePackLookup();
+   }
+
+   private static void enter() {
+      Core.tileScale = Core.getInstance().getOptionTexture2x() ? 2 : 1;
+      IsoCamera.init();
+      if (pzoptTilePacksLoaded) { // pzopt: earlyTilePacks, registered in initShared already
+         setTexturePackLookup();
+      } else {
+      int flags = TextureID.useCompression ? 4 : 0;
+      flags |= 64;
+      if (Core.tileScale == 1) {
+         LoadTexturePack("Tiles1x", flags);
+         LoadTexturePack("Overlays1x", flags);
+         LoadTexturePack("JumboTrees1x", flags);
+         LoadTexturePack("Tiles1x.floor", flags & -5);
+      }
+
+      if (Core.tileScale == 2) {
+         LoadTexturePack("Tiles2x", flags);
+         LoadTexturePack("Overlays2x", flags);
+         LoadTexturePack("JumboTrees2x", flags);
+         LoadTexturePack("JumboTreesBigs2x", flags);
+         LoadTexturePack("Tiles2x.floor", flags & -5);
+         LoadTexturePack("B42ChunkCaching2x", flags);
+         LoadTexturePack("B42ChunkCaching2x.floor", flags & -5);
+         LoadTexturePack("Clock2x", flags);
+      }
+
+      setTexturePackLookup();
+      } // pzopt: end of the stock tile-pack block
       Texture.getSharedTexture("animated_clock_01_0");
       Texture.getSharedTexture("animated_clock_01_1");
       Texture.getSharedTexture("animated_clock_01_2");
@@ -832,12 +874,17 @@ public final class GameWindow {
          throw new RuntimeException("Rebuild Tiles.pack with \"1 Include This in .pack\" as individual images not tilesheets");
       }
 
+      pzopt.TileDefPreload.start(); // pzopt: tile sprites for the first world load build on a thread while the menu loads
+      pzopt.AotCache.start(); // pzopt: aotCache, the next launch's launcher form (record / use), decided on a daemon thread
+
       DebugType.General.debugln("LOADED UP A TOTAL OF " + Texture.totalTextureID + " TEXTURES");
       s_fpsTracking.init();
       DoLoadingText(Translator.getText("UI_Loading_ModelsAnimations", new Object[0]));
       ModelManager.instance.create();
       pzopt.BootAsync.startAnimSets(); // pzopt: no-op if already started from initShared
-      TileDepthTextureManager.getInstance().init();
+      if (!pzoptTilePacksLoaded) { // pzopt: earlyTilePacks initialised it in initShared
+         TileDepthTextureManager.getInstance().init();
+      }
       TileDepthMapManager.instance.init();
       TileSeamManager.instance.init();
       VoiceManager.instance.InitVMClient();
@@ -1107,6 +1154,7 @@ public final class GameWindow {
       PathfindNative.freeMemoryAtExit();
       onGameThreadExited();
       DebugType.ExitDebug.debugln("GameWindow.exit 5");
+      pzopt.AotCache.onGameExit(); // pzopt: an AOT-cache training JVM must exit through System.exit to write the cache
    }
 
    private static void onGameThreadExited() {

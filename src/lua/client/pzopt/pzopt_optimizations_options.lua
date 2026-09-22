@@ -441,6 +441,16 @@ local SECTIONS = {
               tip = "A model takes a shader an earlier model already created instead of waiting one loading-screen frame for the render thread." },
             { key = "mipmapArrays", label = "Row-based texture mipmaps",
               tip = "Texture mipmaps and alpha premultiply build row by row on byte arrays; same pixels as stock." },
+            { key = "tileDefPreload", label = "Build tile definitions during boot",
+              tip = "The ~60k tile sprites are built on a thread while the main menu loads; Continue only binds their textures instead of parsing the tile files again." },
+            { key = "skipIdChecks", label = "Skip room-id consistency checks",
+              tip = "A log-only check over every building and room of the map (six walks per load) runs in debug mode only." },
+            { key = "voronoiFast", label = "Fast zombie-density noise",
+              tip = "The zombie voronoi noise of every map cell is computed per sector instead of per sample; identical values, half the map loading time." },
+            { key = "earlyTilePacks", label = "Load tile textures earlier in boot",
+              tip = "The tile texture packs and depth maps start decoding before the boot Lua load instead of after it, so the world load does not wait for them." },
+            { key = "aotCache", label = "Warm-start cache (Java AOT)",
+              tip = "The game records a Java AOT cache on one launch and starts from it afterwards: warm code for the menu and every world load. Changes the launcher config (backed up once); off puts it back." },
         },
     },
     {
@@ -450,6 +460,8 @@ local SECTIONS = {
               tip = "The loading screen does not fade to black (350 ms) before the world's own fade-in." },
             { key = "noIntroWait", label = "Click-to-start as soon as a new game is loaded",
               tip = "A new game shows click-to-start when loading is done instead of after the 33 s intro text." },
+            { key = "noClickToStart", label = "Enter the world without click-to-start",
+              tip = "The loading screen goes straight into the world when loading is done instead of waiting for a click or A." },
         },
     },
 }
@@ -722,6 +734,12 @@ local EFFECTS = {
     mipmapArrays = { cores = -1 },
     noLoadFade = { load = -1 },
     noIntroWait = { load = -2 },
+    noClickToStart = { load = -2 },
+    tileDefPreload = { load = -2, cores = 1 },
+    skipIdChecks = { load = -1 },
+    voronoiFast = { load = -2, cores = -1 },
+    earlyTilePacks = { load = -1 },
+    aotCache = { load = -2, disk = 1 },
 }
 
 -- SDR values of the media style (docs/media-style.md): stock amber, optimized green, a third series blue

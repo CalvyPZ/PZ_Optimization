@@ -283,6 +283,7 @@ public final class Updater {
       try {
          download(r, zip);
          state = State.INSTALLING;
+         AotCache.onInstallChanging(dir); // the loose files change: launcher back to them, jar and cache dropped
          String rev = Overrides.jarRevision();
          Map<String, String> installed = swap(zip, stage, dir, rev);
          message = "installed " + r.tag + " (" + installed.size() + " files)";

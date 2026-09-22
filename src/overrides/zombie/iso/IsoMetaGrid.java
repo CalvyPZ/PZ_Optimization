@@ -2351,7 +2351,7 @@ public final class IsoMetaGrid {
                                  List<double[]> voronoisValues = IsoWorld.instance
                                     .getZombieVoronois()
                                     .stream()
-                                    .map(vx -> vx.evaluateCellCutoff(wX, wY))
+                                    .map(vx -> pzopt.ZombieNoise.cellCutoff(vx, wX, wY)) // pzopt: voronoiFast, same values per sector instead of per sample
                                     .toList();
 
                                  for (int wx = 0; wx < 32; wx++) {
