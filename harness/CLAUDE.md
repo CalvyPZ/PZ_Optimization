@@ -54,7 +54,19 @@ Modes:
   (same 25 s and turn; at 18 tiles/s the walk outran chunk handoff at the ~30 fps this scene runs at) and
   `see_all=true` (`LightingJNI` override marks every square seen and visible; without it the tall blocks leave
   most of the screen never-seen black). Runs `show-louisville-*`; stock 23.7 fps / p99 94 ms, optimized
-  31.7 / 57, both game-thread bound at 98 %.
+  31.7 / 57, both game-thread bound at 98 %. The soft optimized side of that video was not a render change
+  (2026-09-22, runs `lvroof-*` / `lvpin-*`): a zombie bump on the ghost player still rolls `helmetFall` (god mode
+  only cancels the health loss), the short-sighted bench character lost their glasses and `screen.frag`'s
+  `screenBlur` blurred everything outside a small circle around the player for the rest of the run; which side
+  keeps its glasses is chance. The Harness now pins every worn item (`Scene.pinWornItems`, `chanceToFall=0`) at
+  world-ready, wears any pinned item that still leaves its slot back every frame (`Scene.keepWornItems` in
+  `Scene.tick`, with `updateVisionEffects()` so the blur target never flips; the first two pinned runs still ended
+  with `eyes=none` and `blur=0.00`, so a second removal path exists) and logs `harness: N worn items pinned;
+  eyes=... shortSighted=... blur=... wornRestored=...` at world-ready and `harness: player at route end: ...` at
+  the end; a `blur` above 0 in a console means a soft capture, `wornRestored` counts the re-wears. Sharpness rig:
+  Laplacian stdev of a full-res crop of `shot-game.png` (`magick ... -morphology Convolve Laplacian:0 -format
+  %[fx:standard_deviation*1000]`): stock 22.9, blurred optimized 7.9, pinned optimized 27.1 / stock 24.5; AV1
+  recordings are too noisy for it.
   Scene flags on their own: `start=X,Y`, `population=N|max`, `zombies=off` (population 0 + every loaded zombie removed each tick), `jitter=T` (with hold: player X flips across the end square's east edge by ±T tiles every frame), `see_all=true`, `time_of_day=H`, `weather=storm|clear`, `fog=heavy|off|0..1`, `torch=on|off`, `headlights=on|off|auto` (drive: the spawned car's headlights; auto = on when `time_of_day` is a night hour, 2026-09-21), `lightbar=0..3` (drive: the emergency lightbar lights mode of an ambulance / police car, 0 = off),
   `visible=true` (`pzopt.Scene`; applied at world-ready, re-pinned every frame, recorded in `pzopt-bench.out`
   as `time_of_day/game_hour/weather/fog/torch/visible/night_strength/precipitation/fog_intensity/fog_fx/

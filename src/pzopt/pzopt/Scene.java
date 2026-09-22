@@ -191,6 +191,7 @@ public final class Scene {
 
    /** Per-frame upkeep while the run is live: keep the overrides pinned and fire the scheduled lightning. */
    static void tick(IsoPlayer p, long nowNs) {
+      keepWornItems(p); // the bench player keeps their glasses (screen blur otherwise; see pinWornItems)
       if (zombiesOff) {
          removeZombies();
       }
@@ -310,6 +311,84 @@ public final class Scene {
    /** Flag see_all=true: read by the LightingJNI override on every player update (false until apply() ran). */
    public static boolean seeAll() {
       return seeAll;
+   }
+
+   /**
+    * Nothing the bench player wears may fall off during a run. God mode only cancels the health loss of a zombie
+    * hit or a fall: {@code BodyDamage.AddRandomDamageFromZombie} and {@code handleLandingImpact} still roll
+    * {@code helmetFall}, which drops a hat or glasses with {@code Clothing.chanceToFall} and fires
+    * {@code OnClothingUpdated}. A short-sighted character who loses their glasses then gets
+    * {@code blurFactorTarget = 1}: {@code screen.frag} blurs the whole world outside a small circle around the
+    * player for the rest of the run (Louisville preset, 2026-09-22: the horde bumps the ghost player, the
+    * optimized side of the video looked soft, the stock side had kept its glasses by chance). A zero chance
+    * makes {@code helmetFallFromWornItems} skip the item, so the character keeps every worn item and the
+    * screen stays as sharp as the save left it. Called after god / ghost mode; returns the items pinned.
+    */
+   static int pinWornItems(IsoPlayer p) {
+      zombie.characters.WornItems.WornItems worn = p.getWornItems();
+      pinnedWorn.clear();
+      wornRestored = 0;
+      if (worn == null) {
+         return 0;
+      }
+      int pinned = 0;
+      for (int i = 0; i < worn.size(); i++) {
+         InventoryItem item = worn.getItemByIndex(i);
+         if (item instanceof zombie.inventory.types.Clothing clothing) {
+            if (clothing.getChanceToFall() > 0) {
+               clothing.setChanceToFall(0);
+               pinned++;
+            }
+            pinnedWorn.put(clothing.getBodyLocation(), clothing);
+         }
+      }
+      return pinned;
+   }
+
+   private static final java.util.LinkedHashMap<zombie.scripting.objects.ItemBodyLocation, zombie.inventory.types.Clothing> pinnedWorn = new java.util.LinkedHashMap<>();
+   private static int wornRestored;
+
+   /**
+    * Every frame: a pinned item that left its body location (the first pinned Louisville run still ended with
+    * {@code eyes=none}: the zero chance stops {@code helmetFall}, other paths such as a broken item's
+    * {@code Clothing.setCondition} unwear and drop it) is worn again and the vision effects are recomputed at once,
+    * so the blur target never flips. The dropped copy on the floor of the bench save is left alone.
+    */
+   static void keepWornItems(IsoPlayer p) {
+      if (pinnedWorn.isEmpty()) {
+         return;
+      }
+      boolean changed = false;
+      for (java.util.Map.Entry<zombie.scripting.objects.ItemBodyLocation, zombie.inventory.types.Clothing> e : pinnedWorn.entrySet()) {
+         zombie.inventory.types.Clothing item = e.getValue();
+         if (p.getWornItem(e.getKey()) == item) {
+            continue;
+         }
+         if (!p.getInventory().contains(item)) {
+            p.getInventory().AddItem(item);
+         }
+         p.setWornItem(e.getKey(), item);
+         wornRestored++;
+         changed = true;
+      }
+      if (changed) {
+         p.resetModelNextFrame();
+         p.updateVisionEffects();
+      }
+   }
+
+   /** Times keepWornItems had to put a pinned item back (a hit that would have blurred the screen). */
+   static int wornRestored() {
+      return wornRestored;
+   }
+
+   /** One line for the console: eyewear, the short-sighted trait and the screen blur the vision effects apply. */
+   static String visionState(IsoPlayer p) {
+      InventoryItem eyes = p.getWornItem(zombie.scripting.objects.ItemBodyLocation.EYES);
+      return "eyes=" + (eyes == null ? "none" : eyes.getFullType() + (eyes.isVisualAid() ? " (visual aid)" : ""))
+         + " shortSighted=" + p.hasTrait(zombie.scripting.objects.CharacterTrait.SHORT_SIGHTED)
+         + " blur=" + String.format(java.util.Locale.ROOT, "%.2f", p.getBlurFactor())
+         + " wornRestored=" + wornRestored;
    }
 
    /** "" = leave the save's sandbox values (-1); "max" = 4 (the sandbox ceiling); numbers are clamped to 0-4. */

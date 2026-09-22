@@ -283,6 +283,9 @@ public final class Harness {
                 }
                 p.setGodMod(true, true);
                 p.setInvisible(true, true);
+                // god mode keeps the health, not the hat: a horde bump can still knock the glasses off and blur the
+                // screen for the rest of the run (Louisville, 2026-09-22); worn items get a zero chance to fall
+                Log.info("harness: " + Scene.pinWornItems(p) + " worn items pinned; " + Scene.visionState(p));
                 // scene presets (time of day, weather, torch): forced now, at the start of the settle time,
                 // so the lighting rebake a jump to night or a storm causes is over before the route
                 try {
@@ -580,6 +583,7 @@ public final class Harness {
                Stats.mark("route-end");
                runEndEpochMs = System.currentTimeMillis();
                Log.info("harness: route done in " + secs + "s, " + chunks + " chunks loaded (" + chunks / secs + "/s); quitting");
+               Log.info("harness: player at route end: " + Scene.visionState(p)); // blur > 0 = the screen was soft (pinWornItems)
                writeThreadCpu(secs);
                writeSummary(secs, chunks);
                Stats.flush();
