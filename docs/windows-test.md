@@ -44,6 +44,7 @@ the game runs as stock, so the worst case of a mismatch is "no effect".
 2026-09-20 release from `e398ce5` (master switch) is 607 KB, 114 files plus the manifest
 2026-09-20 release from `aa9482b` is 606 KB, 114 files plus the manifest
 2026-09-20 release from `2d34aa9` is 543 KB, 104 files plus the manifest
+2026-09-23 release from `cbcd436` (fixes a hang while loading a save since the faster Continue: the chat-icon scan raced the early world entry; plus the Dell hitching rounds 2-5: chunk-map lookups without helper calls, allocation-free tile-surface scan, no glGet per frame in the weather drawer, learned render-chunk prewarm) is 43.7 MB, 385 files plus the manifest (386 lines); tag `win-b0bbce05d5-cbcd436`.
 `pzopt-files.txt`; the 2026-09-19 test build from `a202778` had 97) for game
 revision `b0bbce05d5` (Build 42.20.4).
 
