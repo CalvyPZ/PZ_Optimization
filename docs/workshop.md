@@ -100,7 +100,11 @@ profiling" heading went: its image `13` now sits inside the "Performance overlay
 the limit). Later that day a text section "Upscaling: how it works, when it helps" (how the world frame is scaled, how to
 turn it on, when the GPU is the limit) went under the card; to pay for its ~1,000 characters the `14`, `15` and `16`
 card sections left the page (the images stay in the folder and the item's carousel; the README and the options tab keep
-those features), the tab close-up `08` left the frame-by-frame section, and several captions were shortened.
+those features), the tab close-up `08` left the frame-by-frame section, and several captions were shortened. `18` the
+"New! Render distance" card (`docs/media/render-distance-card.png` from `harness/render-distance-card.py`: vanilla 19x19
+chunk grid vs 15x15 on the Rosewood spin and the 120 km/h drive, everything on, runs `prev-gridspin3-*` /
+`card-grid-drive-*`; 2026-09-22 night, release da3cdea): the upscaler card lost its "New!" and took the place of the
+"Upscaling: how it works" heading, and two upscaling sentences were shortened (page 7,878 substituted characters).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
