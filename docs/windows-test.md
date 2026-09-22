@@ -21,6 +21,7 @@ the game runs as stock, so the worst case of a mismatch is "no effect".
 2026-09-22 night release from `214eef7` (off-screen zombies no longer thump doors and windows in bursts of 8 / 16 hits with up to 16x the door damage; 240 fps rig: 29 strikes in one second before, a steady 1-3 per second after) is 40.7 MB, 374 files plus the manifest (375 lines); tag `win-b0bbce05d5-214eef7`.
 2026-09-22 night release from `da3cdea` (Render distance option: the chunk grid 7-15 chunks per side or vanilla, Rosewood uncapped spin 223.5 fps at the vanilla 19x19 vs 247.8 at 15x15; Dell hitching rounds 2 and 3) is 41.6 MB, 381 files
 2026-09-23 release from `d36540a` (Continue: the world builds from the player outwards, and the ground around the player captured at the last exit is shown while loading, tiles popping in, instead of the loading screen; Mac bench save: filled in over 6.4 s of an 8.4 s load) is 41.7 MB, 384 files, sha256 `94a525365bd0d9e151eee34d3ee02dd00f8b2ac1f4d9b5557c286fc8de4d732b`, tag `win-b0bbce05d5-d36540a`.
+2026-09-23 release from `e5d025a` (the Continue view no longer shows chunks with an upper floor as black squares; Dell hitching round 4) is 41.7 MB, 385 files, sha256 `5ec895a87869288cfd7e9def719b01ea32f7a46bf44b96fa5820dd1fe7e2c1a0`, tag `win-b0bbce05d5-e5d025a`.
 
 2026-09-22 night release from `71b2c6c` (the zombie game-thread pass: zombies 23 → 11 % of the game thread in the Louisville horde, eight default-on keys and three opt-in simulation-LOD keys; the `CanSee` self-recursion fix (StackOverflowError on the Lure action); the Optimizations tab's search box, collapsible sections and "Low-end hardware + FSR 1.0" button; Louisville preview clips per group) is 40.7 MB, 359 files plus the manifest (360 lines); tag `win-b0bbce05d5-71b2c6c`.
 
@@ -97,7 +98,7 @@ touches `projectzomboid.jar`.
 
 ```powershell
 Expand-Archive -Path "$env:USERPROFILE\Downloads\pzopt-b0bbce05d5-classes.zip" -DestinationPath $PZ
-Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 384 on the d36540a release, 381 on the da3cdea release, 345 on the 1555855 release, 244 on the 2980cf3 and 3441a1c releases, 224 on the db825a0 release, 220 on the cd1a8de and cb48693 releases, 189 on the 0029f16 and 8bbc11a releases, 184 on the 51a6f78 release, 178 on the d434cde release, 177 on the 31f27f4 and c69c085 releases, 162 on the dcc0ce9 release, 161 on the 8889f72 release, 152 on the 1cf5080 and 667b210 releases, 146 on the 75f9365, f93158f, 4dbe655 and cc99c05 releases (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
+Get-Content "$PZ\pzopt-files.txt" | Measure-Object -Line     # 385 on the e5d025a release, 384 on the d36540a release, 381 on the da3cdea release, 345 on the 1555855 release, 244 on the 2980cf3 and 3441a1c releases, 224 on the db825a0 release, 220 on the cd1a8de and cb48693 releases, 189 on the 0029f16 and 8bbc11a releases, 184 on the 51a6f78 release, 178 on the d434cde release, 177 on the 31f27f4 and c69c085 releases, 162 on the dcc0ce9 release, 161 on the 8889f72 release, 152 on the 1cf5080 and 667b210 releases, 146 on the 75f9365, f93158f, 4dbe655 and cc99c05 releases (131 on b0d4fe6, 115 on e398ce5, 105 on the 2d34aa9 release, 97 on the 2026-09-19 test build)
 Get-Content "$PZ\pzopt\build-info.properties" | Select-String "^revision"
 ```
 
