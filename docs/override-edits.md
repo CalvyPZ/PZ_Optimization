@@ -1845,6 +1845,16 @@ Now (`pzopt.ZoomRetain`, keys `zoomRetain` true, `zoomRebakeBudget` 12, `zoomFra
   camera-motion return is allowed in the frame it appears (the texture is redrawn before it is shown, as
   stock's fresh one was), the bits clear on the occlusion and off-screen paths, and only an actual zoom
   change or a real deferral keeps the flood on.
+- A Workshop player reported the first build's stall as it looks in play (2026-09-22): chunk textures stop
+  appearing past a fixed radius and waiting never fills the rest; `zoomRetain` off cures it. Two guards on top
+  of the previous fix, in the second build: the plan now honours the on-screen scan's "allowed at once" marks
+  outside a flood without charging them to the budget (`checkNewlyOnScreenChunks` runs before `pzoptZoomPlan`,
+  which used to zero every allowed bit, so the camera-motion returns of the previous fix still competed
+  nearest-first inside the 4-12 budget; after a slow frame a pan over seen ground drew stale textures again),
+  and `pzoptZoomSettle`, after the chunk loop, drops every allowed bit still pending: the level never reached
+  the gate (chunk skipped while its lighting is not done, level index not visited after a `minLevel` change,
+  clean level with a texture), so a bit no path clears can take at most one credit and the plan can never
+  starve again. Counter `dropped=` in the periodic `zoom kept=` log line; 0 on the bench route.
 
 Results (240 cap, south route, `zoomsteps.py --window 1.0`): 0.25 ↔ 2.5 instant jumps, worst frame per
 jump 375 / 86 / 59 / 52 ms (stock) → see `docs/results.md` for the adopted build's numbers.

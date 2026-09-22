@@ -1430,6 +1430,9 @@ public final class FBORenderCell {
          }
       }
 
+      if (pzoptZoomRetain) {
+         this.pzoptZoomSettle(playerIndex); // pzopt: zoomRetain, a credit nothing consumed is not carried to the next plan
+      }
       SpriteRenderer.instance.endProfile(tilesProbe);
       FBORenderCorpses.getInstance().update();
       FBORenderItems.getInstance().update();
@@ -4452,7 +4455,11 @@ public final class FBORenderCell {
          for (int yy = 0; yy < IsoChunkMap.chunkGridWidth; yy++) {
             IsoChunk c = chunkMap.getChunk(xx, yy);
             if (c != null && c.pzoptZoomReturned[playerIndex] != 0L) {
-               c.pzoptZoomAllowed[playerIndex] = 0L;
+               // the on-screen scan (checkNewlyOnScreenChunks, before this plan, reading last frame's flood flag) marks a
+               // camera-motion return allowed at once: outside a flood the mark stands and is not charged to the budget
+               // (the plan used to clear it here, so those returns competed nearest-first within the budget and a pan over
+               // seen ground after a slow frame drew stale textures for a frame or two); in a flood frame it is sorted in
+               c.pzoptZoomAllowed[playerIndex] = this.pzoptZoomFlood ? 0L : c.pzoptZoomAllowed[playerIndex] & c.pzoptZoomReturned[playerIndex];
                pending.add(c);
             }
          }
@@ -4470,8 +4477,8 @@ public final class FBORenderCell {
       int left = this.pzoptZoomBudgetNow;
       for (int i = 0; i < pending.size() && left > 0; i++) {
          IsoChunk c = pending.get(i);
-         long bits = c.pzoptZoomReturned[playerIndex];
-         long allowed = 0L;
+         long allowed = c.pzoptZoomAllowed[playerIndex]; // the scan's uncharged marks, if any
+         long bits = c.pzoptZoomReturned[playerIndex] & ~allowed;
          while (bits != 0L && left > 0) {
             long low = bits & -bits;
             allowed |= low;
@@ -4487,6 +4494,28 @@ public final class FBORenderCell {
       float dx = c.wx * 8 + 4 - px;
       float dy = c.wy * 8 + 4 - py;
       return dx * dx + dy * dy;
+   }
+
+   /**
+    * After the chunk loop: a level the plan (or the scan) allowed this frame either took its credit in renderOneLevel (both
+    * bits cleared there) or never reached the gate: its chunk was skipped (lighting not done yet, not in the on-screen
+    * list), the level index is not visited (the chunk's minLevel moved), or the level is clean with a texture and has no
+    * dirt to enter the gate with. Such a level is not pending: its bits go, so a bit no path clears can take at most one
+    * credit. The 3441a1c build had no such guard and two paths that left bits behind: those levels, nearest the camera,
+    * took every credit of every plan, the flood never ended, and every chunk level streamed in from then on waited for a
+    * credit that never came (textures stopped appearing past a fixed radius; the Workshop report of 2026-09-22).
+    */
+   private void pzoptZoomSettle(int playerIndex) {
+      ArrayList<IsoChunk> pending = this.pzoptZoomPending;
+      for (int i = 0; i < pending.size(); i++) {
+         IsoChunk c = pending.get(i);
+         long stale = c.pzoptZoomAllowed[playerIndex] & c.pzoptZoomReturned[playerIndex];
+         if (stale != 0L) {
+            c.pzoptZoomReturned[playerIndex] &= ~stale;
+            pzopt.ZoomRetain.dropped += Long.bitCount(stale);
+         }
+         c.pzoptZoomAllowed[playerIndex] = 0L;
+      }
    }
 
    /**
@@ -4584,7 +4613,7 @@ public final class FBORenderCell {
       if (!pzoptTlSets.isEmpty()) {
          final int frames = pzoptTlFrames;
          sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" strong now=").append(pzoptStrongRebakes).append(" strong past budget=").append(pzoptStrongHeld).append(" creations deferred=").append(pzoptCreatesStarved).append(" strong marks=").append(pzopt.LightDirt.strongMarks).append(" global light events=").append(pzopt.LightDirt.globalEvents).append(" flushed=").append(pzoptLightingFlushed).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld)
-            .append(" | zoom kept=").append(pzopt.ZoomRetain.kept).append(" returned=").append(pzopt.ZoomRetain.returned).append(" rebakes=").append(pzopt.ZoomRetain.rebakes).append(" creations=").append(pzopt.ZoomRetain.creations).append(" urgent=").append(pzopt.ZoomRetain.urgent).append(" placeholders=").append(pzopt.ZoomRetain.placeholders).append(" flags:"); // pzopt: zoomRetain counters
+            .append(" | zoom kept=").append(pzopt.ZoomRetain.kept).append(" returned=").append(pzopt.ZoomRetain.returned).append(" rebakes=").append(pzopt.ZoomRetain.rebakes).append(" creations=").append(pzopt.ZoomRetain.creations).append(" urgent=").append(pzopt.ZoomRetain.urgent).append(" placeholders=").append(pzopt.ZoomRetain.placeholders).append(" dropped=").append(pzopt.ZoomRetain.dropped).append(" flags:"); // pzopt: zoomRetain counters
       for (int b = 0; b < 16; b++) {
          if (pzoptBakeFlags[b] > 0) sb.append(' ').append(PZOPT_FLAG_NAMES[b]).append('=').append(pzoptBakeFlags[b]);
          pzoptBakeFlags[b] = 0;
