@@ -78,5 +78,5 @@ description=All of them measure within noise of stock: [b]Project Zomboid Optimi
 description=
 description=[h1]This build[/h1]
 description=Game revision b0bbce05d5 (Build 42.20.4), repository commit db825a0, 224 files, zip sha256 b025176195c6b84b89627d83f38437ffb888c322ed2015b4ba24a1ec1e225f27 (same bytes as the GitHub release pzopt-b0bbce05d5-classes.zip).
-tags=Build 42;
+tags=Build 42
 visibility=public
