@@ -114,6 +114,10 @@ jar_sha=$(sha256sum "$JAR" | cut -d' ' -f1)
   echo "jar.sha256=$jar_sha"
   echo "jar.size=$(stat -c %s "$JAR")"
   echo "release=$RELEASE"
+  # what this build is, for the in-game updater (pzopt.Updater): the short commit the release tag
+  # win-<revision>-<commit> carries ("-dirty" when src/ has uncommitted changes) and the build time
+  echo "commit=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)$( [[ -n "$(git -C "$REPO" status --porcelain -- src scripts/build.sh 2>/dev/null)" ]] && echo -dirty )"
+  echo "built=$(date -u +%s)"
   echo "overrides=$(IFS=,; echo "${OVERRIDES[*]}")"
   # sha256 of each stock class we shadow, so a same-revision hotfix is caught too
   while IFS= read -r f; do

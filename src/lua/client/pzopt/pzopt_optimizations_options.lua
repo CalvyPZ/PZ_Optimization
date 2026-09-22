@@ -162,7 +162,14 @@ local SECTIONS = {
         title = "Multiplayer", clip = "drive",
         entries = {
             { key = "luaChecksumExempt", label = "Leave the pzopt Lua files out of the server file check",
-              tip = "When joining a server the game lists every Lua file under media/lua to the server; the three pzopt files (this tab, the frame cap combo, the key binding) only exist on clients and a server without them refused the join with \"File doesn't exist on the server\". They are skipped like the game skips SandboxVars.lua. Applies on the next launch." },
+              tip = "When joining a server the game lists every Lua file under media/lua to the server; the four pzopt files (this tab, the frame cap combo, the key binding, the update item) only exist on clients and a server without them refused the join with \"File doesn't exist on the server\". They are skipped like the game skips SandboxVars.lua. Applies on the next launch." },
+        },
+    },
+    {
+        title = "Updates", clip = "load",
+        entries = {
+            { key = "updateCheck", label = "Offer new releases in the main menu",
+              tip = "Once per boot the main menu asks the GitHub releases (one request to api.github.com) whether a newer build for this game revision exists. The \"UPDATE PZ OPTIMIZATION\" item between Credits and Exit is greyed out while the build is current and enabled when a newer one exists: it downloads the zip, replaces the installed files and asks to quit so the next launch loads them. Nothing is downloaded without that click. Applies on the next launch." },
         },
     },
     {
@@ -491,6 +498,8 @@ local EFFECTS = {
     vboFastQuads = { render = -1 },
     -- multiplayer
     luaChecksumExempt = {},
+    -- updates
+    updateCheck = {},
     -- overlay
     overlaySampling = { cpu = 1, cores = 1 },
     overlay = { cpu = 1 },

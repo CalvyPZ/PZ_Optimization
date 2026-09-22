@@ -53,6 +53,7 @@ machine you play on.
    - [Method D: build from source (Linux)](#method-d-build-from-source-linux)
    - [Check that it loaded](#check-that-it-loaded)
    - [Uninstall](#uninstall)
+   - [Updating the mod](#updating-the-mod)
    - [After a game update](#after-a-game-update)
 4. [Settings](#settings)
    - [Options > Optimizations](#options--optimizations)
@@ -470,6 +471,21 @@ scripts/pzopt.sh uninstall      # Linux, from-source install
 Each removes exactly the files it recorded and the empty folders they leave. The caches and
 settings under `Zomboid/pzopt/` (`options.ini`, `framecap.ini`, `anims/`, `packs/`) can be
 deleted by hand; without the overrides the game uses whatever its own `options.ini` holds.
+
+### Updating the mod
+
+Once installed by either script (Workshop copy or release download), the game updates it
+by itself: the main menu has an **UPDATE PZ OPTIMIZATION** item between CREDITS and QUIT,
+styled like the stock ones, greyed out while your build is current. Once per boot the menu
+checks the GitHub releases and, when a newer build for your game revision exists, the item
+lights up. It opens a dialog with the installed and offered builds and
+the release notes; **Update now** downloads the zip, replaces the files listed in
+`pzopt-installed.txt` (the game's own files are never touched, saves and options stay) and
+asks to quit, because the classes already loaded stay the old ones until the next launch.
+Nothing is downloaded before that click; the check itself is one request to
+`api.github.com` and can be switched off in Options > Optimizations > Updates
+(`updateCheck=false`). A copy unpacked by hand (Method C, no `pzopt-installed.txt`) only
+gets a link to the release page from the item.
 
 ### After a game update
 

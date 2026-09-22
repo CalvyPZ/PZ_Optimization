@@ -148,6 +148,54 @@ public final class PerformanceSettings {
       pzopt.GifTextures.releaseAll();
    }
 
+   // pzopt: the main menu's "Update PZ Optimization" item (media/lua/client/pzopt/pzopt_mainscreen_update.lua)
+   // polls pzopt.Updater through these: one release check per boot, then the download + install on a
+   // daemon thread; state names in Updater.State. The game restarts to load the new classes.
+   public void pzoptUpdateCheck() {
+      pzopt.Updater.check();
+   }
+
+   /** "idle", "checking", "up-to-date", "available", "downloading", "installing", "installed" or "error". */
+   public String getPzoptUpdateState() {
+      return pzopt.Updater.state();
+   }
+
+   public String getPzoptUpdateTag() {
+      return pzopt.Updater.tag();
+   }
+
+   public String getPzoptUpdateNotes() {
+      return pzopt.Updater.notes();
+   }
+
+   public String getPzoptUpdatePublished() {
+      return pzopt.Updater.published();
+   }
+
+   public String getPzoptUpdatePageUrl() {
+      return pzopt.Updater.pageUrl();
+   }
+
+   public String getPzoptUpdateInstalledCommit() {
+      return pzopt.Updater.installedCommit();
+   }
+
+   public String getPzoptUpdateMessage() {
+      return pzopt.Updater.message();
+   }
+
+   public int getPzoptUpdateProgress() {
+      return pzopt.Updater.progress();
+   }
+
+   public boolean canPzoptUpdateInstall() {
+      return pzopt.Updater.canInstall();
+   }
+
+   public boolean pzoptUpdateInstall() {
+      return pzopt.Updater.install();
+   }
+
    public void setLightingQuality(int lighting) {
    }
 

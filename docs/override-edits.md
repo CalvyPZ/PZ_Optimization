@@ -739,6 +739,36 @@ a table in the Lua); the clips are `media/ui/pzopt/compare/<clip>-{stock,opt}.gi
 Verified in game on 2026-09-21 (queue job `menu-check4`: hover, scroll, wheel
 over the preview, clips playing, panel sized to its content).
 
+Main-menu update item (added 2026-09-22): eleven more one-line forwards to
+`pzopt.Updater` for `media/lua/client/pzopt/pzopt_mainscreen_update.lua`:
+`pzoptUpdateCheck()` (starts the release check once per boot; a no-op with
+`updateCheck=false` or in a harness run), `getPzoptUpdateState()` ("idle",
+"checking", "up-to-date", "available", "downloading", "installing", "installed",
+"error"), `getPzoptUpdateTag` / `Notes` / `Published` / `PageUrl` /
+`InstalledCommit` / `Message` / `Progress`, `canPzoptUpdateInstall()` (a
+`pzopt-installed.txt` or `pzopt-files.txt` exists to replace) and
+`pzoptUpdateInstall()`. The check lists the GitHub releases on a daemon thread
+and picks the newest one (publish date) that carries
+`pzopt-<revision>-classes.zip` for the running game; it is an update when the
+tag's commit (`win-<revision>-<commit>`) differs from build-info's `commit=` and
+its publish date is after build-info's `built=` (both stamped by `build.sh` since
+this change, so a from-source build newer than the last release stays quiet).
+The install downloads the zip next to the game folder, checks the zip's
+revision, unpacks it into `pzopt-update.tmp/`, moves every file over the
+installed one, deletes what the previous manifest listed and the zip no longer
+has, and rewrites `pzopt-installed.txt` in the installers' format. The Lua adds
+an `ISLabel` styled like the stock items (`UIFont.Large`, the hover fade of
+`MainScreen.prerenderBottomPanelLabel`, the menu sounds) between Credits and
+Exit (Exit and the panel move down one row); it is always there like the stock
+items, greyed out and inert (no fade, no click) while the check runs, when the
+build is current or when the check failed, enabled once a newer build is
+offered; its text follows the state ("UPDATING... 43 %", "RESTART TO FINISH THE
+UPDATE"), and
+the dialog (`PzoptUpdateDialog`) shows the installed and offered builds, the
+release notes, a progress bar and Update now / Later, then Quit game / Later:
+classes the JVM already loaded stay the old ones until a restart. Never in the
+pause menu; no joypad entry (the stock list is hard-coded).
+
 ## zombie.core.skinnedmodel.model.Model (added 2026-09-19, night, game load; GitHub issue #1)
 
 `CreateShader(name)`: the stock method always posts a lambda to the render

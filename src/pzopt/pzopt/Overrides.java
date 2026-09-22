@@ -119,7 +119,7 @@ public final class Overrides {
    }
 
    /** zombie.GitVersion.REVISION read reflectively, so it comes from the jar's class, not an inlined constant. */
-   private static String jarRevision() {
+   static String jarRevision() {
       try {
          Field f = Class.forName("zombie.GitVersion").getField("REVISION");
          return String.valueOf(f.get(null));

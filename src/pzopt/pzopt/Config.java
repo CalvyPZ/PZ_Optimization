@@ -27,6 +27,11 @@ import java.util.Properties;
  *                            Lua checksum a client sends to the server, like SandboxVars.lua is in stock: a server without
  *                            them otherwise refuses the join with "File doesn't exist on the server" (default true; not
  *                            tied to `enabled`, the files are on disk either way)
+ *   updateCheck true/false   the main menu asks the GitHub releases once per boot whether a newer build for this game
+ *                            revision exists and offers an "Update PZ Optimization" menu item that downloads and
+ *                            installs it (pzopt.Updater; default true; never in harness runs)
+ *   devUpdateOffer true/false  dev: offer the newest release for this revision whatever this build is, to see the
+ *                            menu item, the dialog and the install (default false)
  *   translucentCache true/false  reuse prepared translucent render lists (default false)
  *   hotsaveIntervalSec int   (default 30) minimum seconds between the "hot saves" of the ancillary systems (meta grid, game time,
  *                            world map, entities) that ChunkSaveWorker runs on the game thread whenever its chunk
@@ -212,6 +217,8 @@ public final class Config {
    public static final boolean WAKE = bool("wake", true);
    public static final boolean DEV = bool("dev", false);
    public static final boolean LUA_CHECKSUM_EXEMPT = bool("luaChecksumExempt", true); // NetChecksum skips media/lua/*/pzopt/ files: they only exist on clients
+   public static final boolean UPDATE_CHECK = bool("updateCheck", true); // main menu: check the GitHub releases for a newer build and offer the update item (pzopt.Updater)
+   public static final boolean DEV_UPDATE_OFFER = bool("devUpdateOffer", false); // dev: offer the newest release for this revision whatever this build is (menu item / dialog / install checks)
    public static final boolean TRANSLUCENT_CACHE = bool("translucentCache", false);
    public static final int HOTSAVE_INTERVAL_SEC = integer("hotsaveIntervalSec", 30);
    public static final boolean HOTSAVE_STAGED = bool("hotsaveStaged", false);
