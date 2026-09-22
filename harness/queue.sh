@@ -748,7 +748,10 @@ remote_wrapper() { # <job> <machine> <install> <argv...> -> $job/remote-job.sh (
       [[ "$(mcfg "$m" inhibit)" == true ]] && echo "pkill -f '[p]zq-inhibit.py' 2>/dev/null"
       echo 'exit $rc'
     else
-      [[ "$install" == opt ]] && echo 'harness/run-mac.sh install build/classes || exit 1'
+      # run-mac.sh install refuses over an install (as install.sh does); uninstall is a no-op without one. Before this,
+      # sessions uninstalled by hand over ssh before an --install opt job and removed the files under a running one
+      # (jobs 1117 / 1118, 2026-09-23: ClassNotFoundException mid-boot, then a run with nothing installed)
+      [[ "$install" == opt ]] && echo 'harness/run-mac.sh uninstall >/dev/null || exit 1; harness/run-mac.sh install build/classes || exit 1'
       echo "$(mcfg "$m" runner harness/run-mac.sh) $q$(mcfg "$m" run_args)"
     fi
   } > "$d/remote-job.sh"

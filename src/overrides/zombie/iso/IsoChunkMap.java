@@ -123,10 +123,14 @@ public final class IsoChunkMap {
          }
 
          chunkGridWidth = PZMath.min(chunkGridWidth, 19);
-         // pzopt: chunkGridWidth, the player's chunk grid size instead of the screen-size one (0 = the stock value above);
-         // odd like stock so the player's chunk stays the centre, 5..15 chunks
-         if (pzopt.Overrides.enabled() && pzopt.Config.CHUNK_GRID_WIDTH > 0) { // pzopt
-            chunkGridWidth = PZMath.clamp(pzopt.Config.CHUNK_GRID_WIDTH | 1, 5, 15); // pzopt
+         // pzopt: chunkGridWidth, the player's chunk grid size instead of the screen-size one (0 = the stock value above,
+         // "auto" = wide enough to fill the screen at the widest zoom); odd like stock so the player's chunk stays the centre
+         if (pzopt.Overrides.enabled() && (pzopt.Config.CHUNK_GRID_AUTO || pzopt.Config.CHUNK_GRID_WIDTH > 0)) { // pzopt
+            int pzoptStock = chunkGridWidth; // pzopt
+            chunkGridWidth = pzopt.ChunkGrid.width(pzoptStock, pzopt.Config.CHUNK_GRID_AUTO, pzopt.Config.CHUNK_GRID_WIDTH, // pzopt
+               Core.getInstance().getScreenWidth(), Core.getInstance().getScreenHeight(), Core.getInstance().getMaxZoom()); // pzopt
+            pzopt.Log.info("chunk grid: " + chunkGridWidth + " (setting " + pzopt.Config.CHUNK_GRID_SETTING + ", stock " + pzoptStock // pzopt
+               + ", screen " + Core.getInstance().getScreenWidth() + "x" + Core.getInstance().getScreenHeight() + ", max zoom " + Core.getInstance().getMaxZoom() + ")"); // pzopt
          } // pzopt
          chunkWidthInTiles = chunkGridWidth * 8;
       }

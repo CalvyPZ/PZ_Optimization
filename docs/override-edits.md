@@ -1046,6 +1046,16 @@ and `CalcChunkWidth` runs in `GameLoadingState` before the cell is built, so the
 the session. Default 0 = stock. Options tab combo "Render distance (chunk grid width)": 7..15, so
 at 1080p and above it only ever shrinks the stock 19 (at 720p, 15 is above the stock 13).
 
+Second edit of 2026-09-22 (`chunkGridWidth=auto`, cap raised to 41): the stock width stops at 19 whatever the
+screen, and the grid's diamond covers a W x H screen only while its width reaches W + 2H pixels at 128 / zoom
+pixels per tile, so at 5120x2160 the widest zoom (2.5) needs 23 chunks and the stock 19 leaves dark screen
+corners from zoom 2.25 outward (the maintainer's report). The width is now `pzopt.ChunkGrid.width(stock, auto,
+fixed, screen W, screen H, Core.getMaxZoom())`: "auto" = the smallest odd width covering the screen at the widest
+zoom plus one chunk (the player sits anywhere in the centre chunk), never below the stock width (25 at 5120x2160,
+21 at 3840x2160, the stock 19 at 1080p); a number = that width made odd; both clamped to 5..41 (an 8K screen at
+zoom 2.5 needs 41). One `[pzopt] chunk grid:` console line gives the width and its inputs. Tests:
+`tests/pzopt/ChunkGridTest`. The key is read as a string now (`Config.CHUNK_GRID_SETTING`).
+
 ## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, occlusion grid on lighting-only frames)
 
 `renderTilesInternal` decides whether to rebuild the occluded-squares grid through

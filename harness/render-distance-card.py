@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 
 OUT = "docs/media/render-distance-card.png"
-DATE = "2026-09-22"
+DATE = "2026-09-23"
 # docs/media-style.md, SDR column
 BG, PANEL, RULE, INK, INK2, MUTED = "#0b0b0e", "#111114", "#26262c", "#f0f0f4", "#b4b4b8", "#8a8a90"
 STOCK, OPT = "#c9592b", "#44de7c"
@@ -42,10 +42,10 @@ X0 = PAD + 48
 text(X0, 86, "New! Render distance", 30, OPT, "bold")
 text(W - X0, 86, DATE, 16, MUTED, ha="right", family=MONO)
 text(X0, 134, "Options > Optimizations > Chunk streaming: how many chunks per side stay loaded, simulated, lit and drawn "
-     "around you. Vanilla (default) or 7 to 15;", 14, INK2)
-text(X0, 158, "vanilla is 19 at 1080p and above. For CPU-limited setups (heavy mod lists, NPC mods). Measured here on a "
-     "desktop: RTX 4090, 5120x2160, max zoom, uncapped, Linux.", 14, INK2)
-text(X0, 196, "Both columns with every optimization on; only the grid differs. fps mean, frame time mean and p99; one run per cell.", 13, MUTED)
+     "around you. Vanilla (default), 7 to 31, or Auto:", 14, INK2)
+text(X0, 158, "vanilla stops at 19, sized for 1080p; Auto fills the screen at the widest zoom (25 at 5120x2160: 225 fps here, "
+     "same as vanilla). Smaller grids are for CPU-limited setups (heavy mod lists, NPC mods).", 14, INK2)
+text(X0, 196, "RTX 4090, 5120x2160, max zoom, uncapped, Linux; every optimization on, only the grid differs. fps mean, frame time mean and p99; one run per cell.", 13, MUTED)
 
 X_ROUTE = X0
 X_S, X_P = X0 + 760, X0 + 1360
@@ -76,6 +76,6 @@ text(X0, H - PAD - 84, "Bars: fps mean, 0 to 300. This GPU is the limit on both 
      "the fewer chunks save CPU work, which matters most where the CPU is the limit.", 12.5, INK2)
 text(X0, H - PAD - 60, "The trade-off: at wide zoom the world ends before the screen edge, and zombies, cars and sounds "
      "beyond the grid are not simulated. Restart to apply.", 12.5, INK2)
-text(X0, H - PAD - 30, "The runs behind these numbers: github.com/xD3I/PZ_Optimization, commit da3cdea (" + DATE + ").", 11.5, MUTED)
+text(X0, H - PAD - 30, "The runs behind these numbers: github.com/xD3I/PZ_Optimization, docs/override-edits.md (IsoChunkMap, chunkGridWidth).", 11.5, MUTED)
 fig.savefig(OUT, dpi=100, facecolor=BG)
 print(OUT, W, H)
