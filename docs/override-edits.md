@@ -1036,6 +1036,16 @@ chunk 1071,1434: the worker's pass and the streamer retry both overflowed. A squ
 where the index says reads as not loaded, exactly what the map edge returns; two int compares on
 fields already in cache.
 
+Edit of 2026-09-22 (`chunkGridWidth`, a user's suggestion): `CalcChunkWidth` keeps the stock choice
+(the debug 5x5..13x13 options first, else 13 * 1.5 * min(1, screen / 1080p), odd, at most 19) and
+then, when `pzopt.Config.CHUNK_GRID_WIDTH` is above 0 and the overrides are enabled, replaces the
+width with that value made odd and clamped to 5..15 (the maintainer's cap) before `chunkWidthInTiles` is derived. Every
+consumer reads the two statics (the chunk map arrays, `IsoCell` square grid, lighting / pathfind /
+Bullet natives via their init and per-frame calls, the multiplayer connect range, which is a byte),
+and `CalcChunkWidth` runs in `GameLoadingState` before the cell is built, so the width is fixed for
+the session. Default 0 = stock. Options tab combo "Render distance (chunk grid width)": 7..15, so
+at 1080p and above it only ever shrinks the stock 19 (at 720p, 15 is above the stock 13).
+
 ## zombie.iso.fboRenderChunk.FBORenderCell (edit of 2026-09-20 evening, occlusion grid on lighting-only frames)
 
 `renderTilesInternal` decides whether to rebuild the occluded-squares grid through

@@ -123,6 +123,11 @@ public final class IsoChunkMap {
          }
 
          chunkGridWidth = PZMath.min(chunkGridWidth, 19);
+         // pzopt: chunkGridWidth, the player's chunk grid size instead of the screen-size one (0 = the stock value above);
+         // odd like stock so the player's chunk stays the centre, 5..15 chunks
+         if (pzopt.Overrides.enabled() && pzopt.Config.CHUNK_GRID_WIDTH > 0) { // pzopt
+            chunkGridWidth = PZMath.clamp(pzopt.Config.CHUNK_GRID_WIDTH | 1, 5, 15); // pzopt
+         } // pzopt
          chunkWidthInTiles = chunkGridWidth * 8;
       }
    }

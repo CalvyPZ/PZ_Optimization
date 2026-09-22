@@ -100,9 +100,10 @@ local SECTIONS = {
               tip = "A square whose light moved by this much since its texture was last baked (a torch or headlight beam sweeping in) re-bakes now, like stock; smaller drift keeps the holds above." },
             { key = "lightingStrongBudget", label = "Strong light changes re-baked at once per frame",
               choices = { "0", "4", "8", "16", "32" }, note = { ["0"] = "no cap" },
-            { key = "lightingStrongFrameMs", label = "Ease strong light re-bakes on slow frames",
-              choices = { "0", "12", "20", "33" }, note = { ["0"] = "fixed budget (default)" }, tip = "A game-thread frame longer than this many milliseconds halves the number of strong-light chunk re-bakes allowed next frame (it grows back on fast frames). Stops the slow-frame -> more re-bakes -> slower-frame loop of a big downtown horde." },
               tip = "How many chunk textures with a strong light change re-bake in the same frame; the rest keep the holds above. A torch or headlight beam touches a few per frame; turning moves the out-of-sight fade over every exterior tile (downtown Louisville: 10.8 fps with no cap)." },
+            { key = "lightingStrongFrameMs", label = "Ease strong light re-bakes on slow frames",
+              choices = { "0", "12", "20", "33" }, note = { ["0"] = "fixed budget" },
+              tip = "A game-thread frame longer than this many milliseconds halves the number of strong-light chunk re-bakes allowed next frame (it grows back on fast frames). Stops the slow-frame -> more re-bakes -> slower-frame loop of a big downtown horde." },
             { key = "lightingGlobalDeltaPct", label = "Global light move that keeps the spread (%)",
               choices = { "1", "2", "5", "10", "100" }, note = { ["100"] = "never" },
               tip = "A lightning flash or a fast dusk moves the whole scene's light at once; past this per-frame move the lighting re-bakes stay spread over frames instead of landing at once." },
@@ -382,6 +383,11 @@ local SECTIONS = {
               tip = "The initial 361-chunk recalc uses this many threads, then the pool shrinks back." },
             { key = "wake", label = "Wake the streamer on demand",
               tip = "The streamer thread wakes when a chunk is queued instead of polling every 140 ms." },
+            { key = "chunkGridWidth", label = "Render distance (chunk grid width)",
+              choices = { "0", "7", "9", "11", "13", "15" },
+              note = { ["0"] = "vanilla", ["7"] = "56 tiles", ["9"] = "72 tiles", ["11"] = "88 tiles", ["13"] = "104 tiles",
+                       ["15"] = "120 tiles" },
+              tip = "How many chunks (8 tiles each) per side are loaded, simulated, lit and drawn around you, at most 15. Vanilla picks it from the screen size: 19 (152 tiles) at 1080p and above, 13 at 720p. A smaller grid means less world to update every frame, which helps CPU-limited setups (heavy mod lists, NPC mods), but at wide zoom the world ends before the screen edge and zombies, vehicles and sounds beyond it are not simulated. Only the grid size changes; zombie AI, streaming and culling are untouched." },
             { key = "chunkHandoffDivisor", label = "Chunk hand-off budget (queue divisor)",
               choices = { "0", "4", "8", "16" }, note = { ["0"] = "stock: up to 4 chunks a frame" },
               tip = "At most 1 + queued/divisor freshly loaded chunks are handed to the game thread per frame, so a chunk row arriving at once is spread over a few frames instead of one long one." },
@@ -535,6 +541,7 @@ local CLIP_TITLES = {
     zombies = "Downtown Louisville horde: stock vs stock + only the zombie simulation settings (all cores, lookups, push-apart)",
     player = "Downtown Louisville horde: stock vs stock + only the player line-of-sight settings",
     zgt = "Downtown Louisville horde: every optimization on, without vs with the zombie game-thread settings (on their own over stock they gain nothing: the stock frame waits on other work)",
+    grid = "Rosewood, camera spinning, uncapped, every optimization on: the vanilla chunk grid (19x19) vs 15x15",
 }
 -- Clips whose stock side is a shared GIF (one stock run for several group clips): <STOCK_FILE[clip]>-stock.gif.
 local STOCK_FILE = { zombies = "lou", player = "lou" }
@@ -544,11 +551,13 @@ local CLIP_SIDES = {
     overlay = { "OVERLAY OFF", "OVERLAY ON (F9)" },
     alone = { "STOCK GAME", "STOCK + THESE SETTINGS ONLY" },
     without = { "EVERYTHING ON EXCEPT THESE", "EVERYTHING ON" },
+    grid = { "VANILLA GRID (19x19)", "15x15 GRID" },
 }
 local function clipSides(clip)
     if string.sub(clip, 1, 2) == "ov" then return CLIP_SIDES.overlay end
     if STOCK_FILE[clip] then return CLIP_SIDES.alone end
     if clip == "zgt" then return CLIP_SIDES.without end
+    if clip == "grid" then return CLIP_SIDES.grid end
     return CLIP_SIDES.default
 end
 local KEY_CLIP = {
@@ -562,7 +571,7 @@ local KEY_CLIP = {
     playerLosFast = "player", zombieSpotFast = "player", charDrawPrep = "horde", zombieAtlasFast = "horde", charDrawThreads = "horde",
     actionSnapshotFilter = "zgt", emitterParamSkip = "zgt", separateFast = "zgt", separateParallel = "zgt", sleepCheckMemo = "zgt",
     stateParamMemo = "zgt", actionGroupCache = "zgt", profilerThreadMemo = "zgt", zombieSimLodTiles = "zgt", zombieSimLodSteps = "zgt",
-    zombieCheckSpread = "zgt",
+    zombieCheckSpread = "zgt", chunkGridWidth = "grid",
     animBonesParallel = "zombies", vehicleCull = "zombies", frameThreads = "zombies", actionEvalParallel = "zombies", ecsLookupFast = "zombies",
     actionConditionFast = "zombies", skinTransformsPrecompute = "zombies", skinPalettePrecompute = "zombies", shadowPrep = "zombies",
     boneIndexCache = "zombies", lightingReadParallel = "zombies", zombieCullSortFast = "zombies",
@@ -713,6 +722,7 @@ local EFFECTS = {
     loadWorkers = { cores = 2, load = -1 },
     wake = { chunks = -2 },
     chunkHandoffDivisor = { cpu = -1, chunks = 1 },
+    chunkGridWidth = { cpu = -2, gpu = -1, ram = -1, vram = -1, load = -1 },
     hotsaveStaged = { cpu = -1 },
     hotsaveIntervalSec = { cpu = -2, disk = -2 },
     -- boot
@@ -1360,7 +1370,7 @@ local function addSearchRows(self, S, splitpoint, y, width)
 end
 
 local function comboLabels(entry, default, saved)
-    local labels = { "Default (" .. default .. ")" }
+    local labels = { "Default (" .. default .. ((entry.note and entry.note[default]) and (", " .. entry.note[default]) or "") .. ")" }
     local values = {}
     local seen = {}
     for _, v in ipairs(entry.choices) do

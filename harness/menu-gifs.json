@@ -25,6 +25,21 @@
   },
   "title": "120 km/h drive in heavy fog"
  },
+ "grid": {
+  "opt": {
+   "bytes": 1324328,
+   "file": "grid-opt.gif",
+   "run": "prev-gridspin3-15-20260922-234953",
+   "video_t0": 18.23
+  },
+  "stock": {
+   "bytes": 1583474,
+   "file": "grid-stock.gif",
+   "run": "prev-gridspin3-vanilla-20260922-234849",
+   "video_t0": 16.98
+  },
+  "title": "Rosewood, camera spinning, uncapped: vanilla 19x19 chunk grid vs 15x15"
+ },
  "horde": {
   "opt": {
    "bytes": 1068135,

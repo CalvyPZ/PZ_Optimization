@@ -678,7 +678,9 @@ apply_install() { # local --install handling; leaves $Q/left-stock when the game
       # click-to-start forever (job 0204 vp0-torch, 2026-09-22): put the job's own build back first.
       [[ "$kind" =~ ^(run|mp)$ ]] || return 0
       [[ -f "$Q/left-stock" ]] && return 0
-      (cd "$cwd" && scripts/pzopt.sh status 2>/dev/null | grep -q '^installed: *yes') && return 0
+      # grep without -q: -q exits at the first match, pzopt.sh status then dies of SIGPIPE on its file list and
+      # pipefail fails the whole check on an installed game (jobs 0997 / 1000 / 1001, 2026-09-22)
+      (cd "$cwd" && scripts/pzopt.sh status 2>/dev/null | grep '^installed: *yes' >/dev/null) && return 0
       echo "[$(ts)] --install keep, but the game is stock and no --install stock job left it so; reinstalling from $cwd" >> "$d/output.log"
       repo="$cwd" ;;
     opt) repo="$cwd" ;;

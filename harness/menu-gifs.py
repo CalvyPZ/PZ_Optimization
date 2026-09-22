@@ -72,6 +72,10 @@ for name, stock, opt, title, extra in (
         ('player', 'tri-lou-stock', 'prev-lou-player', 'Louisville horde: stock vs stock + the player line-of-sight keys', dict(stock_file='lou')),
         ('zgt', 'zt1-rec-off', 'zt15-rec-plain', 'Louisville horde: everything on without vs with the zombie game-thread keys', {})):
     CLIPS[name] = dict(stock=stock, opt=opt, after=3.0, title=title, **extra)
+# chunkGridWidth (2026-09-22): the uncapped Rosewood spin with everything on, the vanilla 19x19 chunk grid vs 15x15 (runs
+# prev-gridspin3-vanilla / prev-gridspin3-15; the Louisville pair of that evening was never-seen black on both sides)
+CLIPS['grid'] = dict(stock='prev-gridspin3-vanilla', opt='prev-gridspin3-15', after=2.0,
+                     title='Rosewood, camera spinning, uncapped: vanilla 19x19 chunk grid vs 15x15')
 # The performance overlay's elements (2026-09-22): the spinning route recorded with the overlay off (`ov-off`) and with
 # every default element on at overlayFont=Large (`ov-full`); each clip is one crop of the 5120x2160 capture, halved
 # (Large text ~30 px -> 15 px, readable), 16 fps x 3 s = 48 frames (the overlay's own numbers move at 1-2 Hz), no

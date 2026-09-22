@@ -14,6 +14,7 @@ PzoptOptionClasses = {
     bootPump = { "FileSystemImpl", "pzopt.BootPump" },
     charDrawPrep = { "pzopt.CharDraw" },
     charDrawThreads = { "pzopt.CharDraw" },
+    chunkGridWidth = { "IsoChunkMap" },
     chunkHandoffDivisor = { "IsoChunkMap" },
     chunkMapFast = { "IsoChunkMap" },
     curtainDepthNudgePct = { "FBORenderCell" },
