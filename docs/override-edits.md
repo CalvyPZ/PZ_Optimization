@@ -1800,3 +1800,59 @@ runs first: the vehicle's bounding circle (half the horizontal diagonal of its s
 centre-of-mass offset plus a 1-tile margin (getX/getY follow the physics origin a tick behind)) against the segment's nearest point; a miss skips the
 exact test, a hit runs it unchanged. Key `vehicleCull` (true); a vehicle without a script always runs
 the exact test.
+
+## zombie.iso.fboRenderChunk.FBORenderCell + IsoChunk + MultiTextureFBO2 (edit of 2026-09-22, chunk textures across zoom changes)
+
+Stock frees a chunk level's textures the frame the level leaves the screen (`checkNewlyOnScreenChunks`,
+`renderOneLevel`: `freeFBOsForLevel`) and creates them again, dirty, when it returns. Zooming in
+shrinks the screen, so it frees most of what was visible; zooming back out bakes every level that
+reappears in the frame it appears, and the bake budget never caught those: `DIRTY_CREATE` is only set
+by `createFBOForLevel`, inside `beginRenderChunkLevel`, after the deferral decision, so a level with
+no texture yet always baked at once. On the south route at 5120x2160 a 0.25 → 2.5 wheel spin was 320-410
+bakes in one frame, 77-109 ms, then a 375 ms frame (the render thread allocating the textures); one notch
+out at wide zoom 45-51 ms frames (stock runs `zs-out-jump9`, `zs-out-wheel`; rig `--flag zoom_cycle=`
+`zoom_span=` `zoom_jump=`, `harness/zoomsteps.py`).
+
+Now (`pzopt.ZoomRetain`, keys `zoomRetain` true, `zoomRebakeBudget` 12, `zoomFrameMs` 10, `zoomPlaceholder`):
+
+- Off-screen levels go through `ZoomRetain.releaseOffScreen`: the textures stay while the chunk lies
+  inside the screen rectangle the widest zoom would show (centred on the camera character like
+  `PlayerCamera.center`, one chunk of margin; the high-res texture, a debug option, inside the widest
+  zoom below 0.75), else they are freed as before. That is the set stock holds at the widest zoom, so
+  the texture memory stays within stock's own maximum. Chunk unload still frees everything.
+- A level coming back on screen that was seen before (`prevMinZ` set) gets a bit in
+  `IsoChunk.pzoptZoomReturned[player]` (cleared in `removeFromWorld`); stock's `invalidateLevel(1024)`
+  stays. In `renderOneLevel` such a level, and every first-sight level while a zoom flood lasts (the zoom
+  changed this frame or zoom work was deferred last frame), bakes only when the frame's plan allows it;
+  otherwise it is held with its kept texture on screen (the stale path), its other-scale texture, or
+  nothing, and returns. Object / item / obscuring dirt still bakes at once; lighting, redraw, tree and
+  cutaway dirt is held.
+- The plan (`pzoptZoomPlan`, once per player per frame before the chunk loop): the pending levels of
+  the loaded grid sorted by their chunk's distance to the camera character, the first N allowed
+  (`IsoChunk.pzoptZoomAllowed`), so the picture fills from the player outwards and the cutaway-relevant
+  chunks land first. N follows the last game-thread frame: over `zoomFrameMs` it halves (a fresh
+  chunk texture costs the render thread ~1 ms of GL allocation on top of the bake, which shows up as a
+  hand-off wait), under 3/4 of it grows by two, within [4, `zoomRebakeBudget`]. Credits the plan did
+  not give to a pending level go to first-sight flood levels in chunk order; in the frame the zoom
+  changes nothing new starts at all (the returned set is only known after that frame's on-screen scan).
+- `MultiTextureFBO2.pzoptWidestZoomBelow(limit)`: the widest selectable zoom under a limit (the high-res
+  rectangle).
+
+Results (240 cap, south route, `zoomsteps.py --window 1.0`): 0.25 ↔ 2.5 instant jumps, worst frame per
+jump 375 / 86 / 59 / 52 ms (stock) → see `docs/results.md` for the adopted build's numbers.
+
+## zombie.core.textures.MultiTextureFBO2 (edit of 2026-09-22, zoom motion as a cubic Bézier)
+
+`update()`: stock moves the zoom towards the target by a fixed 0.03 per frame (0.004 × 1.5 × 5 for a manual
+change; auto-zoom without the ×5) and snaps onto it, so a wheel notch takes 8 frames whatever the frame rate
+(16 ms at 500 fps, 130 ms at 60), at constant speed with an abrupt stop. With `zoomEaseMs` > 0 (300) a
+manual change (`autoZoom` off for the player) takes `pzoptEase`: the first frame that sees a new target
+(any entry point: `doZoomScroll`, `setTargetZoom`, `setZoomAndTargetZoom`) records the current zoom and the
+time; every frame after that sets `zoom = from + (target − from) × curve(elapsed / zoomEaseMs)` with
+`pzopt.ZoomEase`, a CSS-style cubic Bézier through (0,0) and (1,1) with control points from `zoomEase`
+(x1,y1,x2,y2; default 0.25,0.1,0.25,1.0 = CSS "ease"; the solver is Newton steps on x(t) with a bisection
+fallback, `tests/pzopt/ZoomEaseTest`). A new target during the motion restarts the curve from the current
+zoom, so nothing jumps; `dirtyRecalcGridStackTime` is set while it moves as stock does. `zoomEaseMs=0` is
+the stock step. Auto-zoom keeps the stock step (it retargets every frame with a distance term, a restarted
+curve would never leave its slow start).
+

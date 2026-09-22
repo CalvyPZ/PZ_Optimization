@@ -3,6 +3,8 @@
 joined with the per-frame timings of a harness run.
 
   harness/attribute.py <run-dir>... [--threshold-ms 20] [--top 20] [--json out.json] [--thread MainThread|main]
+                       [--after-mark PREFIX:N]   "slow" = the frame holding every "# PREFIX..." mark and the N-1 after it, instead of a threshold
+                                                (e.g. zoom-:2 for the frames of a harness zoom step, flag zoom_cycle)
                        [--check-anchors] [--java-period-ms 10] [--native-period-ms 20]
                        [--drill pkg.Class.method[,...]]   what a method was doing (callees) in slow vs ordinary frames
 
@@ -82,6 +84,7 @@ def load_frames(run):
     markers = {label: offset_us}. frame_id is the game's frame counter (None if the log predates it).
     """
     frames, anchors, markers = [], [], {}
+    marklist = []  # every mark in order, (label, offset_us); markers keeps the last per label
     anchor = None
     cursor = None  # epoch µs at which the next frame starts
     fid = None     # game frame counter of the next frame
@@ -97,6 +100,7 @@ def load_frames(run):
                 fid = int(parts[4]) if len(parts) > 4 else None
             else:
                 markers[parts[1]] = int(parts[2])
+                marklist.append((parts[1], int(parts[2])))
             continue
         if cursor is None:  # frames before the first anchor (older log format): unusable for the join
             continue
@@ -108,6 +112,7 @@ def load_frames(run):
     window = None
     if anchors and "route-start" in markers and "route-end" in markers:
         window = (offset_to_epoch(anchors, markers["route-start"]), offset_to_epoch(anchors, markers["route-end"]))
+    markers["__list__"] = marklist
     return frames, window, anchors, markers
 
 
@@ -233,7 +238,7 @@ class Tally:
                 self.marker_us[label] += period_us
 
 
-def attribute(runs, threshold_ms=20.0, java_period_ms=10.0, native_period_ms=20.0, drill=()):
+def attribute(runs, threshold_ms=20.0, java_period_ms=10.0, native_period_ms=20.0, drill=(), after_mark=None):
     groups = {"slow": Tally(), "ordinary": Tally(), "spike33": Tally(), "spike50": Tally()}
     drills = {g: [Drill(m) for m in drill] for g in ("slow", "ordinary")}
     info = {"runs": [], "dropped_boundary": 0, "outside_window": 0, "gc_in_window": [], "pauses_in_window": [], "stalls_in_window": []}
@@ -248,12 +253,25 @@ def attribute(runs, threshold_ms=20.0, java_period_ms=10.0, native_period_ms=20.
             frames = [f for f in frames if window[0] <= f[0] < window[1]]
         starts = [f[0] for f in frames]
         thr = threshold_ms * 1000
-        for start, end, d, _fid in frames:
-            for g, lim in (("slow", thr), ("spike33", 33333), ("spike50", 50000)):
+        slow_idx = None  # --after-mark: the frame indices that count as slow
+        if after_mark:
+            prefix, nf = after_mark
+            slow_idx = set()
+            for label, off in markers.get("__list__", []):
+                if label.startswith(prefix):
+                    i0 = max(0, bisect.bisect_right(starts, offset_to_epoch(anchors, off)) - 1)  # the frame the mark fell in
+                    slow_idx.update(range(i0, min(i0 + nf, len(frames))))
+        def is_slow(idx, d):
+            return idx in slow_idx if slow_idx is not None else d >= thr
+        for idx, (start, end, d, _fid) in enumerate(frames):
+            for g, lim in (("spike33", 33333), ("spike50", 50000)):
                 if d >= lim:
                     groups[g].frames += 1
                     groups[g].frame_us += d
-            if d < thr:
+            if is_slow(idx, d):
+                groups["slow"].frames += 1
+                groups["slow"].frame_us += d
+            else:
                 groups["ordinary"].frames += 1
                 groups["ordinary"].frame_us += d
         assigned = 0
@@ -272,11 +290,11 @@ def attribute(runs, threshold_ms=20.0, java_period_ms=10.0, native_period_ms=20.
                 continue
             assigned += 1
             period = (jp if kind == "java" else native_period_ms) * 1000
-            if d >= thr:
+            if is_slow(i, d):
                 groups["slow"].add(kind, st, period)
             else:
                 groups["ordinary"].add(kind, st, period)
-            for dr in drills["slow" if d >= thr else "ordinary"]:
+            for dr in drills["slow" if is_slow(i, d) else "ordinary"]:
                 dr.add(st)
             if d >= 33333:
                 groups["spike33"].add(kind, st, period)
@@ -410,6 +428,7 @@ def to_json(groups, info, threshold_ms):
 if __name__ == "__main__":
     args = sys.argv[1:]
     threshold, top, out_json, check = 20.0, 20, None, False
+    after_mark = None
     jp, np_ = 10.0, 20.0
     runs, drill = [], []
     i = 0
@@ -417,6 +436,9 @@ if __name__ == "__main__":
         a = args[i]
         if a == "--threshold-ms":
             threshold = float(args[i + 1]); i += 2
+        elif a == "--after-mark":
+            pfx, nf = args[i + 1].rsplit(":", 1)
+            after_mark = (pfx, int(nf)); i += 2
         elif a == "--top":
             top = int(args[i + 1]); i += 2
         elif a == "--json":
@@ -436,7 +458,7 @@ if __name__ == "__main__":
     if check:
         ok = all([check_anchors(r) for r in runs])
         sys.exit(0 if ok else 1)
-    groups, info = attribute(runs, threshold, jp, np_, drill)
+    groups, info = attribute(runs, threshold, jp, np_, drill, after_mark)
     print_report(groups, info, threshold, top)
     print_drills(info, top)
     info.pop("drills")

@@ -55,12 +55,18 @@ harness/run.sh --label <name> --mode bench --flag zoom=max --prop instrument=tru
 ```
 Scene presets (night with / without the torch, thunderstorm, heavy fog, both; spinning Rosewood route, 25 s):
 ```bash
-harness/run.sh --label <name> --preset night-torch --prop instrument=true --no-dashboard   # or night-dark, storm, fog, storm-fog
+harness/run.sh --label <name> --preset night-torch --prop instrument=true --no-dashboard   # or night-dark, storm, fog, storm-fog, helicopter
 ```
 Presets only add flags (`time_of_day`, `torch`, `visible`, `weather`, `fog`, route, turn, zoom); later `--flag`s override
 (`--preset storm --flag fog=0.5` = storm with half fog).
 Check `weather=`/`torch=`/`night_strength=` in `pzopt-bench.out` and compare preset runs only with
 runs of the same preset.
+Camera zoom steps on the bench route (2026-09-22; `zoom=` sets the start level, `zoom_cycle=` seconds between one-notch
+steps in then out, `zoom_span=9` = whole 0.25..2.5 range per step, `zoom_jump=true` = no ease; read with `harness/zoomsteps.py`;
+stock runs need `--option frameRate=240 --option uncappedFPS=false` because stock resets a saved uncappedFPS to a 60 lock):
+```bash
+harness/run.sh --label <name> --mode bench --flag route=S:450 --flag zoom=0.25 --flag zoom_cycle=1.5 --prop uncappedFps=true --prop instrument=true --no-dashboard
+```
 Drive, 60 km/h A/B route (the comparable one):
 ```bash
 harness/run.sh --label <name> --mode drive --flag route=E:1200 --route-seconds 90 \

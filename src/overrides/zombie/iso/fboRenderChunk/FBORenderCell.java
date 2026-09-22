@@ -1304,6 +1304,9 @@ public final class FBORenderCell {
                if (!c.IsOnScreen(true)) {
                   for (int z = c.minLevel; z <= c.maxLevel; z++) {
                      renderLevels.setOnScreen(z, false);
+                     if (pzoptZoomRetain) { // pzopt: zoomRetain, the textures stay while the chunk is inside the widest zoom's screen
+                        pzopt.ZoomRetain.releaseOffScreen(renderLevels, c, z, playerIndex);
+                     } else
                      renderLevels.freeFBOsForLevel(z);
                   }
                } else {
@@ -1325,12 +1328,22 @@ public final class FBORenderCell {
                         if (bWasOnScreen != bOnScreen) {
                            if (bOnScreen) {
                               renderLevels.setOnScreen(z, true);
+                              if (pzoptZoomRetain && this.pzoptZoomFlood && renderLevels.prevMinZ != Integer.MAX_VALUE) {
+                                 // pzopt: zoomRetain. Seen before and back during a zoom flood (a zoom-out brought it back, not the
+                                 // camera moving, which re-bakes at once as stock): its kept texture re-bakes, or its missing one
+                                 // is made, under the zoom plan
+                                 c.pzoptZoomReturned[playerIndex] |= 1L << (z + 32);
+                                 pzopt.ZoomRetain.returned++;
+                              }
                               renderLevels.invalidateLevel(z, 1024L);
                               if (renderLevels.isDirty(z, 16384L, cameraZoom)) {
                                  bForceCutawaysUpdate = true;
                               }
                            } else {
                               renderLevels.setOnScreen(z, false);
+                              if (pzoptZoomRetain) { // pzopt: zoomRetain
+                                 pzopt.ZoomRetain.releaseOffScreen(renderLevels, c, z, playerIndex);
+                              } else
                               renderLevels.freeFBOsForLevel(z);
                            }
                         }
@@ -1354,6 +1367,22 @@ public final class FBORenderCell {
       FBORenderChunkManager.instance.startFrame();
       this.pzoptBakesThisFrame = 0;
       this.pzoptRebakesThisFrame = 0; // pzopt: re-bake budget
+      this.pzoptZoomRebakesThisFrame = 0; // pzopt: zoomRetain re-bake budget
+      // pzopt: zoomRetain flood mode: the zoom changed this frame, or zoom work deferred last frame is still draining; while
+      // it lasts, first-sight levels are made under the zoom budget too (a spin from 0.25 to 2.5 while driving brings
+      // 200-300 chunk levels that were streamed in off screen; outside a flood a new chunk row bakes at once, as stock)
+      float pzoptZoomNow = Core.getInstance().getZoom(playerIndex);
+      boolean pzoptZoomChanged = this.pzoptLastZoom[playerIndex] > 0.0F && pzoptZoomNow != this.pzoptLastZoom[playerIndex];
+      this.pzoptZoomChangedNow = pzoptZoomChanged;
+      this.pzoptZoomFlood = pzoptZoomRetain && this.pzoptLastZoom[playerIndex] > 0.0F && (pzoptZoomChanged || this.pzoptZoomDeferredThisFrame > 0);
+      this.pzoptLastZoom[playerIndex] = pzoptZoomNow;
+      this.pzoptZoomDeferredThisFrame = 0;
+      if (pzoptZoomRetain) {
+         this.pzoptZoomPlan(playerIndex);
+         if (pzoptZoomChanged) {
+            this.pzoptZoomAllowLeft = 0; // the frame the zoom changes: nothing new starts, the next frame's plan sorts what appeared
+         }
+      }
       this.pzoptStrongThisFrame = 0; // pzopt: strong re-bake budget
       this.pzoptCreatesThisFrame = 0; // pzopt: never-baked levels started this frame (the bakeBudget counts these alone)
       this.pzoptCreatesDeferredLastFrame = this.pzoptCreatesDeferredThisFrame;
@@ -1647,6 +1676,9 @@ public final class FBORenderCell {
       FBORenderCell.PerPlayerData perPlayerData1 = this.perPlayerData[playerIndex];
       FBORenderLevels renderLevels = c.getRenderLevels(playerIndex);
       if (!renderLevels.isOnScreen(level)) {
+         if (pzoptZoomRetain) { // pzopt: zoomRetain
+            pzopt.ZoomRetain.releaseOffScreen(renderLevels, c, level, playerIndex);
+         } else
          renderLevels.freeFBOsForLevel(level);
       } else {
          float zoom = Core.getInstance().getZoom(playerIndex);
@@ -1678,7 +1710,11 @@ public final class FBORenderCell {
          // not drawn this frame. Deferred levels are retried next frame in the same chunk order.
          int pzoptBudget = pzopt.Overrides.enabled() ? pzopt.Config.BAKE_BUDGET : 0;
          int pzoptRebakeMs = pzopt.Overrides.enabled() ? pzopt.Config.LIGHTING_REBAKE_MS : 0;
-         if ((pzoptBudget > 0 || pzoptRebakeMs > 0) && renderLevels.isDirty(level, zoom)) {
+         // pzopt: zoomRetain. A level never made at all (its slot was never dirtied: a chunk streamed in while zoomed in and
+         // not seen since) has no dirt to enter this block with and baked at once; during a zoom flood it takes the plan too.
+         boolean pzoptZoomFresh = pzoptZoomRetain && this.pzoptZoomFlood && !renderLevels.isDirty(level, zoom)
+               && level == renderLevels.getMinLevel(level) && renderLevels.getFBOForLevel(level, zoom) == null;
+         if ((pzoptBudget > 0 || pzoptRebakeMs > 0 || pzoptZoomRetain) && (renderLevels.isDirty(level, zoom) || pzoptZoomFresh)) {
             FBORenderChunk pzoptRc = renderLevels.getFBOForLevel(level, zoom);
             boolean pzoptDefer;
             if (level == renderLevels.getMinLevel(level)) {
@@ -1697,6 +1733,60 @@ public final class FBORenderCell {
                // stayed black), and while a creation was deferred last frame the optional re-bakes (strong, lighting
                // hold, spread) wait so the whole frame goes to the black ones (2026-09-22, Louisville horde preset).
                boolean pzoptCreate = renderLevels.isDirty(level, 512L, zoom);
+               // pzopt: zoomRetain. A level back on screen after a zoom-out with no texture at this scale yet (never seen at
+               // this scale, or freed outside the retention rectangle) is made ZOOM_REBAKE_BUDGET per frame, its other-scale
+               // texture or nothing in its place meanwhile; the stock path made every one of them in the frame it returned
+               // (300-400 for a 0.25 -> 2.5 spin). A first-sight level (a new chunk) still bakes at once.
+               // pzopt: zoomRetain (pzopt.ZoomRetain). A level the zoom brought back on screen (bit in c.pzoptZoomReturned), or
+               // a level first seen while a zoom flood drains, bakes when this frame's plan allows it (pzoptZoomPlan: the
+               // pending levels nearest the camera first, an adaptive count per frame) and is otherwise held with its kept
+               // texture, its other-scale one or nothing on screen; only object / item / obscuring changes bake at once.
+               boolean pzoptZoomAllowedNow = false;
+               if (pzoptZoomRetain) {
+                  long pzoptBit = 1L << (level + 32);
+                  boolean pzoptPending = (c.pzoptZoomReturned[playerIndex] & pzoptBit) != 0L;
+                  boolean pzoptAllowed = pzoptPending && (c.pzoptZoomAllowed[playerIndex] & pzoptBit) != 0L;
+                  boolean pzoptHoldable = pzoptRc == null || pzoptCreate || !renderLevels.isDirty(level, ~(32L | 1024L | 2048L | 4096L | 16384L), zoom);
+                  if (!pzoptPending && this.pzoptZoomFlood && (pzoptRc == null || pzoptCreate)) {
+                     // first sight during a flood: a spare credit of the plan, else it joins the pending set for the next plan
+                     pzoptPending = true;
+                     if (this.pzoptZoomAllowLeft > 0) {
+                        this.pzoptZoomAllowLeft--;
+                        pzoptAllowed = true;
+                     } else {
+                        c.pzoptZoomReturned[playerIndex] |= pzoptBit;
+                     }
+                  } else if (!pzoptPending && this.pzoptZoomChangedNow && pzoptRc != null && pzoptHoldable) {
+                     // the frame the zoom changes also dirties levels that stayed on screen (the tree-fade stencil rectangle
+                     // is screen pixels, a zoom-out sweeps it over ten times the world; redraws): they take the plan too
+                     pzoptPending = true;
+                     c.pzoptZoomReturned[playerIndex] |= pzoptBit;
+                  }
+                  if (pzoptPending) {
+                     if (pzoptAllowed || !pzoptHoldable) {
+                        c.pzoptZoomReturned[playerIndex] &= ~pzoptBit;
+                        c.pzoptZoomAllowed[playerIndex] &= ~pzoptBit;
+                        if (pzoptAllowed) {
+                           pzoptZoomAllowedNow = true;
+                           this.pzoptZoomRebakesThisFrame++;
+                           if (pzoptRc == null || pzoptCreate) pzopt.ZoomRetain.creations++; else pzopt.ZoomRetain.rebakes++;
+                        } else {
+                           pzopt.ZoomRetain.urgent++;
+                           for (int b = 0; b < 16; b++) {
+                              if (renderLevels.isDirty(level, 1L << b, zoom)) pzopt.ZoomRetain.urgentFlags[b]++;
+                           }
+                        }
+                     } else {
+                        pzoptDeferredTotal++;
+                        this.pzoptZoomDeferredThisFrame++;
+                        if (pzoptRc != null) {
+                           this.pzoptDeferredTextures.add(pzoptRc);
+                        }
+                        this.pzoptDeferZoomDraw(c, level, zoom, renderLevels, perPlayerData1, pzoptRc != null && !pzoptCreate ? pzoptRc : null);
+                        return;
+                     }
+                  }
+               }
                boolean pzoptStarving = pzoptBudget > 0 && this.pzoptCreatesDeferredLastFrame > 0;
                boolean pzoptStrong = pzoptOnly32 && !pzoptStarving && this.pzoptStrongNow(c, level);
                boolean pzoptLightingOnly = pzoptRebakeMs > 0 && pzoptOnly32 && !pzoptStrong;
@@ -1707,7 +1797,10 @@ public final class FBORenderCell {
                // only a never-baked level (DIRTY_CREATE) is deferred: a re-bake of a visible texture (obscuring set,
                // trees, cutaways, lighting) must land the same frame or the stale texture shows (window flicker)
                pzoptDefer = pzoptLightingOnly || (pzoptBudget > 0 && this.pzoptCreatesThisFrame >= pzoptBudget && pzoptCreate);
-               if (pzoptCreate) {
+               if (pzoptZoomAllowedNow) {
+                  pzoptDefer = false; // pzopt: zoomRetain, planned this frame
+               }
+               if (pzoptCreate && !pzoptZoomAllowedNow) {
                   if (pzoptDefer) {
                      this.pzoptCreatesDeferredThisFrame++;
                      pzoptCreatesStarved++;
@@ -1725,7 +1818,7 @@ public final class FBORenderCell {
                // the live state (isTableTopObjectSquareCutaway, the window-frame flags), so a stale texture would show
                // the object neither baked nor per frame.
                int pzoptRebakeBudget = pzopt.Overrides.enabled() ? pzopt.Config.REBAKE_BUDGET : 0;
-               if (!pzoptDefer && pzoptRebakeBudget > 0 && pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom)
+               if (!pzoptDefer && !pzoptZoomAllowedNow && pzoptRebakeBudget > 0 && pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom)
                      && !renderLevels.isDirty(level, ~(32L | 1024L), zoom)) {
                   int pzoptNow = IsoWorld.instance.getFrameNo();
                   // pzopt: lighting-only dirt (32 alone: daylight drift, a lightning flash ramp) may stay stale for
@@ -1762,6 +1855,7 @@ public final class FBORenderCell {
                }
                if (pzoptDefer) {
                   pzoptDeferredTotal++;
+                  pzoptDeferredCumulative++;
                   if (pzoptRc != null) {
                      this.pzoptDeferredTextures.add(pzoptRc);
                   }
@@ -1772,9 +1866,16 @@ public final class FBORenderCell {
                pzoptDefer = pzoptRc == null || this.pzoptDeferredTextures.contains(pzoptRc);
             }
             if (pzoptDefer) {
-               if (pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom)) {
+               FBORenderChunk pzoptDraw = pzoptRc != null && !renderLevels.isDirty(level, 512L, zoom) ? pzoptRc : null;
+               if (pzoptDraw == null && pzoptZoomRetain && pzopt.Config.ZOOM_PLACEHOLDER) {
+                  // pzopt: zoomPlaceholder. The texture at this zoom's scale is still to be baked (the 0.75 crossing flips
+                  // every on-screen level to the other scale); the level's texture at the other scale, when complete,
+                  // is drawn in its place (FBORenderChunk.render scales by its own highRes flag) instead of nothing.
+                  pzoptDraw = this.pzoptOtherScaleTexture(renderLevels, level, zoom);
+               }
+               if (pzoptDraw != null) {
                   // stale but complete texture: same as the clean path below
-                  FBORenderChunkManager.instance.renderChunk = pzoptRc;
+                  FBORenderChunkManager.instance.renderChunk = pzoptDraw;
                   FBORenderChunkManager.instance.endRenderChunkLevel(c, level, zoom, false);
                   if (!renderLevels.getCachedSquares_AnimatedAttachments(level).isEmpty()) {
                      perPlayerData1.addChunkWith_AnimatedAttachments(c);
@@ -1813,6 +1914,17 @@ public final class FBORenderCell {
             }
             if (pzopt.Config.INSTRUMENT && level == renderLevels.getMinLevel(level)) {
                pzoptBakesTotal++;
+               pzoptBakesCumulative++;
+               if (this.pzoptZoomChangedNow) {
+                  // pzopt: zoomRetain dev tally, what bakes in the frame the zoom changes (the plan starts nothing there)
+                  pzopt.ZoomRetain.changeFrameBakes++;
+                  if (renderLevels.isDirty(level, 512L, zoom)) pzopt.ZoomRetain.changeFrameCreates++;
+                  if (renderLevels.prevMinZ == Integer.MAX_VALUE) pzopt.ZoomRetain.changeFrameFirstSight++;
+                  if (!c.IsOnScreen(true)) pzopt.ZoomRetain.changeFrameOffScreen++;
+                  for (int b = 0; b < 16; b++) {
+                     if (renderLevels.isDirty(level, 1L << b, zoom)) pzopt.ZoomRetain.changeFrameFlags[b]++;
+                  }
+               }
                for (int b = 0; b < 16; b++) {
                   if (renderLevels.isDirty(level, 1L << b, zoom)) pzoptBakeFlags[b]++;
                }
@@ -4296,6 +4408,115 @@ public final class FBORenderCell {
       return true;
    }
    private final java.util.IdentityHashMap<FBORenderChunk, Integer> pzoptRebakeHeldSince = new java.util.IdentityHashMap<>();
+   // pzopt: zoomRetain (2026-09-22, pzopt.ZoomRetain): kept textures back on screen, re-baked under their own budget
+   private static final boolean pzoptZoomRetain = pzopt.Overrides.enabled() && pzopt.Config.ZOOM_RETAIN;
+   private int pzoptZoomRebakesThisFrame;
+   private final float[] pzoptLastZoom = new float[4];
+   private boolean pzoptZoomFlood;
+   private boolean pzoptZoomChangedNow; // the zoom changed this frame (dev tally of what still bakes in that frame)
+   private int pzoptZoomDeferredThisFrame;
+   private int pzoptZoomAllowLeft; // this frame's plan credits not given to a pending level (first-sight flood levels take them)
+   private int pzoptZoomBudgetNow = pzopt.Config.ZOOM_REBAKE_BUDGET; // adaptive: halves after a long frame, grows back after short ones
+   private final ArrayList<IsoChunk> pzoptZoomPending = new ArrayList<>();
+
+   /**
+    * The frame's zoom plan: the pending levels (c.pzoptZoomReturned) of the loaded chunks sorted by their chunk's distance
+    * to the camera character, the first pzoptZoomBudgetNow of them allowed (c.pzoptZoomAllowed). The count follows the last
+    * game-thread frame step (FrameCap.lastStepNs, the limiter's wait excluded): over ZOOM_FRAME_MS it halves (a fresh chunk texture costs the render thread ~1 ms of GL allocation
+    * on top of the bake, and that wait shows up here), under 3/4 of it grows by two, within [4, zoomRebakeBudget].
+    */
+   private void pzoptZoomPlan(int playerIndex) {
+      long lastStepNs = pzopt.FrameCap.lastStepNs; // the previous frame step's own length (no limiter wait, so a 60 fps cap is not read as a long frame)
+      if (lastStepNs > 0L) {
+         float lastMs = lastStepNs / 1e6F;
+         if (lastMs > pzopt.Config.ZOOM_FRAME_MS) {
+            this.pzoptZoomBudgetNow = Math.max(4, this.pzoptZoomBudgetNow / 2);
+         } else if (lastMs < pzopt.Config.ZOOM_FRAME_MS * 0.75F) {
+            this.pzoptZoomBudgetNow = Math.min(pzopt.Config.ZOOM_REBAKE_BUDGET, this.pzoptZoomBudgetNow + 2);
+         }
+      }
+      this.pzoptZoomAllowLeft = this.pzoptZoomBudgetNow;
+      IsoChunkMap chunkMap = this.cell.chunkMap[playerIndex];
+      ArrayList<IsoChunk> pending = this.pzoptZoomPending;
+      pending.clear();
+      for (int xx = 0; xx < IsoChunkMap.chunkGridWidth; xx++) {
+         for (int yy = 0; yy < IsoChunkMap.chunkGridWidth; yy++) {
+            IsoChunk c = chunkMap.getChunk(xx, yy);
+            if (c != null && c.pzoptZoomReturned[playerIndex] != 0L) {
+               c.pzoptZoomAllowed[playerIndex] = 0L;
+               pending.add(c);
+            }
+         }
+      }
+      if (pending.isEmpty()) {
+         return;
+      }
+      this.pzoptZoomFlood = true; // pending zoom work keeps the flood on (first-sight levels stay budgeted meanwhile)
+      pzopt.ZoomRetain.floodFrames++;
+      IsoGameCharacter ch = IsoCamera.getCameraCharacter();
+      final float px = ch != null ? ch.getX() : IsoCamera.frameState.camCharacterX;
+      final float py = ch != null ? ch.getY() : IsoCamera.frameState.camCharacterY;
+      pending.sort((a, b) -> Float.compare(pzoptChunkDist2(a, px, py), pzoptChunkDist2(b, px, py)));
+      int left = this.pzoptZoomBudgetNow;
+      for (int i = 0; i < pending.size() && left > 0; i++) {
+         IsoChunk c = pending.get(i);
+         long bits = c.pzoptZoomReturned[playerIndex];
+         long allowed = 0L;
+         while (bits != 0L && left > 0) {
+            long low = bits & -bits;
+            allowed |= low;
+            bits ^= low;
+            left--;
+         }
+         c.pzoptZoomAllowed[playerIndex] = allowed;
+      }
+      this.pzoptZoomAllowLeft = left;
+   }
+
+   private static float pzoptChunkDist2(IsoChunk c, float px, float py) {
+      float dx = c.wx * 8 + 4 - px;
+      float dy = c.wy * 8 + 4 - py;
+      return dx * dx + dy * dy;
+   }
+
+   /**
+    * A returned level whose texture is deferred this frame: draws the given stale texture, else the other-scale one, else
+    * nothing (the per-player lists are kept as for a stale draw).
+    */
+   private void pzoptDeferZoomDraw(IsoChunk c, int level, float zoom, FBORenderLevels renderLevels, FBORenderCell.PerPlayerData perPlayerData1, FBORenderChunk stale) {
+      FBORenderChunk draw = stale;
+      if (draw == null && pzopt.Config.ZOOM_PLACEHOLDER) {
+         draw = this.pzoptOtherScaleTexture(renderLevels, level, zoom);
+      }
+      if (draw != null) {
+         FBORenderChunkManager.instance.renderChunk = draw;
+         FBORenderChunkManager.instance.endRenderChunkLevel(c, level, zoom, false);
+         if (!renderLevels.getCachedSquares_AnimatedAttachments(level).isEmpty()) {
+            perPlayerData1.addChunkWith_AnimatedAttachments(c);
+         }
+         if (!renderLevels.getCachedSquares_TranslucentFloor(level).isEmpty()) {
+            perPlayerData1.addChunkWith_TranslucentFloor(c);
+         }
+         if (renderLevels.getCachedSquares_Items(level).size() + renderLevels.getCachedSquares_TranslucentNonFloor(level).size()
+               + renderLevels.getCachedSquares_CutawayWindowFrames(level).size() > 0) {
+            perPlayerData1.addChunkWith_TranslucentNonFloor(c);
+         }
+      }
+   }
+
+   /** The level's complete texture at the other scale (null when there is none): the placeholder while this scale bakes. */
+   private FBORenderChunk pzoptOtherScaleTexture(FBORenderLevels renderLevels, int level, float cameraZoom) {
+      if (FBORenderLevels.getTextureScale(0.5F) == FBORenderLevels.getTextureScale(1.0F)) {
+         return null; // high-res textures off: one scale only
+      }
+      float otherZoom = FBORenderLevels.getTextureScale(cameraZoom) > 1 ? 1.0F : 0.5F;
+      FBORenderChunk other = renderLevels.getFBOForLevel(level, otherZoom);
+      if (other == null || other.tex == null || other.getMinLevel() != renderLevels.getMinLevel(level) || renderLevels.isDirty(level, 512L, otherZoom)) {
+         return null;
+      }
+      pzopt.ZoomRetain.placeholders++;
+      return other;
+   }
    private static long pzoptRebakesTotal;
    private static long pzoptRebakesHeld;
    private final java.util.HashSet<FBORenderChunk> pzoptDeferredTextures = new java.util.HashSet<>();
@@ -4310,6 +4531,8 @@ public final class FBORenderCell {
    private int pzoptGridStackFrame = -1000;
    private final java.util.IdentityHashMap<FBORenderChunk, Long> pzoptLastBakeMs = new java.util.IdentityHashMap<>();
    private static long pzoptBakesTotal;
+   public static long pzoptBakesCumulative; // pzopt: never reset; the harness zoom trace reads the per-frame delta
+   public static long pzoptDeferredCumulative; // pzopt: never reset; deferred (budgeted / held) levels
    private static final long[] pzoptBakeFlags = new long[16];
    private static final String[] PZOPT_FLAG_NAMES = {"blood", "corpse", "itemAdd", "itemRemove", "itemModify", "lighting", "objectAdd", "objectRemove", "objectModify", "create", "redraw", "cutaways", "trees", "obscuring", "redoCutaways", "b15"};
    // pzopt: lighting budget — chunks whose square light info is refreshed per frame; continues next frame
@@ -4350,7 +4573,8 @@ public final class FBORenderCell {
       }
       if (!pzoptTlSets.isEmpty()) {
          final int frames = pzoptTlFrames;
-         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" strong now=").append(pzoptStrongRebakes).append(" strong past budget=").append(pzoptStrongHeld).append(" creations deferred=").append(pzoptCreatesStarved).append(" strong marks=").append(pzopt.LightDirt.strongMarks).append(" global light events=").append(pzopt.LightDirt.globalEvents).append(" flushed=").append(pzoptLightingFlushed).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld).append(" flags:");
+         sb.append(" | trees waited for texture=").append(pzoptTreesWaited).append(" arrived=").append(pzoptTreesArrived).append(" | bakes in period=").append(pzoptBakesTotal).append(" deferred so far=").append(pzoptDeferredTotal).append(" lighting rebakes held=").append(pzoptLightingRebakesHeld).append(" strong now=").append(pzoptStrongRebakes).append(" strong past budget=").append(pzoptStrongHeld).append(" creations deferred=").append(pzoptCreatesStarved).append(" strong marks=").append(pzopt.LightDirt.strongMarks).append(" global light events=").append(pzopt.LightDirt.globalEvents).append(" flushed=").append(pzoptLightingFlushed).append(" budgeted rebakes=").append(pzoptRebakesTotal).append(" held=").append(pzoptRebakesHeld)
+            .append(" | zoom kept=").append(pzopt.ZoomRetain.kept).append(" returned=").append(pzopt.ZoomRetain.returned).append(" rebakes=").append(pzopt.ZoomRetain.rebakes).append(" creations=").append(pzopt.ZoomRetain.creations).append(" urgent=").append(pzopt.ZoomRetain.urgent).append(" placeholders=").append(pzopt.ZoomRetain.placeholders).append(" flags:"); // pzopt: zoomRetain counters
       for (int b = 0; b < 16; b++) {
          if (pzoptBakeFlags[b] > 0) sb.append(' ').append(PZOPT_FLAG_NAMES[b]).append('=').append(pzoptBakeFlags[b]);
          pzoptBakeFlags[b] = 0;
@@ -5118,6 +5342,9 @@ public final class FBORenderCell {
 
          for (int z = c.minLevel; z <= c.maxLevel; z++) {
             if (z == renderLevels.getMinLevel(z) && renderLevels.isOnScreen(z) && renderLevels.isDirty(z, zoom)) {
+               if (pzoptZoomRetain && pzopt.ZoomRetain.waiting(c, playerIndex, z)) {
+                  continue; // pzopt: zoomRetain, prepared in the frame the plan bakes it (a zoom-out dirties ~200 levels at once)
+               }
                this.prepareChunkForUpdating(playerIndex, c, z);
             }
          }

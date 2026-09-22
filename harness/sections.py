@@ -92,7 +92,20 @@ def route_frame_ids(run):
 THREADS = {"game": "MainThread", "render": "main"}
 
 
-def analyse(run, threshold_ms=20.0, thread="game"):
+def mark_frame_ids(run, prefix):
+    """Frame counters of every "# <prefix>..." mark in pzopt-frames.out (the frame the mark fell in)."""
+    p = Path(run) / "pzopt-frames.out"
+    ids = []
+    if p.exists():
+        for line in p.read_text().splitlines():
+            if line.startswith("# " + prefix):
+                parts = line.split()
+                if len(parts) > 3:
+                    ids.append(int(parts[3]))
+    return ids
+
+
+def analyse(run, threshold_ms=20.0, thread="game", after_mark=None):
     pdir = Path(run) / "profiler"
     thread = THREADS.get(thread, thread)
     if not any(pdir.glob(f"*_{thread}_header.csv")):
@@ -121,7 +134,15 @@ def analyse(run, threshold_ms=20.0, thread="game"):
                 top[key] += ln
         rows.append({"frame": fno, "total_ns": total, "top": top, "incl": incl, "top_sum": sum(top.values())})
     thr = threshold_ms * 1e6
-    groups = {"slow": [r for r in rows if r["total_ns"] >= thr], "ordinary": [r for r in rows if r["total_ns"] < thr],
+    if after_mark:
+        # --after-mark PREFIX:N: "slow" = the frame holding each mark and the N-1 after it (harness zoom steps and the like)
+        slow_ids = set()
+        for fid in mark_frame_ids(run, after_mark[0]):
+            slow_ids.update(range(fid, fid + after_mark[1]))
+        is_slow = lambda r: r["frame"] in slow_ids
+    else:
+        is_slow = lambda r: r["total_ns"] >= thr
+    groups = {"slow": [r for r in rows if is_slow(r)], "ordinary": [r for r in rows if not is_slow(r)],
               "spike33": [r for r in rows if r["total_ns"] >= 33.333e6], "spike50": [r for r in rows if r["total_ns"] >= 50e6]}
     out = {"run": Path(run).name, "thread": thread or "all", "threshold_ms": threshold_ms, "frames": len(rows), "window": window, "groups": {}}
     keys = sorted({k for r in rows for k in r["incl"]})
@@ -164,6 +185,7 @@ def print_report(a, top=15):
 if __name__ == "__main__":
     args = sys.argv[1:]
     threshold, top, out_json, thread = 20.0, 15, None, "game"
+    after_mark = None
     runs = []
     i = 0
     while i < len(args):
@@ -171,6 +193,9 @@ if __name__ == "__main__":
             threshold = float(args[i + 1]); i += 2
         elif args[i] == "--thread":
             thread = args[i + 1]; i += 2
+        elif args[i] == "--after-mark":
+            pfx, nf = args[i + 1].rsplit(":", 1)
+            after_mark = (pfx, int(nf)); i += 2
         elif args[i] == "--top":
             top = int(args[i + 1]); i += 2
         elif args[i] == "--json":
@@ -178,7 +203,7 @@ if __name__ == "__main__":
         else:
             runs.append(args[i]); i += 1
     for r in runs:
-        a = analyse(r, threshold, thread)
+        a = analyse(r, threshold, thread, after_mark)
         print_report(a, top)
         if out_json:
             Path(out_json).write_text(json.dumps(a, indent=1))

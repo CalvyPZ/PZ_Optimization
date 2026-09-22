@@ -38,6 +38,11 @@ import zombie.vehicles.BaseVehicle;
  *   settle   seconds   wait after the world is up before moving (default 15; harness/run.sh passes 5: the
  *                      load burst and the forced-zoom bake are over ~2 s after the world is up)
  *   zoom     max|level  force the camera zoom before the route (auto-zoom off); drive mode defaults to max, other modes keep the save's zoom
+ *   zoom_cycle secs    bench/drive: every this many seconds on the route move the target zoom one level, like one mouse-wheel
+ *                      notch (the ease in MultiTextureFBO2.update runs), in to the closest level then back out; each step is a
+ *                      Stats mark "zoom-<level>" (harness/zoomsteps.py aligns the frame times to them)
+ *   zoom_jump  true    with zoom_cycle: set the zoom to the level at once (no ease), the worst case for the chunk-texture bakes
+ *   zoom_span  N       with zoom_cycle: levels per step (default 1; 9 = the whole 0.25..2.5 range, a fast wheel spin)
  *   max_seconds        drive mode: give up (route_status=timeout) after this long on the route (default 90)
  *   jitter   tiles     bench/parity, with hold: every frame of the hold the player's X alternates between the end
  *                      square's east edge minus and plus this much (e.g. 0.05), i.e. the square under the player
@@ -116,6 +121,21 @@ public final class Harness {
    /** bench: degrees per second the player facing rotates while on the route (flag turn, 0 = off). */
    private static float turnDegPerSec = 0f;
    private static float turnAngle = 0f;
+   /** bench/drive: seconds between one-level camera zoom steps on the route (flag zoom_cycle, 0 = off). */
+   private static float zoomCycleSecs = 0f;
+   private static boolean zoomJump; // flag zoom_jump: the zoom is set to the level at once instead of the wheel's ease
+   private static int zoomSpan = 1; // flag zoom_span: levels per step
+   private static int zoomDir = 1; // +1 = zooming in (smaller value), -1 = zooming out
+   private static long lastZoomStepNs;
+   private static int zoomSteps;
+   private static final int ZOOM_TRACE_FRAMES = 90;
+   private static int zoomTraceLeft; // frames still to trace after the last step
+   private static long zoomTraceBakes, zoomTraceDeferred, zoomTraceFrameNs;
+   private static final StringBuilder zoomTrace = new StringBuilder();
+   private static long zoomTraceReturned, zoomTraceRebakes, zoomTraceCreations, zoomTraceUrgent, zoomTracePlaceholders, zoomTraceFlood;
+   private static final int[] zoomTraceUrgentFlags = new int[16];
+   private static final long[] zoomTraceCf = new long[4];
+   private static final int[] zoomTraceCfFlags = new int[16];
    /** bench: seconds into the route at which the camera is held for a screenshot (flag shot_at, 0 = off). */
    private static float shotAt = 0f;
    /** bench: seconds to stay on the route's end square, still spinning, before the run ends (flag hold, 0 = off). */
@@ -245,6 +265,9 @@ public final class Harness {
          }
          speed = Float.parseFloat(HarnessFlags.get("speed", "18"));
          turnDegPerSec = Float.parseFloat(HarnessFlags.get("turn", "0"));
+         zoomCycleSecs = Float.parseFloat(HarnessFlags.get("zoom_cycle", "0"));
+         zoomJump = "true".equals(HarnessFlags.get("zoom_jump", "false"));
+         zoomSpan = Math.max(1, Integer.parseInt(HarnessFlags.get("zoom_span", "1")));
          shotAt = Float.parseFloat(HarnessFlags.get("shot_at", "0"));
          holdSecs = Float.parseFloat(HarnessFlags.get("hold", "0"));
          jitterTiles = Float.parseFloat(HarnessFlags.get("jitter", "0"));
@@ -491,6 +514,7 @@ public final class Harness {
                    vehicle.setKeysInIgnition(true);
                    vehicle.engineDoRunning();
                 }
+                 zoomCycle(p, nowNs);
                  float steer = roadFollow(dt);
                  if (nowNs - lastTelemetryNs >= 1_000_000_000L) {
                     lastTelemetryNs = nowNs;
@@ -543,6 +567,7 @@ public final class Harness {
                turnAngle = (turnAngle + turnDegPerSec * Math.min(dt, 0.1f)) % 360f;
                p.setDirectionAngle(turnAngle);
             }
+            zoomCycle(p, nowNs);
             if (leg >= legs.size() && holdSecs > 0f) {
                // end-of-route hold: no more teleports, the facing keeps turning (flag hold)
                if (holdStartNs == 0L) {
@@ -1140,6 +1165,96 @@ public final class Harness {
          }
       }
       Log.info("harness: " + found + " curtains within 100 tiles of " + px + "," + py + (close ? ", " + closed + " closed now" : "") + " (" + squares + " loaded squares, " + windows + " windows)");
+   }
+
+   /**
+    * flag zoom_cycle: every zoomCycleSecs on the route the target zoom moves one level the way one mouse-wheel
+    * notch does (MultiTextureFBO2.getNextZoom; the ease in its update() then slides the zoom there), zooming in
+    * until the closest level, then back out, and so on. The step is a Stats mark so the frame times can be aligned
+    * to it. zoom_jump=true sets the zoom to the level at once (the ease skipped: every chunk texture flips scale
+    * in one frame, the worst case for the bakes).
+    */
+   private static void zoomCycle(IsoPlayer p, long nowNs) {
+      if (zoomCycleSecs <= 0f) return;
+      Core core = Core.getInstance();
+      if (core.offscreenBuffer == null) return;
+      if (zoomTraceLeft > 0) {
+         // per-frame trace after a step: "bakes/deferred@ms" for ZOOM_TRACE_FRAMES frames (the frame that ended now)
+         long bakes = zombie.iso.fboRenderChunk.FBORenderCell.pzoptBakesCumulative;
+         long deferred = zombie.iso.fboRenderChunk.FBORenderCell.pzoptDeferredCumulative;
+         zoomTrace.append(' ').append(bakes - zoomTraceBakes);
+         if (deferred != zoomTraceDeferred) zoomTrace.append('/').append(deferred - zoomTraceDeferred);
+         zoomTrace.append('@').append(String.format(java.util.Locale.ROOT, "%.1f", (nowNs - zoomTraceFrameNs) / 1e6));
+         zoomTraceBakes = bakes;
+         zoomTraceDeferred = deferred;
+         zoomTraceFrameNs = nowNs;
+         if (--zoomTraceLeft == 0) {
+            Log.info("harness: zoom step " + zoomSteps + " trace (bakes[/deferred]@ms per frame):" + zoomTrace);
+            StringBuilder z = new StringBuilder("harness: zoom step " + zoomSteps + " retain: returned=" + (ZoomRetain.returned - zoomTraceReturned)
+                  + " rebakes=" + (ZoomRetain.rebakes - zoomTraceRebakes) + " creations=" + (ZoomRetain.creations - zoomTraceCreations)
+                  + " urgent=" + (ZoomRetain.urgent - zoomTraceUrgent) + " flood frames=" + (ZoomRetain.floodFrames - zoomTraceFlood) + " placeholders=" + (ZoomRetain.placeholders - zoomTracePlaceholders) + " urgent flags:");
+            for (int b = 0; b < 16; b++) {
+               if (ZoomRetain.urgentFlags[b] != zoomTraceUrgentFlags[b]) z.append(' ').append(1L << b).append('=').append(ZoomRetain.urgentFlags[b] - zoomTraceUrgentFlags[b]);
+            }
+            Log.info(z.toString());
+            z = new StringBuilder("harness: zoom step " + zoomSteps + " change-frame bakes=" + (ZoomRetain.changeFrameBakes - zoomTraceCf[0]) + " creates=" + (ZoomRetain.changeFrameCreates - zoomTraceCf[1])
+                  + " first-sight=" + (ZoomRetain.changeFrameFirstSight - zoomTraceCf[2]) + " chunk-off-screen=" + (ZoomRetain.changeFrameOffScreen - zoomTraceCf[3]) + " flags:");
+            for (int b = 0; b < 16; b++) {
+               if (ZoomRetain.changeFrameFlags[b] != zoomTraceCfFlags[b]) z.append(' ').append(1L << b).append('=').append(ZoomRetain.changeFrameFlags[b] - zoomTraceCfFlags[b]);
+            }
+            Log.info(z.toString());
+            zoomTrace.setLength(0);
+         }
+      }
+      if (lastZoomStepNs == 0L) {
+         lastZoomStepNs = nowNs; // the first step comes zoomCycleSecs after the route start
+         return;
+      }
+      if ((nowNs - lastZoomStepNs) / 1e9f < zoomCycleSecs) return;
+      lastZoomStepNs = nowNs;
+      int idx = p.getIndex();
+      float next = zoomSpanTarget(core, idx, zoomDir);
+      if (next == core.offscreenBuffer.getTargetZoom(idx)) {
+         zoomDir = -zoomDir; // at the end of the level list: turn around
+         next = zoomSpanTarget(core, idx, zoomDir);
+      }
+      if (zoomJump) {
+         core.offscreenBuffer.setZoomAndTargetZoom(idx, next);
+      } else {
+         core.offscreenBuffer.setTargetZoom(idx, next);
+      }
+      zoomSteps++;
+      Stats.mark("zoom-" + next);
+      zoomTraceLeft = ZOOM_TRACE_FRAMES;
+      zoomTraceReturned = ZoomRetain.returned;
+      zoomTraceRebakes = ZoomRetain.rebakes;
+      zoomTraceCreations = ZoomRetain.creations;
+      zoomTraceUrgent = ZoomRetain.urgent;
+      zoomTracePlaceholders = ZoomRetain.placeholders;
+      zoomTraceFlood = ZoomRetain.floodFrames;
+      zoomTraceCf[0] = ZoomRetain.changeFrameBakes; zoomTraceCf[1] = ZoomRetain.changeFrameCreates; zoomTraceCf[2] = ZoomRetain.changeFrameFirstSight; zoomTraceCf[3] = ZoomRetain.changeFrameOffScreen;
+      System.arraycopy(ZoomRetain.changeFrameFlags, 0, zoomTraceCfFlags, 0, 16);
+      System.arraycopy(ZoomRetain.urgentFlags, 0, zoomTraceUrgentFlags, 0, 16);
+      zoomTraceBakes = zombie.iso.fboRenderChunk.FBORenderCell.pzoptBakesCumulative;
+      zoomTraceDeferred = zombie.iso.fboRenderChunk.FBORenderCell.pzoptDeferredCumulative;
+      zoomTraceFrameNs = nowNs;
+      zoomTrace.setLength(0);
+      Log.info(String.format(java.util.Locale.ROOT, "harness: zoom step %d -> %.2f (%s, was %.2f, %s)", zoomSteps, next, zoomDir > 0 ? "out" : "in",
+            core.getZoom(idx), zoomJump ? "jump" : "wheel"));
+   }
+
+   /** The level zoomSpan wheel notches away from the current target (the list end when fewer remain). */
+   private static float zoomSpanTarget(Core core, int idx, int dir) {
+      float from = core.offscreenBuffer.getTargetZoom(idx);
+      float next = from;
+      for (int i = 0; i < zoomSpan; i++) {
+         core.offscreenBuffer.setTargetZoom(idx, next); // getNextZoom walks from the target
+         float n = core.offscreenBuffer.getNextZoom(idx, dir);
+         if (n == next) break;
+         next = n;
+      }
+      core.offscreenBuffer.setTargetZoom(idx, from);
+      return next;
    }
 
    /**

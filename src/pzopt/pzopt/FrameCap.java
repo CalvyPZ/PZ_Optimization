@@ -40,6 +40,13 @@ public final class FrameCap {
    static final int[] FPS_TABLE = {500, 430, 400, 330, 300, 244, 240, 165, 144, 120, 95, 90, 75, 60, 55, 45, 30, 24};
    /** Core's IntegerConfigOption for frameRate= rejects anything above this. */
    static final int STOCK_MAX_FPS = 244;
+
+   /** Length of the last game-thread frame step (GameWindow.frameStep) in ns, without the limiter's wait between steps. */
+   public static volatile long lastStepNs;
+
+   public static void stepDone(long startNs) {
+      lastStepNs = System.nanoTime() - startNs;
+   }
    public static final int MIN_FPS = 24;
    public static final int MAX_FPS = 500;
    public static final int MENU_SAME = 1;

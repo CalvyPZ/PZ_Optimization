@@ -187,6 +187,14 @@ public final class MultiTextureFBO2 {
          this.setTargetZoom(playerIndex, zoom);
       }
 
+      if (!this.autoZoom[playerIndex] && PZOPT_EASE_MS > 0) {
+         // pzopt: zoomEase. A manual zoom change (wheel, harness, Lua) moves along a cubic Bézier over PZOPT_EASE_MS of wall
+         // time instead of the fixed 0.03 per frame and the snap below; a new target while moving restarts from the current zoom.
+         this.pzoptEase(playerIndex);
+         this.setCameraToCentre();
+         return;
+      }
+
       float step = 0.004F * GameTime.instance.getMultiplier() / GameTime.instance.getTrueMultiplier() * (Core.tileScale == 2 ? 1.5F : 1.5F);
       if (!this.autoZoom[playerIndex]) {
          step *= 5.0F;
@@ -211,6 +219,31 @@ public final class MultiTextureFBO2 {
       }
 
       this.setCameraToCentre();
+   }
+
+   // pzopt: zoomEase state per player (Config.ZOOM_EASE_MS / ZOOM_EASE, pzopt.ZoomEase)
+   private static final int PZOPT_EASE_MS = pzopt.Overrides.enabled() ? pzopt.Config.ZOOM_EASE_MS : 0;
+   private static final pzopt.ZoomEase PZOPT_EASE = pzopt.ZoomEase.parse(pzopt.Config.ZOOM_EASE);
+   private final float[] pzoptEaseFrom = new float[4];
+   private final float[] pzoptEaseTarget = new float[]{Float.NaN, Float.NaN, Float.NaN, Float.NaN};
+   private final long[] pzoptEaseStartNs = new long[4];
+
+   private void pzoptEase(int playerIndex) {
+      float target = this.targetZoom[playerIndex];
+      if (target != this.pzoptEaseTarget[playerIndex]) {
+         // a new target (doZoomScroll, setTargetZoom, setZoomAndTargetZoom): the motion starts here, from wherever the zoom is
+         this.pzoptEaseTarget[playerIndex] = target;
+         this.pzoptEaseFrom[playerIndex] = this.zoom[playerIndex];
+         this.pzoptEaseStartNs[playerIndex] = System.nanoTime();
+      }
+      if (this.zoom[playerIndex] == target) {
+         return;
+      }
+      float elapsedMs = (System.nanoTime() - this.pzoptEaseStartNs[playerIndex]) / 1e6F;
+      this.zoom[playerIndex] = PZOPT_EASE.zoomAt(this.pzoptEaseFrom[playerIndex], target, elapsedMs, PZOPT_EASE_MS);
+      if (IsoPlayer.players[playerIndex] != null) {
+         IsoPlayer.players[playerIndex].dirtyRecalcGridStackTime = 2.0F;
+      }
    }
 
    private boolean shouldAutoZoomIn() {
@@ -344,6 +377,20 @@ public final class MultiTextureFBO2 {
 
    public float getMaxZoom() {
       return this.zoomEnabled && this.zoomLevels != null && this.zoomLevels.length != 0 ? this.zoomLevels[0] : 1.0F;
+   }
+
+   // pzopt: the widest selectable zoom below `limit` (zoomRetain: the largest zoom at which the high-res chunk
+   // textures are used is the widest level under 0.75); 0 when no level is below it
+   public float pzoptWidestZoomBelow(float limit) {
+      float best = 0.0F;
+      if (this.zoomEnabled && this.zoomLevels != null) {
+         for (float level : this.zoomLevels) {
+            if (level < limit && level > best) {
+               best = level;
+            }
+         }
+      }
+      return best;
    }
 
    public boolean test() {

@@ -1538,3 +1538,33 @@ and the fresh world has a real population where the bench save is quiet, so a go
 optimized tail here is zombies streaming in beside the road, not the render path. The 1200-tile route
 and the bench-save scene are not reproducible on a server; treat these as "the gain survives
 multiplayer", not as a number to compare to the single-player rows.
+
+## Camera zoom changes (2026-09-22, keys `zoomRetain` / `zoomRebakeBudget` / `zoomFrameMs` / `zoomEaseMs` / `zoomEase`)
+
+Rig: `--mode bench --flag route=S:450 --flag zoom=0.25 --flag zoom_cycle=S [zoom_span=N] [zoom_jump=true]`
+(one wheel notch (span N notches) every S seconds, in to the closest level then back out; `zoom_jump`
+sets the zoom at once, the fast-wheel-spin worst case with no ease), `harness/zoomsteps.py <run>
+--window 1.0` (frame times in the second after each step vs the rest of the route), the per-step bake
+trace and `retain:` counters in the console, `attribute.py --after-mark zoom-:1` / `sections.py
+--after-mark zoom-2.5:1` for the change frame. Desktop, 5120x2160, south route (18 tiles/s teleport
+route, so the route itself loads chunks: its own spikes are 26-45 ms).
+
+What stock does: a level's textures are freed the frame it leaves the screen; zooming in frees most of
+what was visible, zooming back out bakes everything that reappears in the frame it appears, and the bake
+budget never caught those (`DIRTY_CREATE` is set after the deferral decision). The zoom itself moves
+0.03 per frame and snaps (8 frames per notch whatever the frame rate).
+
+| case (worst frame in the step windows, ms) | stock (240 cap) | ours before | `zoomRetain` + plan | + `zoomEase` |
+|---|---|---|---|---|
+| 0.25 → 2.5 at once, four jumps (`zs-out-jump9`, `zo-jump9-off-u`, `zo-jump9-plan5u`) | 375 / 101 / 77 / 83 | 429 / 112 / 133 / 99 | 25 / 27 / 18 / 14 | (no ease on a jump) |
+| one notch out per 1.5 s, at wide zoom 1.75-2.5 (`zs-out-wheel`, `zo-wheel-plan5u`, `zo-wheel-ease`) | 48 / 51 / 51 / 46 | 21-39 | 22 / 15 / 17 / 28 | 25 (median step 11.5) |
+| 0.25 ↔ 2.5 eased spins every 3 s (`zs-out-wheel9`, `zo-wheel9-ease`) | 28 / 20 / 26 / 13 | | | 9 / 18 / 20 / 12 |
+| route without zoom steps, max (`zs-ctl`, `zo-ctl-plan5u`) | 45 | | 41 | |
+
+The step windows are now inside the route's own spike range (26-45 ms from chunk rows at max zoom),
+the change frame itself is 15-30 ms on an instant 2.25-level jump (its remaining cost is the on-screen
+scan of ~200 new chunk levels: cutaway walls, occlusion, light info; the bakes are spread 4-12 a frame
+nearest-first over the next 20-40 frames, the kept textures on screen meanwhile), and a wheel notch or an
+eased spin no longer shows in the frame times at all. The 240-cap frame rate during the fill is ~120-200
+fps for 0.1-0.2 s instead of one 80-375 ms freeze; with `zoomEaseMs=300` the motion itself is a 300 ms
+Bézier (CSS "ease") at every frame rate instead of 8 linear frames and a snap.

@@ -279,6 +279,17 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   26.4 → 32.2 fps (p50 30 ms), GPU 46 %, batch flush 1 % of the game thread, zombie postupdate 19 → 14.5 %.
   Runs right after a peer's `update-*` / `release-updater` cmd job showed GPU 75-80 % with the game's own gpu_ms
   tripled (a leftover game / Steam UI client; a game at the main menu alone is ~40 % GPU here) — re-run those.
+- Camera zoom (2026-09-22, `docs/results.md` "Camera zoom changes", `docs/override-edits.md`): stock frees a chunk level's
+  textures the frame it leaves the screen and bakes every level a zoom-out reveals in the frame it appears (the bake budget
+  never caught them: DIRTY_CREATE is set after the deferral decision); a 0.25 → 2.5 wheel spin was an 80-375 ms frame, a
+  notch at wide zoom 45-51 ms. `zoomRetain` (`pzopt.ZoomRetain`, default on): textures kept while the chunk is inside the
+  widest zoom's screen rect, levels a zoom brings back or reveals baked under a per-frame plan (nearest first, count adapts to
+  the last frame step, `zoomRebakeBudget` 12 / `zoomFrameMs` 10) with the kept texture on screen meanwhile; `zoomEaseMs` 300 /
+  `zoomEase` (`pzopt.ZoomEase`, CSS-style cubic Bézier, default "ease"): the zoom motion is time-based instead of 0.03 per frame
+  and a snap. Jumps 375 → 25 ms worst frame, notches and eased spins inside the route's own noise. Rig: `--flag zoom=0.25
+  zoom_cycle=S [zoom_span=9] [zoom_jump=true]`, `harness/zoomsteps.py`, `attribute.py`/`sections.py --after-mark zoom-:1`.
+  Other sessions' forced `uncappedFps=` runs leave `framecap.ini restore=` that the next boot applies: pass `--prop uncappedFps=true`
+  for a deterministic cap in an optimized run; stock runs need `--option frameRate=240 --option uncappedFPS=false`.
 - Open plans: `docs/plan-game-load.md`, `docs/plan-vulkan-renderer.md`, `docs/plan-resource-use.md`,
   `docs/plan-zombie-multithread.md` (2026-09-22: the rest of the zombie simulation on all cores, phased).
   The game-thread optimization plans were dropped on 2026-09-21 at the maintainer's request.

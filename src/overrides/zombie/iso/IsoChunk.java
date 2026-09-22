@@ -193,6 +193,10 @@ public final class IsoChunk {
    public final zombie.audio.ObjectAmbientEmitters.ChunkData objectEmitterData = new zombie.audio.ObjectAmbientEmitters.ChunkData();
    public final ChunkLevelsData cutawayData = new ChunkLevelsData(this);
    public final zombie.vispoly.VisibilityPolygon2.ChunkData vispolyData = new zombie.vispoly.VisibilityPolygon2.ChunkData(this);
+   // pzopt: zoomRetain. Bit (minLevel + 32) per player: the level pair came back on screen (a zoom-out) and its
+   // texture, kept or still to be made, is handled under the zoom budget (FBORenderCell.renderOneLevel)
+   public final long[] pzoptZoomReturned = new long[4];
+   public final long[] pzoptZoomAllowed = new long[4]; // pzopt: zoomRetain, the bits of pzoptZoomReturned this frame's plan bakes
    private boolean blendingDoneFull;
    private boolean blendingDonePartial;
    private boolean[] blendingModified = new boolean[4];
@@ -3356,6 +3360,8 @@ public final class IsoChunk {
       if (!GameServer.server) {
          FBORenderOcclusion.getInstance().removeChunkFromWorld(this);
          FBORenderChunkManager.instance.freeChunk(this);
+         java.util.Arrays.fill(this.pzoptZoomReturned, 0L); // pzopt: zoomRetain, nothing pending for a reused chunk
+         java.util.Arrays.fill(this.pzoptZoomAllowed, 0L);
          this.cutawayData.removeFromWorld();
          this.getVispolyData().removeFromWorld();
          if (this.corpseData != null) {

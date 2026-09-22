@@ -115,6 +115,10 @@ public final class FBORenderCutaways {
          FBORenderLevels renderLevels = chunk.getRenderLevels(playerIndex);
          if (renderLevels.isOnScreen(z)) {
             FBORenderCutaways.ChunkLevelData chunkLevelData = chunk.getCutawayData().getDataForLevel(z);
+            if (chunkLevelData.adjacentChunkLoadedCounter != chunk.adjacentChunkLoadedCounter
+                  && pzopt.ZoomRetain.waiting(chunk, playerIndex, renderLevels.getMinLevel(z))) {
+               continue; // pzopt: zoomRetain, the level pair waits for the zoom plan; its walls are recreated in the frame it bakes
+            }
             if (chunkLevelData.adjacentChunkLoadedCounter != chunk.adjacentChunkLoadedCounter) {
                chunkLevelData.adjacentChunkLoadedCounter = chunk.adjacentChunkLoadedCounter;
                chunkLevelData.orphanStructures.adjacentChunkLoadedCounter = chunk.adjacentChunkLoadedCounter;
@@ -127,6 +131,12 @@ public final class FBORenderCutaways {
             } else {
                for (int z1 = chunk.getMinLevel(); z1 <= chunk.getMaxLevel(); z1++) {
                   if (renderLevels.isOnScreen(z1) && renderLevels.isDirty(z1, 192L, zoom)) {
+                     // pzopt: zoomRetain. A level waiting for the zoom plan keeps its object dirt until it bakes; the recreate
+                     // runs in the frame the plan allows it (before the chunk loop), not on every frame it waits
+                     long pzoptBit = 1L << (renderLevels.getMinLevel(z1) + 32);
+                     if ((chunk.pzoptZoomReturned[playerIndex] & pzoptBit) != 0L && (chunk.pzoptZoomAllowed[playerIndex] & pzoptBit) == 0L) {
+                        continue;
+                     }
                      chunk.getCutawayData().recreateLevel(z1);
                      bForceCutawayUpdate = true;
                   }

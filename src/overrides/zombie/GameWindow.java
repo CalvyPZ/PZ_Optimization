@@ -652,12 +652,14 @@ public final class GameWindow {
          if (pzopt.FrameCap.uncappedNow()) { // stock limiter shape; pzopt.FrameCap picks the in-game or the menu cap (and makes "Uncapped" selectable and persistent)
             frameStep();
             pzopt.FrameCap.onFrame(newTime); // pzopt: per-phase frame counter for the console (menu vs game)
+            pzopt.FrameCap.stepDone(newTime); // pzopt: the step's own length, without the limiter wait (zoom bake plan)
          } else {
             accumulator += timeDiffNS;
             long desiredDt = PZMath.secondsToNanos / pzopt.FrameCap.lockNow();
             if (accumulator >= desiredDt) {
                frameStep();
                pzopt.FrameCap.onFrame(newTime); // pzopt: per-phase frame counter for the console (menu vs game)
+               pzopt.FrameCap.stepDone(newTime); // pzopt: the step's own length, without the limiter wait (zoom bake plan)
                accumulator %= desiredDt;
             }
          }
