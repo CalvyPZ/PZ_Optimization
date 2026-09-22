@@ -1328,11 +1328,16 @@ public final class FBORenderCell {
                         if (bWasOnScreen != bOnScreen) {
                            if (bOnScreen) {
                               renderLevels.setOnScreen(z, true);
-                              if (pzoptZoomRetain && this.pzoptZoomFlood && renderLevels.prevMinZ != Integer.MAX_VALUE) {
-                                 // pzopt: zoomRetain. Seen before and back during a zoom flood (a zoom-out brought it back, not the
-                                 // camera moving, which re-bakes at once as stock): its kept texture re-bakes, or its missing one
-                                 // is made, under the zoom plan
+                              if (pzoptZoomRetain && renderLevels.prevMinZ != Integer.MAX_VALUE) {
+                                 // pzopt: zoomRetain. Seen before and back during a zoom flood (a zoom-out brought it back): its
+                                 // kept texture re-bakes, or its missing one is made, under the zoom plan. Back by the camera
+                                 // moving (no flood): allowed at once, so the kept texture is redrawn this frame as stock's fresh
+                                 // one was, never held by the re-bake budget (a stale roof for 1-3 frames read as flicker on the
+                                 // Louisville walk, parity watch 2026-09-22 05:18)
                                  c.pzoptZoomReturned[playerIndex] |= 1L << (z + 32);
+                                 if (!this.pzoptZoomFlood) {
+                                    c.pzoptZoomAllowed[playerIndex] |= 1L << (z + 32);
+                                 }
                                  pzopt.ZoomRetain.returned++;
                               }
                               renderLevels.invalidateLevel(z, 1024L);
@@ -1692,6 +1697,10 @@ public final class FBORenderCell {
             }
 
             if (renderLevels.getRenderedSquaresCount(level) == 0) {
+               if (pzoptZoomRetain) {
+                  c.pzoptZoomReturned[playerIndex] &= ~(1L << (renderLevels.getMinLevel(level) + 32)); // pzopt: zoomRetain, nothing pending for a culled level
+                  c.pzoptZoomAllowed[playerIndex] &= ~(1L << (renderLevels.getMinLevel(level) + 32));
+               }
                if (level == renderLevels.getMaxLevel(level)) {
                   renderLevels.clearDirty(level, zoom);
                   if (renderLevels.getFBOForLevel(level, zoom) != null) {
@@ -4451,8 +4460,9 @@ public final class FBORenderCell {
       if (pending.isEmpty()) {
          return;
       }
-      this.pzoptZoomFlood = true; // pending zoom work keeps the flood on (first-sight levels stay budgeted meanwhile)
-      pzopt.ZoomRetain.floodFrames++;
+      if (this.pzoptZoomFlood) {
+         pzopt.ZoomRetain.floodFrames++;
+      }
       IsoGameCharacter ch = IsoCamera.getCameraCharacter();
       final float px = ch != null ? ch.getX() : IsoCamera.frameState.camCharacterX;
       final float py = ch != null ? ch.getY() : IsoCamera.frameState.camCharacterY;

@@ -76,6 +76,9 @@ public final class ZoomRetain {
     * Off-screen level: free what is outside its retention rectangle, keep the rest. Returns true when something was kept.
     */
    public static boolean releaseOffScreen(FBORenderLevels renderLevels, IsoChunk c, int level, int playerIndex) {
+      long bit = 1L << (renderLevels.getMinLevel(level) + 32);
+      c.pzoptZoomReturned[playerIndex] &= ~bit; // off screen: nothing pending for it (a stale bit would wait for a plan forever)
+      c.pzoptZoomAllowed[playerIndex] &= ~bit;
       if (!keepNormal(c, playerIndex)) {
          renderLevels.freeFBOsForLevel(level);
          return false;

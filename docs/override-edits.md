@@ -1837,6 +1837,14 @@ Now (`pzopt.ZoomRetain`, keys `zoomRetain` true, `zoomRebakeBudget` 12, `zoomFra
   changes nothing new starts at all (the returned set is only known after that frame's on-screen scan).
 - `MultiTextureFBO2.pzoptWidestZoomBelow(limit)`: the widest selectable zoom under a limit (the high-res
   rectangle).
+- Two faults of the first build (`3441a1c`, found by the parity watch on the Louisville walk the same
+  night): a level re-entering the screen by camera motion carried its kept texture into the ordinary re-bake
+  hold (`rebakeBudget`, up to 3 frames of the stale texture, read as roof flicker), and a returned level that
+  was then occlusion-culled or freed kept its pending bit, which the plan took for a running zoom flood, so
+  every first-sight chunk level was budgeted for the rest of the session (black chunk levels downtown). Now a
+  camera-motion return is allowed in the frame it appears (the texture is redrawn before it is shown, as
+  stock's fresh one was), the bits clear on the occlusion and off-screen paths, and only an actual zoom
+  change or a real deferral keeps the flood on.
 
 Results (240 cap, south route, `zoomsteps.py --window 1.0`): 0.25 ↔ 2.5 instant jumps, worst frame per
 jump 375 / 86 / 59 / 52 ms (stock) → see `docs/results.md` for the adopted build's numbers.
