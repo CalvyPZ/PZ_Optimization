@@ -2057,6 +2057,16 @@ the finally `ActionEval.flush()` (the parallel evaluation, then every queued zom
 `pzoptPostUpdateAnimatingRest()` in order, which is where their bone math gets queued) and last `AnimBatch.flush()`.
 Log line `action eval:` next to `anim batch:` (FBORenderCell).
 
+Fix of 2026-09-22 night (off-screen thump bursts, a player report): every bucket sets
+`GameTime.perObjectMultiplier` to its frame mod while its zombies update / postupdate and resets it to 1 afterwards,
+so the deferred `pzoptPostUpdateAnimatingRest()` calls in `flush()` ran at 1. An off-screen zombie runs at its
+state's minimum simulation level (SIXTEENTH: one update every 16 frames): `ThumpState.execute` counted the thump
+events between the track time and the track time + 16 frames of animation, while the deferred animation advanced
+the track by one frame, so the next update counted the same strikes again, up to 16 times (bursts of 8 / 16 thumps
+and 16x door damage). `flush()` now sets the multiplier to each zombie's `getCurrentSimulationLevel().getFrameMod()`
+around its deferred call and restores the previous value in a finally, as stock's in-loop call saw it. Dev key
+`devActionEvalUnitMultiplier=true` restores the bug for A/Bs; rig `pzopt.ThumpRig` (harness flag `thump=N`).
+
 ## pzopt.FrameBatch (2026-09-22)
 
 The worker pool both batches share (`frameThreads`, default 8 = the old `animBonesThreads`, clamped to cores - 1):

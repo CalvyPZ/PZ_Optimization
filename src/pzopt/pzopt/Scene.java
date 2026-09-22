@@ -226,6 +226,7 @@ public final class Scene {
    /** Per-frame upkeep while the run is live: keep the overrides pinned and fire the scheduled lightning. */
    static void tick(IsoPlayer p, long nowNs) {
       keepWornItems(p); // the bench player keeps their glasses (screen blur otherwise; see pinWornItems)
+      ThumpRig.tick(p, nowNs); // thump=N: zombies thumping a door off-screen (the thump-burst repro)
       if (zombiesOff) {
          removeZombies();
       }
@@ -529,6 +530,9 @@ public final class Scene {
       try {
          java.util.ArrayList<zombie.characters.IsoZombie> list = new java.util.ArrayList<>(zombie.iso.IsoWorld.instance.getCell().getZombieList());
          for (zombie.characters.IsoZombie z : list) {
+            if (ThumpRig.isRigZombie(z)) {
+               continue;
+            }
             z.removeFromWorld();
             z.removeFromSquare();
             zombiesRemoved++;
@@ -571,6 +575,6 @@ public final class Scene {
             + "\npopulation=" + (population >= 0f ? Float.toString(population) : "save") + "\nzombies_loaded=" + zombiesLoaded() + "\nzombies_removed=" + zombiesRemoved
             + "\nsee_all=" + seeAll
             + (soundRadius > 0 ? "\nsound_radius=" + soundRadius + "\nsound_every=" + soundEvery + "\nsound_stats=" + soundStats() : "")
-            + (helicopter ? "\nhelicopter=" + helicopterState() : "");
+            + (helicopter ? "\nhelicopter=" + helicopterState() : "") + ThumpRig.summary();
    }
 }

@@ -1,5 +1,6 @@
 package pzopt;
 
+import zombie.GameTime;
 import zombie.characters.IsoGameCharacter;
 import zombie.characters.IsoZombie;
 import zombie.characters.action.ActionContext;
@@ -232,11 +233,21 @@ public final class ActionEval {
          Log.warn("actionEvalParallel: transition evaluation failed on a worker, batching off: " + t);
       }
       applying = true;
+      // Each bucket's postupdate ran its zombies at perObjectMultiplier = the bucket's frame mod and reset it to 1 at
+      // the end; the rest of postUpdateAnimating (animation advance) must see the same multiplier, or a zombie on a
+      // reduced simulation level (off-screen: SIXTEENTH, frame mod 16) advances its thump animation 1 frame per update
+      // while ThumpState counts the strikes over 16: every strike counted up to 16 times (bursts of 8 / 16 thumps).
+      GameTime gameTime = GameTime.getInstance();
+      float multiplier = gameTime.perObjectMultiplier;
       try {
          for (int i = 0; i < count; i++) {
+            if (!Config.DEV_ACTION_EVAL_UNIT_MULTIPLIER) {
+               gameTime.perObjectMultiplier = queue[i].getCurrentSimulationLevel().getFrameMod();
+            }
             queue[i].pzoptPostUpdateAnimatingRest();
          }
       } finally {
+         gameTime.perObjectMultiplier = multiplier;
          applying = false;
          java.util.Arrays.fill(queue, 0, count, null);
          count = 0;

@@ -22,6 +22,7 @@ PzoptOptionClasses = {
     cutawayVisitPrefilter = { "FBORenderCutaways" },
     dev = { "pzopt.Guard" },
     devActionEvalCheck = { "ActionContext", "pzopt.ActionEval" },
+    devActionEvalUnitMultiplier = { "pzopt.ActionEval", "pzopt.ThumpRig" },
     devAotCacheHarness = { "pzopt.AotCache" },
     devCutawayLog = { "FBORenderCutaways" },
     devFogDepthView = { "pzopt.FogPass" },

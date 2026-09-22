@@ -88,6 +88,7 @@ import java.util.Properties;
  *   actionEvalParallel true/false the zombies' action-context transitions are evaluated on the frame workers after the
  *                            postupdate loop, applied on the game thread in order (default true; pzopt.ActionEval)
  *   devActionEvalCheck true/false dev: re-evaluate on the game thread at apply time and count disagreements
+ *   devActionEvalUnitMultiplier true/false dev: the pre-fix deferred postupdate at perObjectMultiplier 1 (off-screen thump bursts; ThumpRig A/B)
  *   zombieCullSortFast true/false the per-frame zombie relevance sort computes each score once (default true; same order)
  *   lightingReadParallel true/false the lighting queue's pre-pass drain reads its chunk levels on the frame workers
  *                            (default true; pzopt.LightingBatch)
@@ -373,6 +374,7 @@ public final class Config {
    public static final boolean LIGHTING_READ_PARALLEL = bool("lightingReadParallel", true); // the pre-pass drain of the lighting queue reads its chunk levels on the frame workers, one task per level (pzopt.LightingBatch; FBORenderCell.pzoptFlushPendingLighting, LightingJNI override); the room-seen / meta hooks are applied by the game thread after the join
    public static final boolean DEV_LIGHTING_READ_CHECK = bool("devLightingReadCheck", false); // dev: after a parallel lighting batch re-read one square in sixteen on the game thread and count squares whose stored fields differ from the native's answer
    public static final boolean DEV_ACTION_EVAL_CHECK = bool("devActionEvalCheck", false); // dev: evaluate every batched transition set again on the game thread at apply time and count / log disagreements with the worker's result
+   public static final boolean DEV_ACTION_EVAL_UNIT_MULTIPLIER = bool("devActionEvalUnitMultiplier", false); // dev: reproduce the bug fixed on 2026-09-22 (deferred postupdate ran at perObjectMultiplier 1, a reduced-simulation zombie counted each thump up to 16 times)
    public static final boolean SKIN_TRANSFORMS_PRECOMPUTE = bool("skinTransformsPrecompute", true); // the worker that updated a zombie's bones also multiplies them into the skin-transform sets its models used last frame, so the render phase finds them computed (AnimationPlayer.pzoptPrecomputeSkinTransforms; only with animBonesParallel)
    public static final boolean SKIN_PALETTE_PRECOMPUTE = bool("skinPalettePrecompute", true); // the worker also stores each precomputed skin-transform set as the shader palette buffer, so initMatrixPalette is one bulk copy (AnimatedModel override; needs skinTransformsPrecompute)
    public static final boolean SHADOW_PREP = bool("shadowPrep", true); // the worker that updated a zombie's bones also computes its shadow ellipse (pzopt.ShadowPrep); IsoZombie.calculateShadowParams serves it until the next update
