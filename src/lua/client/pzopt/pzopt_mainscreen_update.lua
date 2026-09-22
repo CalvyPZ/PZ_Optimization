@@ -8,6 +8,9 @@
 --  offers to quit, because the classes the JVM already loaded stay the old ones until a restart.
 --  A copy without pzopt-installed.txt (a hand-unpacked zip) cannot swap its own files: the dialog
 --  then only opens the release page.
+--  Controller: the item has its own row in the menu's joypad list while it is enabled (the D-pad reaches
+--  it between Credits and Exit, A is the click), the dialog takes the joypad focus like the stock modals
+--  (A = first button, B = second one or close, D-pad scrolls the notes) and hands it back to the item.
 -- Installed by scripts/pzopt.sh into <game dir>/media/lua/client/pzopt/ (loose game-dir Lua is
 -- loaded like any other, no mod to enable).
 
@@ -156,6 +159,51 @@ function PzoptUpdateDialog:refresh(force)
         self.secondary:setVisible(false)
         self.primary:setX((self.width - w1) / 2)
     end
+    self:syncJoypadButtons()
+end
+
+-- Controller: A is the first button and B the second one, like the stock yes / no modals; with a single
+-- button ("Hide" / "Close") B closes too. The glyphs follow the buttons whenever the state changes.
+function PzoptUpdateDialog:syncJoypadButtons()
+    if not self.joyfocus then return end
+    self:setISButtonForA(self.primary)
+    if self.secondary:isVisible() then
+        self:setISButtonForB(self.secondary)
+    else
+        self.ISButtonB = nil
+        self.secondary:clearJoypadButton()
+    end
+end
+
+function PzoptUpdateDialog:onGainJoypadFocus(joypadData)
+    ISPanelJoypad.onGainJoypadFocus(self, joypadData)
+    self.joypadButtons = {}
+    self:syncJoypadButtons()
+end
+
+function PzoptUpdateDialog:onLoseJoypadFocus(joypadData)
+    ISPanelJoypad.onLoseJoypadFocus(self, joypadData)
+    self.ISButtonA = nil
+    self.ISButtonB = nil
+    self.primary:clearJoypadButton()
+    self.secondary:clearJoypadButton()
+end
+
+function PzoptUpdateDialog:onJoypadDown(button, joypadData)
+    if button == Joypad.BButton and not self.ISButtonB then
+        self:close()
+        return
+    end
+    ISPanelJoypad.onJoypadDown(self, button, joypadData)
+end
+
+-- the D-pad scrolls the release notes (three mouse-wheel notches)
+function PzoptUpdateDialog:onJoypadDirUp(joypadData)
+    self.text:setYScroll(self.text:getYScroll() + 18 * 3)
+end
+
+function PzoptUpdateDialog:onJoypadDirDown(joypadData)
+    self.text:setYScroll(self.text:getYScroll() - 18 * 3)
 end
 
 function PzoptUpdateDialog:prerender()
@@ -228,8 +276,21 @@ function PzoptUpdateDialog:close()
     self:setVisible(false)
     self:removeFromUIManager()
     PzoptUpdateDialog.instance = nil
-    if MainScreen.instance and MainScreen.instance.bottomPanel then
-        MainScreen.instance.bottomPanel:setVisible(true)
+    local ms = MainScreen.instance
+    if ms and ms.bottomPanel then
+        ms.bottomPanel:setVisible(true)
+    end
+    -- the controller's focus goes back where it came from (the menu, whose focus reset lands on the default
+    -- item) and then onto the update item, so a "Later" leaves the cursor where the player pressed A
+    local joypadData = self.joyfocus
+    if joypadData and joypadData.focus == self then
+        joypadData.focus = self.prevFocus
+        updateJoypadFocus(joypadData)
+        if ms and joypadData.focus == ms and ms.joyfocus and ms.pzoptUpdateOption then
+            if ms:setJoypadFocus(ms.pzoptUpdateOption, joypadData) then
+                ms:updateBottomPanelButtons()
+            end
+        end
     end
 end
 
@@ -247,8 +308,15 @@ function PzoptUpdateDialog.show()
     dlg:setAlwaysOnTop(true)
     dlg:bringToTop()
     PzoptUpdateDialog.instance = dlg
-    -- like the stock quit dialog: the menu items go while a dialog is up
+    -- like the stock quit dialog: the menu items go while a dialog is up, and a controller's focus moves
+    -- to the dialog (the menu would otherwise keep A for itself)
     MainScreen.instance.bottomPanel:setVisible(false)
+    local joypadData = JoypadState.getMainMenuJoypad()
+    if joypadData then
+        dlg.prevFocus = joypadData.focus
+        joypadData.focus = dlg
+        updateJoypadFocus(joypadData)
+    end
 end
 
 -- --- the menu item -------------------------------------------------------------------------------
@@ -301,6 +369,52 @@ local function addItem(self)
     print("[pzopt] update: main menu item added")
 end
 
+-- Controller. The D-pad walks self.joypadButtonsY, which the stock MainScreen:onGainJoypadFocus rebuilds
+-- from its own list of labels (so a controller went from Credits straight to Exit), and A goes through
+-- onMenuItemMouseDownMainMenu, which only knows the stock `internal` names. The label gets its own row
+-- right after Credits while it is enabled and visible; a greyed item has no row, the D-pad skips it like
+-- the mouse ignores it. Runs after every stock rebuild and once per frame while the menu holds the focus.
+local function joypadRowOf(rows, element)
+    if not element then return nil end
+    for i, row in ipairs(rows) do
+        if row[1] == element then return i end
+    end
+    return nil
+end
+
+local function syncJoypadRow(self)
+    local label = self.pzoptUpdateOption
+    local rows = self.joypadButtonsY
+    if not label or not rows then return end
+    local at = joypadRowOf(rows, label)
+    local want = label.pzoptEnabled and label:isVisible()
+    if want and not at then
+        local pos = joypadRowOf(rows, self.creditOption)
+        if pos then
+            pos = pos + 1
+        else
+            pos = joypadRowOf(rows, self.exitOption) or (#rows + 1)
+        end
+        table.insert(rows, pos, { label })
+        if (self.joypadIndexY or 0) >= pos then
+            self.joypadIndexY = self.joypadIndexY + 1
+        end
+    elseif at and not want then
+        table.remove(rows, at)
+        label:setJoypadFocused(false)
+        if self.joypadIndexY == at then
+            -- the focused item just went inert: the cursor moves to the row that took its place
+            local row = rows[math.min(at, #rows)]
+            if row then
+                self:setJoypadFocus(row[1], self.joyfocus)
+                self:updateBottomPanelButtons()
+            end
+        elseif (self.joypadIndexY or 0) > at then
+            self.joypadIndexY = self.joypadIndexY - 1
+        end
+    end
+end
+
 -- Once per frame: enabled state, colour and text follow the updater; the item is shown whenever Exit
 -- is, i.e. after the intro fade and not while a stock dialog hid the panel.
 local function syncItem(self)
@@ -336,6 +450,7 @@ local function syncItem(self)
         label:setWidth(self.maxMenuItemWidth or label:getWidth())
     end
     label:setVisible(self.exitOption:isVisible())
+    if self.joyfocus then syncJoypadRow(self) end
 end
 
 local function install()
@@ -363,6 +478,21 @@ local function install()
                 self.pzoptUpdateOption = nil
             end
         end
+    end
+    -- controller: the row right after the stock rebuild of the joypad list, and A on the item is the click
+    local stockGainJoypadFocus = MainScreen.onGainJoypadFocus
+    function MainScreen:onGainJoypadFocus(...)
+        stockGainJoypadFocus(self, ...)
+        if self.pzoptUpdateOption then pcall(syncJoypadRow, self) end
+    end
+    local stockJoypadDown = MainScreen.onJoypadDown
+    function MainScreen:onJoypadDown(button, ...)
+        local label = self.pzoptUpdateOption
+        if label and button == Joypad.AButton and self.joypadButtons and self.joypadButtons[self.joypadIndex] == label then
+            onItemClick(label, 0, 0)
+            return
+        end
+        return stockJoypadDown(self, button, ...)
     end
 end
 

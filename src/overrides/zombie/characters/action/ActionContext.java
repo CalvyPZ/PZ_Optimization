@@ -33,6 +33,9 @@ public final class ActionContext {
    private ActionStateContainer pzoptCheckContainer; // devActionEvalCheck scratch
    private final java.util.IdentityHashMap<Object, Object> pzoptSnapshot = new java.util.IdentityHashMap<>(); // lookup -> value read on the game thread
    private static final java.util.IdentityHashMap<ActionState, Object[]> pzoptStateLookups = new java.util.IdentityHashMap<>(); // game thread only; null = a state with an unsupported condition
+   private static final java.util.IdentityHashMap<ActionState, Object[]> pzoptStateAllLookups = new java.util.IdentityHashMap<>(); // devActionEvalCheck only: the same states' unfiltered operands
+   private static final java.util.IdentityHashMap<ActionState, int[]> pzoptStateDuplicates = new java.util.IdentityHashMap<>(); // per operand: the earlier operand of the state naming the same variable, or -1
+   private Object[] pzoptSnapshotScratch = new Object[16]; // the values read for this state, so a repeated variable is read once
 
    /** Worker (or the game thread at the join): the evaluate half of updateInternal, result in nextActionStateContainer. */
    public void pzoptEvaluate() {
@@ -56,6 +59,9 @@ public final class ActionContext {
    public void pzoptSnapshot() {
       this.pzoptSnapshot.clear();
       IAnimatable owner = this.getOwner();
+      // pzopt: no state of this container defines a variable, so none can shadow a game variable and the operands
+      // resolve straight to the character's slot array; checked once here instead of walked per operand.
+      this.pzoptDirectVariables = !this.actionStateContainer.hasStateVariables();
       this.pzoptSnapshotState(this.actionStateContainer.getRootState(), owner);
 
       for (int i = 0; i < this.actionStateContainer.childStateCount(); i++) {
@@ -63,16 +69,59 @@ public final class ActionContext {
       }
    }
 
+   private boolean pzoptDirectVariables;
+
    private void pzoptSnapshotState(ActionState state, IAnimatable owner) {
       Object[] lookups = pzoptStateLookups.get(state);
       if (lookups == null) {
          return;
       }
 
-      for (Object lookup : lookups) {
-         Object value = CharacterVariableCondition.pzoptSnapshotValue(lookup, owner);
+      int[] duplicates = pzoptStateDuplicates.get(state);
+      if (this.pzoptSnapshotScratch.length < lookups.length) {
+         this.pzoptSnapshotScratch = new Object[lookups.length];
+      }
+
+      for (int i = 0; i < lookups.length; i++) {
+         // pzopt: a state that tests the same variable in several transitions used to resolve and call it once per
+         // transition; the side-effecting callbacks stock reads here are exactly the ones worth reading once.
+         int duplicate = duplicates == null ? -1 : duplicates[i];
+         Object value = duplicate >= 0
+            ? this.pzoptSnapshotScratch[duplicate]
+            : CharacterVariableCondition.pzoptSnapshotValue(lookups[i], owner, this.pzoptDirectVariables);
+         this.pzoptSnapshotScratch[i] = value;
          if (value != null) {
-            this.pzoptSnapshot.put(lookup, value);
+            this.pzoptSnapshot.put(lookups[i], value);
+         }
+      }
+
+      if (pzopt.Config.DEV_ACTION_EVAL_CHECK && pzopt.Config.ACTION_SNAPSHOT_FILTER) {
+         this.pzoptCheckFilter(state, owner, lookups); // the rig of actionSnapshotFilter: what the name filter left out
+      }
+   }
+
+   /**
+    * pzopt: devActionEvalCheck rig for actionSnapshotFilter. Resolves every operand the filter dropped and counts the
+    * ones that do resolve to a callback with side effects, i.e. the reads the filter wrongly moved to a worker.
+    */
+   private void pzoptCheckFilter(ActionState state, IAnimatable owner, Object[] kept) {
+      Object[] all = pzoptStateAllLookups.get(state);
+      if (all == null) {
+         return;
+      }
+
+      for (Object lookup : all) {
+         boolean wasKept = false;
+         for (Object k : kept) {
+            if (k == lookup) {
+               wasKept = true;
+               break;
+            }
+         }
+
+         if (!wasKept && CharacterVariableCondition.pzoptSnapshotValue(lookup, owner) != null) {
+            pzopt.ActionEval.filterMisses++;
+            this.pzoptSnapshot.put(lookup, CharacterVariableCondition.pzoptSnapshotValue(lookup, owner));
          }
       }
    }
@@ -107,6 +156,7 @@ public final class ActionContext {
       }
 
       java.util.ArrayList<Object> lookups = new java.util.ArrayList<>();
+      java.util.ArrayList<Object> allLookups = new java.util.ArrayList<>(); // devActionEvalCheck only
       boolean safe = true;
 
       for (int i = 0; safe && i < state.transitions.size(); i++) {
@@ -117,12 +167,22 @@ public final class ActionContext {
             if (condition instanceof CharacterVariableCondition variableCondition) {
                Object lhs = variableCondition.pzoptLhsLookup();
                Object rhs = variableCondition.pzoptRhsLookup();
-               if (lhs != null) {
-                  lookups.add(lhs);
+               if (lhs != null && (!pzopt.Config.ACTION_SNAPSHOT_FILTER || CharacterVariableCondition.pzoptNeedsSnapshot(lhs))) {
+                  lookups.add(lhs); // pzopt: actionSnapshotFilter, only the operands that can be an impure callback
                }
 
-               if (rhs != null) {
+               if (rhs != null && (!pzopt.Config.ACTION_SNAPSHOT_FILTER || CharacterVariableCondition.pzoptNeedsSnapshot(rhs))) {
                   lookups.add(rhs);
+               }
+
+               if (pzopt.Config.DEV_ACTION_EVAL_CHECK) {
+                  if (lhs != null) {
+                     allLookups.add(lhs);
+                  }
+
+                  if (rhs != null) {
+                     allLookups.add(rhs);
+                  }
                }
             } else if (!(condition instanceof zombie.characters.action.conditions.EventOccurred)
                && !(condition instanceof zombie.characters.action.conditions.EventNotOccurred)) {
@@ -132,7 +192,28 @@ public final class ActionContext {
          }
       }
 
+      if (safe) {
+         // pzopt: which operands name a variable an earlier operand of this state already names
+         int[] duplicates = new int[lookups.size()];
+         for (int i = 0; i < duplicates.length; i++) {
+            duplicates[i] = -1;
+
+            for (int j = 0; j < i; j++) {
+               if (CharacterVariableCondition.pzoptSameVariable(lookups.get(j), lookups.get(i))) {
+                  duplicates[i] = j;
+                  break;
+               }
+            }
+         }
+
+         pzoptStateDuplicates.put(state, duplicates);
+      }
+
       pzoptStateLookups.put(state, safe ? lookups.toArray() : PZOPT_UNSAFE_STATE);
+      if (pzopt.Config.DEV_ACTION_EVAL_CHECK && safe) {
+         pzoptStateAllLookups.put(state, allLookups.toArray());
+      }
+
       return safe;
    }
 

@@ -144,6 +144,21 @@
   },
   "title": "Verdict line: what holds the frame rate below the cap"
  },
+ "player": {
+  "opt": {
+   "bytes": 818170,
+   "file": "player-opt.gif",
+   "run": "prev-lou-player-20260922-192956",
+   "video_t0": 38.8
+  },
+  "stock": {
+   "bytes": 860417,
+   "file": "lou-stock.gif",
+   "run": "tri-lou-stock-20260922-105001",
+   "video_t0": 38.3
+  },
+  "title": "Louisville horde: stock vs stock + the player line-of-sight keys"
+ },
  "spin": {
   "opt": {
    "bytes": 1991505,
@@ -182,5 +197,35 @@
    "video_t0": 31.74
   },
   "title": "Night, hand torch, turning in place"
+ },
+ "zgt": {
+  "opt": {
+   "bytes": 936611,
+   "file": "zgt-opt.gif",
+   "run": "zt15-rec-plain-20260922-145657",
+   "video_t0": 35.7
+  },
+  "stock": {
+   "bytes": 926148,
+   "file": "zgt-stock.gif",
+   "run": "zt1-rec-off-20260922-134400",
+   "video_t0": 36.63
+  },
+  "title": "Louisville horde: everything on without vs with the zombie game-thread keys"
+ },
+ "zombies": {
+  "opt": {
+   "bytes": 836416,
+   "file": "zombies-opt.gif",
+   "run": "prev-lou-zombies-20260922-193507",
+   "video_t0": 38.84
+  },
+  "stock": {
+   "bytes": 860417,
+   "file": "lou-stock.gif",
+   "run": "tri-lou-stock-20260922-105001",
+   "video_t0": 38.3
+  },
+  "title": "Louisville horde: stock vs stock + the zombie simulation keys"
  }
 }

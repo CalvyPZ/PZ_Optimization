@@ -60,6 +60,18 @@ CLIPS = {
     'load': dict(stock='sbs-stock120-1', opt='sbs-opt120-uncap-1', kind='load',
                  title='Launch to main menu, Continue to world'),
 }
+# Louisville horde, one group of keys at a time (2026-09-22). `zombies` and `player`: the profiled stock run (every key
+# off, overlay + profiler on screen) vs the same stock key list with only that group on (runs prev-lou-<clip>; the
+# zombie group needs the worker pool, `parallel=true`); the shared stock GIF is written once as lou-stock.gif
+# (`stock_file`, the Lua's STOCK_FILE). `zgt`, the zombie game-thread keys: on their own over stock they gain nothing
+# (the stock frame is bound by the player LOS and lighting), so the clip is everything on without them (zt1-rec-off,
+# the start of that pass) vs everything on (zt15-rec-plain). The characters-draw keys keep the `horde` clip: every
+# everything-on-minus-them run tipped the preset into its strong re-bake flood (four of four), not comparable.
+for name, stock, opt, title, extra in (
+        ('zombies', 'tri-lou-stock', 'prev-lou-zombies', 'Louisville horde: stock vs stock + the zombie simulation keys', dict(stock_file='lou')),
+        ('player', 'tri-lou-stock', 'prev-lou-player', 'Louisville horde: stock vs stock + the player line-of-sight keys', dict(stock_file='lou')),
+        ('zgt', 'zt1-rec-off', 'zt15-rec-plain', 'Louisville horde: everything on without vs with the zombie game-thread keys', {})):
+    CLIPS[name] = dict(stock=stock, opt=opt, after=3.0, title=title, **extra)
 # The performance overlay's elements (2026-09-22): the spinning route recorded with the overlay off (`ov-off`) and with
 # every default element on at overlayFont=Large (`ov-full`); each clip is one crop of the 5120x2160 capture, halved
 # (Large text ~30 px -> 15 px, readable), 16 fps x 3 s = 48 frames (the overlay's own numbers move at 1-2 Hz), no
@@ -194,19 +206,29 @@ def gif(src, t0, dur, ass, out, fps=FPS, hold=0.0, extra='', crop=None):
     return size
 
 
+WRITTEN = set()  # GIFs written by this invocation
+
+
 def action_clip(name, c, work):
     s, o = run_info(c['stock']), run_info(c['opt'])
     res = {}
     dur, fps = c.get('dur', DUR), c.get('fps', FPS)
     for side, info, colour in (('stock', s, C_STOCK), ('opt', o, C_OPT)):
         t0 = info['onset'] + c['after']
+        # clips sharing one stock run write its GIF once (`stock_file`)
+        stem = c['stock_file'] if side == 'stock' and c.get('stock_file') else name
+        out = os.path.join(OUT, f'{stem}-{side}.gif')
+        if out in WRITTEN:
+            res[side] = dict(run=os.path.basename(info['dir']), video_t0=round(t0, 2), file=os.path.basename(out),
+                             bytes=os.path.getsize(out))
+            continue
         ass = None
         if c.get('counter', True):
             ass = os.path.join(work, f'{name}-{side}.ass')
             fps_ass(info, t0, dur, colour, ass)
-        out = os.path.join(OUT, f'{name}-{side}.gif')
-        res[side] = dict(run=os.path.basename(info['dir']), video_t0=round(t0, 2),
+        res[side] = dict(run=os.path.basename(info['dir']), video_t0=round(t0, 2), file=os.path.basename(out),
                          bytes=gif(info['video'], t0, dur, ass, out, fps=fps, crop=c.get('crop')))
+        WRITTEN.add(out)
     return res
 
 

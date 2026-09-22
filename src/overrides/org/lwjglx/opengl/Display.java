@@ -144,7 +144,40 @@ public class Display {
 
       boolean bDebug = Core.debug && "true".equalsIgnoreCase(System.getProperty("org.lwjgl.util.Debug"));
       GLFW.glfwWindowHint(139271, bDebug ? 1 : 0);
-      Display.Window.handle = GLFW.glfwCreateWindow(gameWindowMode.getWidth(), gameWindowMode.getHeight(), windowTitle, 0L, 0L);
+      // pzopt: create the window at the size and mode the game asks for a moment later (Core.width x Core.height,
+      // fullscreen per the option) instead of the shim's 640x480 placeholder that Core.setDisplayModeInternal
+      // resizes. Under NVIDIA PRIME render offload on XWayland (Dell GTX 960M, 2026-09-22) the GL drawable kept the
+      // size the context was first made current with: the fullscreen 1920x1080 window showed the frame's
+      // bottom-left 640x480, the rest black (the stock shim too). Created at the final size, nothing has to
+      // follow a resize; Core's own switch then finds the window already right and does nothing.
+      long pzoptMonitor = 0L;
+      Core pzoptCore = Core.getInstance();
+      if (pzoptCore != null && (Core.width > 0 && Core.height > 0 || pzoptCore.isFullScreen())) {
+         boolean pzoptFullscreen = pzoptCore.isFullScreen();
+         int w = Core.width > 0 ? Core.width : monitorWidth;
+         int h = Core.height > 0 ? Core.height : monitorHeight;
+         if (!pzoptFullscreen && pzoptCore.getOptionBorderlessWindow()) {
+            w = monitorWidth;
+            h = monitorHeight;
+         }
+         if (pzoptFullscreen) {
+            GLFW.glfwWindowHint(GLFW.GLFW_REFRESH_RATE, monitorRefreshRate); // the desktop's rate: no video mode switch
+            pzoptMonitor = monitor;
+            gameWindowMode = new DisplayMode(w, h, monitorBitPerPixel, monitorRefreshRate);
+         } else {
+            gameWindowMode = new DisplayMode(w, h);
+         }
+      }
+      Display.Window.handle = GLFW.glfwCreateWindow(gameWindowMode.getWidth(), gameWindowMode.getHeight(), windowTitle, pzoptMonitor, 0L);
+      if (Display.Window.handle != 0L && pzoptMonitor != 0L) {
+         // pzopt: GLFW may have picked another video mode; keep gameWindowMode equal to what Core will look for
+         int[] pw = new int[1];
+         int[] ph = new int[1];
+         GLFW.glfwGetWindowSize(Display.Window.handle, pw, ph);
+         if (pw[0] > 0 && ph[0] > 0 && (pw[0] != gameWindowMode.getWidth() || ph[0] != gameWindowMode.getHeight())) {
+            gameWindowMode = new DisplayMode(pw[0], ph[0], monitorBitPerPixel, monitorRefreshRate);
+         }
+      }
       if (Display.Window.handle == 0L) {
          throw new IllegalStateException("Failed to create Display window");
       }
@@ -451,12 +484,62 @@ public class Display {
 
          GLFW.glfwShowWindow(Display.Window.handle);
          GLFW.glfwFocusWindow(Display.Window.handle);
+         pzoptAwaitWindowSize(); // pzopt: the window manager applies the new size after this call returns
+         GLFW.glfwMakeContextCurrent(0L);
          GLFW.glfwMakeContextCurrent(Display.Window.handle);
          GL11.glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
          GLFW.glfwSwapInterval(0);
          GL11.glClear(16640);
          GLFW.glfwSwapBuffers(Display.Window.handle);
          setVSyncEnabled(vsyncEnabled);
+      }
+   }
+
+   /**
+    * pzopt: after glfwSetWindowMonitor the window manager resizes the window asynchronously; the stock shim
+    * re-bound the context at once, so a driver that latches the drawable geometry on MakeCurrent (NVIDIA PRIME
+    * render offload on XWayland) kept presenting the old size. Wait, briefly, until the server reports the
+    * requested size (a fullscreen window may legitimately settle on another video mode: stop when the size
+    * stops changing), then record it so getWidth()/getHeight() are right before the ConfigureNotify is polled.
+    */
+   private static void pzoptAwaitWindowSize() {
+      int wantW = gameWindowMode.getWidth();
+      int wantH = gameWindowMode.getHeight();
+      int[] w = new int[1];
+      int[] h = new int[1];
+      int lastW = -1;
+      int lastH = -1;
+      int stable = 0;
+      long deadline = System.nanoTime() + 1_000_000_000L;
+      while (System.nanoTime() < deadline) {
+         GLFW.glfwGetFramebufferSize(Display.Window.handle, w, h);
+         if (w[0] == wantW && h[0] == wantH) {
+            break;
+         }
+         if (w[0] == lastW && h[0] == lastH) {
+            if (++stable >= 20) { // 200 ms without a change: the window manager is done
+               break;
+            }
+         } else {
+            stable = 0;
+            lastW = w[0];
+            lastH = h[0];
+         }
+         try {
+            Thread.sleep(10L);
+         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            break;
+         }
+      }
+      if (w[0] > 0 && h[0] > 0) {
+         displayFramebufferWidth = w[0];
+         displayFramebufferHeight = h[0];
+         GLFW.glfwGetWindowSize(Display.Window.handle, w, h);
+         if (w[0] > 0 && h[0] > 0) {
+            latestWidth = w[0];
+            latestHeight = h[0];
+         }
       }
    }
 

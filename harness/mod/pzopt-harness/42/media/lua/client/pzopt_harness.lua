@@ -90,7 +90,53 @@ local function onFETick()
     end
 end
 
+-- lure=<animal type> (2026-09-22, CanSee repro): lure_at seconds after the player exists, spawn the
+-- animal 8 tiles away, put a carrot in the primary hand and queue the stock ISLureAnimal action, i.e.
+-- the context menu's "Lure" path (lureAnimal -> IsoAnimal.tryLure -> CanSee(IsoMovingObject)). A
+-- status line every 2 s: distance, lured count, current action. Stock: the animal walks up to the player.
+local lure = nil
+local function lureTick()
+    if lure == false then return end
+    local player = getPlayer()
+    if not player then return end
+    if lure == nil then
+        local flags = readFlags()
+        if not flags or not flags.lure or flags.lure == "" then lure = false; return end
+        lure = { kind = flags.lure, breed = flags.lure_breed or "holstein",
+                 atMs = getTimestampMs() + (tonumber(flags.lure_at) or 10) * 1000 }
+    end
+    local now = getTimestampMs()
+    if not lure.animal then
+        if now < lure.atMs then return end
+        local sq = player:getCurrentSquare()
+        local target = nil
+        for _, d in ipairs({ {8, 0}, {-8, 0}, {0, 8}, {0, -8}, {6, 6}, {-6, -6} }) do
+            local s = getCell():getGridSquare(sq:getX() + d[1], sq:getY() + d[2], sq:getZ())
+            if s and s:isFree(false) then target = s; break end
+        end
+        if not target then print("[pzopt-harness] lure: no free square 8 tiles from the player"); lure = false; return end
+        local breed = AnimalDefinitions.getDef(lure.kind):getBreedByName(lure.breed)
+        local animal = addAnimal(getCell(), target:getX(), target:getY(), target:getZ(), lure.kind, breed)
+        animal:addToWorld()
+        lure.animal = animal
+        local item = player:getInventory():AddItem("Base.Carrots")
+        player:setPrimaryHandItem(item)
+        print("[pzopt-harness] lure: " .. lure.kind .. " at " .. target:getX() .. "," .. target:getY() .. ", player at " .. sq:getX() .. "," .. sq:getY() .. ", queueing ISLureAnimal with " .. item:getFullType())
+        ISTimedActionQueue.add(ISLureAnimal:new(player, animal, item))
+        lure.logMs = now
+        return
+    end
+    if now - lure.logMs >= 2000 then
+        lure.logMs = now
+        print(string.format("[pzopt-harness] lure: dist=%.1f lured=%d action=%s", lure.animal:DistTo(player),
+            player:getLuredAnimals():size(),
+            tostring(ISTimedActionQueue.getTimedActionQueue(player).queue[1] and ISTimedActionQueue.getTimedActionQueue(player).queue[1].Type)))
+    end
+end
+
 local function onTickEvenPaused()
+    local ok, err = pcall(lureTick)
+    if not ok then print("[pzopt-harness] lure: rig error " .. tostring(err)); lure = false end
     if quitAtMs and getTimestampMs() >= quitAtMs then
         quitAtMs = nil
         print("[pzopt-harness] quit_after reached, quitting")

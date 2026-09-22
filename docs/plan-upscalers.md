@@ -104,3 +104,60 @@ against the matching `ups-off` recording of the same route (overlay panels off).
   fsr1 / DLSS 50 % pairs. Judging note from the watch: an auto window that slides onto the quit-to-black reads as
   black tiles + a hue shift; `parity-judge.py` / `colorshift.py` take `--window-a` / `--window-b` to pin a side —
   check the printed window against the route before trusting a black_tiles verdict.
+- 2026-09-22 ~12:00 — committed in ba89d84 and released as win-b0bbce05d5-1555855 (release session). Maintainer's decision:
+  no native libraries in releases (`scripts/release.sh` sets `PZOPT_DLSS=0`; the Workshop uploader also refuses any
+  `.so`), so a released install runs `upscaler=dlss` as fsr1 with the logged reason; DLSS needs the shim and the DLSS
+  library built and installed from a checkout (`scripts/build.sh` with the SDK under `~/.local/share/nvidia-dlss-sdk`,
+  then `scripts/pzopt.sh install`).
+- 2026-09-22 12:20-12:50 — DLSS presets and quality levels on the 120 km/h drive (E:1200, kmh=193, 60 s, uncapped, 5120x2160,
+  recorded, overlay panels off, runs `upsd-*`, one build for every DLSS row and the `-2` references; the desktop had been on
+  the natives-free release install since the updater test at 11:50, `pzopt.sh reinstall` from the checkout put the shim
+  back, console `dlss: ready`). Mean fps / p99 / p99.9 ms / frames > 33 ms / sysmon GPU % and W; every run route
+  complete, first attempt:
+
+  | run | fps | p99 | p99.9 | >33 | GPU | W | soft % | trail % |
+  |---|---|---|---|---|---|---|---|---|
+  | off (`upsd-off-2`) | 483.6 | 7.6 | 12.3 | 0 | 99 | 309 | 0 (ref) | 0 |
+  | fsr1 quality 67 % (`upsd-fsr1-q-2`) | 511.7 | 7.3 | 12.5 | 0 | 98 | 304 | 2.5 | 0.0 |
+  | dlss quality, preset default | 249.4 | 11.9 | 17.5 | 1 | 100 | 343 | 15.3 | 0.9 |
+  | dlss quality, preset k | 255.3 | 11.3 | 16.2 | 0 | 100 | 348 | 19.9 | 1.2 |
+  | dlss quality, preset j | 248.5 | 10.9 | 18.1 | 0 | 100 | 346 | 12.2 | 0.2 |
+  | dlss quality, preset e | 332.6 | 9.8 | 13.9 | 0 | 99 | 316 | 14.8 | 0.1 |
+  | dlss quality, preset f | 324.3 | 9.9 | 14.2 | 0 | 99 | 310 | 15.5 | 0.3 |
+  | dlss quality, preset m | 169.2 | 13.9 | 23.1 | 3 | 100 | 362 | 9.5 | 0.2 |
+  | dlss quality, preset l | 149.5 | 15.2 | 23.8 | 0 | 100 | 364 | 11.9 | 0.4 |
+  | dlss native (DLAA), default | 212.9 | 12.3 | 17.4 | 0 | 100 | 345 | 7.9 | 0.5 |
+  | dlss balanced 58 %, default | 263.3 | 10.9 | 16.6 | 0 | 99 | 343 | 20.5 | 0.8 |
+  | dlss performance 50 %, default | 235.6 | 11.9 | 16.1 | 0 | 99 | 353 | 18.2 | 0.2 |
+  | dlss ultra 33 %, default | 277.8 | 10.8 | 15.2 | 0 | 100 | 343 | 30.9 | 0.9 |
+
+  Readings: (1) at 5120x2160 on the 4090 fsr1 is the only upscaler that is a net win (+6 % mean, p99 7.3 vs 7.6); every
+  DLSS preset costs more than the render-scale saving, the cheapest (the convolutional e / f) 30 % below off and the
+  transformer ones (default = k at quality, j) 48 % below, with 25-28 % of the frames under 240 fps (e / f: 13-16 %,
+  off: 6 %). (2) The DLSS cost is per output pixel: the quality levels move the mean by ± 10 % only (ultra 278, balanced
+  263, quality 249, performance 236 — the driver picks a different network per level, so the order is not monotonic),
+  DLAA at 213 is the price of the network alone. (3) Presets m and l (the transformer performance / ultra-performance
+  models) are the heaviest networks at this output size (150-170 fps, 362-364 W, one `dlss: ready`, no re-creation)
+  and are not usable at 4K. (4) The `-2` references booted the Display "fourth edit" build (window created at its final
+  size): off 484.3 → 483.6, fsr1 525.1 → 511.7, i.e. the edit is a wash on the desktop drive. Verdict for the tab: keep
+  `dlssPreset=default` as the quality choice; `e` / `f` are the DLSS presets to name when fps matters; at 4K/240 Hz DLSS
+  is an image-quality option, fsr1 the performance one.
+- 2026-09-22 13:30 — ghosting pass over the same 15 recordings (`harness/ghostscan.py`, new; whole-route window
+  route_start+2 .. route_end-2, ~2,100 capture frames per run, HUD excluded). Two trail metrics and one
+  detail metric, all measured identically for every run: `asym` (after aligning the previous and the next
+  capture frame onto the current one, does a frame resemble its past more than its future? a renderer that
+  leaks history leans on the past), `trail` (loss of gradient energy ALONG the scroll direction vs across it,
+  relative to `off`), and `soft` (Laplacian RMS vs `off`). Noise floor from the repeat pairs (two runs of the
+  same mode): soft 1.8 % (off), 0.3 % (fsr1).
+  **No mode trails**: `asym` is within ±0.002 (SE 0.006) and `trail` within 1.2 % for all seven DLSS presets,
+  every quality level, fsr1 and off alike — i.e. camera-motion reprojection on this route is working and the
+  per-object motion vectors (`upscalerObjectMv`) are not leaving smears behind the car. What DLSS costs here
+  is **detail, not trails**: the `soft` column of the table above, 2.5 % for fsr1 against 8-31 % for DLSS, and
+  it tracks the render scale (ultra 33 % is the softest at 30.9 %, DLAA the sharpest at 7.9 %) rather than fps
+  — the two heaviest networks, m and l, are among the sharper DLSS rows (9.5 / 11.9 %) at half the frame rate.
+  Scope: a 120 km/h highway drive with no zombie crowd, captured at 60 fps AV1 (same encoder for every run),
+  so character ghosting and low-contrast temporal flicker are not exercised; a null `asym` means "no trail
+  above this rig's noise floor", not a proof of none. Earlier attempts that did NOT work, for the next person:
+  a two-predictor regression of the frame on (re-projected previous, unshifted previous) — the two predictors
+  are collinear at 4 px/frame and the fit returned noise; and sharpness of the moving phase against the parked
+  settling phase — different scenery, so the ratio measured content, not the renderer.

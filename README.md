@@ -483,6 +483,8 @@ lights up. It opens a dialog with the installed and offered builds and
 the release notes; **Update now** downloads the zip, replaces the files listed in
 `pzopt-installed.txt` (the game's own files are never touched, saves and options stay) and
 asks to quit, because the classes already loaded stay the old ones until the next launch.
+With a controller the lit item is one more row of the menu's D-pad list (A opens the dialog;
+there A is the first button, B the second one or close, the D-pad scrolls the notes).
 Nothing is downloaded before that click; the check itself is one request to
 `api.github.com` and can be switched off in Options > Optimizations > Updates
 (`updateCheck=false`). A copy unpacked by hand (Method C, no `pzopt-installed.txt`) only
@@ -521,7 +523,11 @@ texture lives seconds and baking its trees cost more than drawing them), and on 
 page lighting updates 10/s and the UI redrawn 30/s — 120 km/h drive 44 → 68 fps, walking
 49 → 81, p99 halved. On such a machine also use the G1 launcher JSON
 (`config/launcher/ProjectZomboid64.g1.json`): the stock ZGC stalls the game for seconds on
-four cores.
+four cores. A fourth button, **Low-end hardware + FSR 1.0 upscaling**, is that same set plus
+`upscaler=fsr1` at Quality (67 % per axis): on the same laptop the clear routes are CPU-bound, so
+the upscaler is free but idle there, while the night thunderstorm in heavy fog goes from p99 145 ms
+to 111 and the GPU load from 48 % to 40 % (2026-09-22, `docs/results.md`); a machine whose GPU is
+the wall gains roughly the pixel ratio.
 Below come titled groups: chunk textures (what bakes, bake budgets), cutaways / lighting /
 weather, sprite buffers, multiplayer, performance overlay (one dropdown per overlay element:
 statistics, game-thread tree, verdict, frame graph, flame graph, plus the sampler rate and the

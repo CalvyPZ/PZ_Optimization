@@ -5,6 +5,7 @@ import zombie.characters.action.ActionContext;
 import zombie.characters.action.ActionState;
 import zombie.characters.action.IActionCondition;
 import zombie.characters.action.IActionCondition.IFactory;
+import zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandle; // pzopt: the pooled handle of an operand
 import zombie.core.skinnedmodel.advancedanimation.AnimationVariableReference;
 import zombie.core.skinnedmodel.advancedanimation.IAnimatable;
 import zombie.core.skinnedmodel.advancedanimation.IAnimationVariableSlot;
@@ -350,9 +351,48 @@ public final class CharacterVariableCondition implements IActionCondition {
     * see, read now on the game thread (a callback with side effects or shared scratch), {@code pzopt.ActionEval.NULL}
     * for a null value.
     */
-   public static Object pzoptSnapshotValue(Object lookup, IAnimationVariableSource owner) {
+   /**
+    * pzopt: actionSnapshotFilter. Whether this operand can ever resolve to a callback with side effects, from its
+    * variable name alone (fixed by the action XML) and the character's callback registry (fixed by its constructor):
+    * a name the registry does not know can only ever be a stored slot, and a name in {@code PURE_CALLBACKS} is an
+    * audited pure read, so neither needs the game thread. A sub-variable source (another character) stays conservative.
+    * Computed once per state when the state's lookups are cached, so the per-frame snapshot walks only the few
+    * operands that really need a read.
+    */
+   public static boolean pzoptNeedsSnapshot(Object lookup) {
       CharacterVariableCondition.CharacterVariableLookup lookUp = (CharacterVariableCondition.CharacterVariableLookup)lookup;
-      IAnimationVariableSlot slot = lookUp.variableReference.getVariable(owner);
+      if (lookUp.variableReference.getSubVariableSourceName() != null) {
+         return true;
+      }
+
+      String name = lookUp.variableReference.getName();
+      return name == null || name.isBlank() || pzopt.ActionEval.impureCallback(name);
+   }
+
+   /**
+    * pzopt: whether two operands name the same variable of the same source, so one read serves both in a snapshot.
+    * Operands come from the action XML, so the comparison is a one-off at cache time.
+    */
+   public static boolean pzoptSameVariable(Object a, Object b) {
+      AnimationVariableReference ra = ((CharacterVariableCondition.CharacterVariableLookup)a).variableReference;
+      AnimationVariableReference rb = ((CharacterVariableCondition.CharacterVariableLookup)b).variableReference;
+      return StringUtils.equalsIgnoreCase(ra.getSubVariableSourceName(), rb.getSubVariableSourceName())
+         && StringUtils.equalsIgnoreCase(ra.getName(), rb.getName());
+   }
+
+   public static Object pzoptSnapshotValue(Object lookup, IAnimationVariableSource owner) {
+      return pzoptSnapshotValue(lookup, owner, false);
+   }
+
+   /**
+    * pzopt: {@code directGameVariables} = the owner's action-state container holds no state variables at all, so no
+    * state can shadow a game variable and the operand resolves straight to the character's own slot array. Stock's
+    * path walks the container's current state and every sub-state first, per operand; the caller checks the container
+    * once per snapshot instead.
+    */
+   public static Object pzoptSnapshotValue(Object lookup, IAnimationVariableSource owner, boolean directGameVariables) {
+      CharacterVariableCondition.CharacterVariableLookup lookUp = (CharacterVariableCondition.CharacterVariableLookup)lookup;
+      IAnimationVariableSlot slot = lookUp.pzoptResolve(owner, directGameVariables);
       if (slot == null || !(slot instanceof zombie.core.skinnedmodel.advancedanimation.AnimationVariableSlotCallback)) {
          return null;
       }
@@ -366,13 +406,61 @@ public final class CharacterVariableCondition implements IActionCondition {
          return null;
       }
 
-      Object value = lookUp.pzoptGetValue(owner);
+      // pzopt: the slot is resolved, and this is the game thread building the snapshot, so read it straight —
+      // no second resolution through the reference and no thread-local snapshot probe.
+      Object value = pzoptReadSlot(slot);
       return value == null ? pzopt.ActionEval.NULL : value;
+   }
+
+   /** pzopt: the typed read of a resolved slot; the body pzoptGetValue uses once it has its slot. */
+   private static Object pzoptReadSlot(IAnimationVariableSlot variableSlot) {
+      switch (variableSlot.getType()) {
+         case Boolean:
+            return variableSlot.getValueBool() ? Boolean.TRUE : Boolean.FALSE;
+         case Int:
+            return Integer.valueOf(Math.abs(variableSlot.getValueInt()));
+         default:
+            String variableValue = variableSlot.getValueString();
+            return variableValue != null ? parseValue(variableValue, false) : null;
+      }
    }
 
    private static class CharacterVariableLookup {
       private final AnimationVariableReference variableReference;
       byte pzoptPure; // pzopt: actionEvalParallel, 0 unknown, 1 = pure callback (allowlist), -1 = snapshot before the batch
+      private AnimationVariableHandle pzoptHandle; // pzopt: the reference's handle, allocated from the same pool, once
+      private byte pzoptDirect; // pzopt: 0 unknown, 1 = no sub-variable source (handle path), -1 = use the reference
+
+      /**
+       * pzopt: the owner's slot for this operand. Stock re-derives it per call: a blank test that scans the name, the
+       * handle from the reference (lazily allocated, then a field read) and the sub-source resolution. Without a
+       * sub-source the whole chain is the pooled handle — the same object the reference would have cached — and the
+       * owner's own lookup.
+       */
+      IAnimationVariableSlot pzoptResolve(IAnimationVariableSource owner) {
+         return this.pzoptResolve(owner, false);
+      }
+
+      IAnimationVariableSlot pzoptResolve(IAnimationVariableSource owner, boolean directGameVariables) {
+         if (this.pzoptDirect == 0) {
+            String name = this.variableReference.getName();
+            boolean direct = this.variableReference.getSubVariableSourceName() == null && name != null && !name.isBlank();
+            this.pzoptDirect = (byte)(direct ? 1 : -1);
+            if (direct) {
+               this.pzoptHandle = AnimationVariableHandle.alloc(name);
+            }
+         }
+
+         if (this.pzoptDirect <= 0) {
+            return this.variableReference.getVariable(owner);
+         }
+
+         if (directGameVariables && owner instanceof zombie.core.skinnedmodel.advancedanimation.IAnimationVariableRegistry registry) {
+            return registry.getGameVariablesInternal().getVariable(this.pzoptHandle);
+         }
+
+         return owner.getVariable(this.pzoptHandle);
+      }
 
       public CharacterVariableLookup(String variableName) {
          this.variableReference = AnimationVariableReference.fromRawVariableName(variableName);
@@ -399,20 +487,8 @@ public final class CharacterVariableCondition implements IActionCondition {
             }
          }
 
-         IAnimationVariableSlot variableSlot = this.variableReference.getVariable(owner);
-         if (variableSlot == null) {
-            return null;
-         }
-
-         switch (variableSlot.getType()) {
-            case Boolean:
-               return variableSlot.getValueBool() ? Boolean.TRUE : Boolean.FALSE;
-            case Int:
-               return Integer.valueOf(Math.abs(variableSlot.getValueInt()));
-            default:
-               String variableValue = variableSlot.getValueString();
-               return variableValue != null ? parseValue(variableValue, false) : null;
-         }
+         IAnimationVariableSlot variableSlot = this.pzoptResolve(owner);
+         return variableSlot == null ? null : pzoptReadSlot(variableSlot);
       }
 
       @Override

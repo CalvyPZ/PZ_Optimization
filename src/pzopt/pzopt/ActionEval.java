@@ -52,6 +52,7 @@ public final class ActionEval {
    private static volatile boolean failed;
 
    public static long batched, inline, frames, maxBatch, waitNanos, workNanos, mismatches, checks; // counters for the log
+   public static long filterMisses; // devActionEvalCheck: lookups the name filter skipped that did resolve to an impure callback
 
    /** Marker for a null variable value in a snapshot map. */
    public static final Object NULL = new Object();
@@ -76,7 +77,71 @@ public final class ActionEval {
       "verticalaimangle", "attackanim", "shoveanim", "stompanim", "isstompanim", "performinghostileanim", "firemode",
       "isanimatingbackwards", "iseditingragdoll", "isupright", "isonback", "bheadlookaround", "lookhorizontal",
       "lookvertical", "hitforce", "hitdir", "hideequippedhandl", "hideequippedhandr", "isunarmed", "ismeleeweaponequipped",
-      "israngedweaponequipped", "isrendered", "stateeventdelaytimer");
+      "israngedweaponequipped", "isrendered", "stateeventdelaytimer",
+      // Second audit, 2026-09-22 afternoon: the callbacks the first pass never met. IsoGameCharacter field getters
+      // and derived reads (the hand items, the worn items, the action queue, the fall table) with no write and no
+      // shared scratch; IsoZombie's network-moving test, small-vehicle test, distance to target, canSeeTarget field
+      // and shouldGetUpFromCrawl (state comparisons only).
+      "bumpdone", "bumpfall", "bumpfalltype", "bumpstaggered", "rangedweaponempty", "choptreespeed", "movedelta",
+      "turndelta", "maxtwist", "isturning", "isturning90", "isturningaround", "bmoving", "hastarget",
+      "grapplethrowoutwindow", "grapplethrowoverfence", "grapplethrowintocontainer", "recoilvarx", "recoilvary",
+      "shouttype", "shoutitemmodel", "fallspeedseverity", "aimingmode", "hastimedactions",
+      "bmovingnetwork", "bistargetissmallvehicle", "distancetotarget", "bcanseetarget", "bgetupfromcrawl",
+      // Third audit, 2026-09-22: two grid reads (the square's objects and properties, the sheet-rope walk down).
+      "intrees", "canclimbdownrope");
+      // Deliberately NOT here (they write through a getter or use shared scratch, so the game thread reads them into
+      // the snapshot, in stock's order): battack / bhastarget / shouldsprint / getShouldAttack clear the target,
+      // bthump drops the thump target, beatbodytarget rescans the corpses, blunge runs a pathfind line test through a
+      // shared point pool, turndirection uses the class's static vectors; battackvehicle, bpassengerexposed,
+      // bundervehicle, bbeingsteppedon, canclimbdownrope and intrees are not audited yet.
+
+   /**
+    * actionSnapshotFilter: the lower-case keys of every callback variable a character registers, read once off the first
+    * batched zombie ({@code registerVariableCallbacks} runs in the constructor, so the set is complete and the same for
+    * every zombie). A condition operand whose variable name is not in here can only ever resolve to a stored slot — a
+    * pure read — so it never needs a snapshot; a name in here but also in {@link #PURE_CALLBACKS} is an audited pure
+    * callback. Everything else is the handful of callbacks with side effects, and only those are read per frame.
+    */
+   private static java.util.Set<String> callbackKeys;
+
+   /** Game thread, once: classify the character's variables for {@link #impureCallback}. */
+   public static void initCallbackKeys(Object owner) {
+      if (callbackKeys != null || !Config.ACTION_SNAPSHOT_FILTER
+            || !(owner instanceof zombie.core.skinnedmodel.advancedanimation.IAnimationVariableRegistry registry)) {
+         return;
+      }
+      java.util.HashSet<String> keys = new java.util.HashSet<>();
+      int impure = 0;
+      for (zombie.core.skinnedmodel.advancedanimation.IAnimationVariableSlot slot : registry.getGameVariablesInternal().getGameVariables()) {
+         if (!(slot instanceof zombie.core.skinnedmodel.advancedanimation.AnimationVariableSlotCallback)) {
+            continue;
+         }
+         String key = slot.getKey();
+         if (key == null) {
+            continue;
+         }
+         String lower = key.toLowerCase(java.util.Locale.ENGLISH);
+         keys.add(lower);
+         if (!PURE_CALLBACKS.contains(lower)) {
+            impure++;
+         }
+      }
+      if (keys.isEmpty()) {
+         return; // nothing readable yet: stay conservative and try again with the next zombie
+      }
+      callbackKeys = keys;
+      Log.info("actionSnapshotFilter: " + keys.size() + " callback variables, " + impure + " of them read per frame on the game thread");
+   }
+
+   /** True when a condition operand of this variable name may resolve to a callback with side effects. */
+   public static boolean impureCallback(String name) {
+      java.util.Set<String> keys = callbackKeys;
+      if (keys == null) {
+         return true; // not classified yet: snapshot, i.e. the pre-filter behaves like the full walk
+      }
+      String lower = name.toLowerCase(java.util.Locale.ENGLISH);
+      return keys.contains(lower) && !PURE_CALLBACKS.contains(lower);
+   }
 
    private static final ThreadLocal<java.util.IdentityHashMap<Object, Object>> SNAPSHOT = new ThreadLocal<>();
 
@@ -129,6 +194,7 @@ public final class ActionEval {
          inline++;
          return false;
       }
+      initCallbackKeys(zombie); // actionSnapshotFilter: classify the callback variables before the first state is cached
       ActionContext context = zombie.getActionContext();
       if (context == null || context.getGroup() == null || !context.pzoptOffThreadSafe()) {
          inline++;
@@ -181,6 +247,6 @@ public final class ActionEval {
    public static String describe() {
       return "action eval: frames=" + frames + " batched=" + batched + " inline=" + inline + " max=" + maxBatch
             + " work ms=" + (workNanos / 1_000_000L) + " wait ms=" + (waitNanos / 1_000_000L)
-            + (Config.DEV_ACTION_EVAL_CHECK ? " checked=" + checks + " mismatches=" + mismatches : "") + (failed ? " FAILED" : "");
+            + (Config.DEV_ACTION_EVAL_CHECK ? " checked=" + checks + " mismatches=" + mismatches + " filterMisses=" + filterMisses : "") + (failed ? " FAILED" : "");
    }
 }

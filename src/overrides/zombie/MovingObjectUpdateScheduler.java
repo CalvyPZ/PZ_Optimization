@@ -32,8 +32,12 @@ public final class MovingObjectUpdateScheduler {
       return this.frameCounter;
    }
 
+   private boolean pzoptSeparateBatch; // pzopt: separateParallel, this frame's zombies are being collected
+
    public void startFrame() {
       this.frameCounter++;
+      pzopt.SeparateBatch.clear(); // pzopt: separateParallel, anything a previous frame left uncollected
+      this.pzoptSeparateBatch = pzopt.SeparateBatch.enabled();
       PZArrayUtil.forEach(this.simulationLevels, MovingObjectUpdateSchedulerUpdateBucket::clear);
       float averageFps = GameWindow.averageFPS;
       if (GameServer.server) {
@@ -52,6 +56,14 @@ public final class MovingObjectUpdateScheduler {
 
             UpdateSchedulerSimulationLevel sim = this.getUpdateSchedulerSimulationLevelForObject(isoMovingObject, averageFps);
             this.simulationLevels[sim.getUpdateOrderIndex()].add(isoMovingObject);
+            // pzopt: separateParallel. The bucket a level holds this frame is the one whose index matches the object's
+            // id, so this is exactly the set update() will walk; their separation is computed on the workers first.
+            if (pzoptSeparateBatch && isoMovingObject instanceof IsoZombie zombieForSeparate) {
+               int frameMod = sim.getFrameMod();
+               if (isoMovingObject.getID() % frameMod == (int)(this.frameCounter % (long)frameMod)) {
+                  pzopt.SeparateBatch.add(zombieForSeparate);
+               }
+            }
          }
       }
    }
@@ -134,6 +146,19 @@ public final class MovingObjectUpdateScheduler {
                sim = sim.more();
             }
 
+            // pzopt: zombieSimLodTiles. Stock already drops a visible object's simulation level a step at 30, 60 and
+            // 80 tiles from the nearest player; this is the same mechanism with one more step at a closer distance,
+            // for zombies only, as an A/B of "simulate fewer of the horde per frame" (default 0 = stock).
+            if (pzopt.Config.ZOMBIE_SIM_LOD_TILES > 0 && isoMovingObject instanceof IsoZombie && pzopt.Overrides.enabled()) {
+               for (int step = 0; step < pzopt.Config.ZOMBIE_SIM_LOD_STEPS; step++) {
+                  if (distance <= (float)(pzopt.Config.ZOMBIE_SIM_LOD_TILES << step)) {
+                     break; // each further step doubles the distance, like stock's own 30 / 60 / 80 ladder
+                  }
+
+                  sim = sim.less();
+               }
+            }
+
             return sim.max(minSim);
          } else {
             return minSim;
@@ -144,6 +169,11 @@ public final class MovingObjectUpdateScheduler {
    }
 
    public void update() {
+      pzopt.FrameTick.next(); // pzopt: the frame stamp of the simulation memos (separateFast, allPlayersAsleep)
+      if (this.pzoptSeparateBatch) {
+         pzopt.SeparateBatch.run(); // pzopt: separateParallel, this frame's separations computed on the workers
+      }
+
       for (MovingObjectUpdateSchedulerUpdateBucket simulation : this.simulationLevels) {
          simulation.update((int)this.frameCounter);
       }

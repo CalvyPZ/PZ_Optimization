@@ -1570,3 +1570,202 @@ fps for 0.1-0.2 s instead of one 80-375 ms freeze; with `zoomEaseMs=300` the mot
 Bézier (CSS "ease") at every frame rate instead of 8 linear frames and a snap.
 Video: `docs/media/bench-zoom-spin-stock-vs-new-1080.mp4` (`harness/stitch-zoom-sbs.sh`, runs `zoom-rec-stock` /
 `zoom-rec-new`: the stock zoom paths on our build vs the new ones, side by side, aligned at the first zoom-out).
+
+## 2026-09-22 (00:53–01:12, 12:42–12:55): "Ultimate ZBetterFPS" (user-submitted fork) on the Louisville horde, before and after the day's game-thread passes
+
+A mod user sent the maintainer "Ultimate ZBetterFPS" (`~/Downloads/mods/ZBBetterFPS`, jar sha256
+`0b53bfb3…663cb13`): a fork of zed_0xff's ZBetterFPS (13 of 14 upstream classes unchanged) plus ~100
+"ZomPerfBuddy" classes; loaded through ZombieBuddy (`--mod ZombieBuddy --mod ZBBetterFPS --vmarg
+-javaagent:…/ZombieBuddy.jar=policy=allow-all,frontend=console`, copy under `~/Zomboid/mods/ZBBetterFPS`,
+the Workshop 3622986450 copy moved aside because `searchForModInfo` lets the last scanned copy win).
+Audited before the runs: no network, exec, native loading or file writes; two raw `ClassFileTransformer`s
+(`StreamCoreTransformer`, `ZombieCullCapTransformer`). Its defaults: **max 3D zombies 192** (vanilla 510,
+rewritten in place in `IsoWorld.sceneCullZombies`, "510 -> 192 (2 sites)"), **12 blended zombie
+animations** (vanilla 20), the six graphics patches off (IndieGL state cache, sprite batching, ring buffer,
+uniform cache, chunk multi-texture, 3D models), `optimizeIsoMovingObject` off (NoSuchFieldError on 42.20),
+zombie sort caching / high-rise dirty fast / atlas job pacer / the ZomPerf stream, neighbour and vehicle-index
+patches on. It transforms ~30 game classes at load, 13 of them ours (IsoWorld, FBORenderCell/Cutaways/Levels,
+IsoChunk, IsoChunkMap, WorldStreamer, MovingObjectUpdateScheduler, IsoGameCharacter, TextureDraw,
+MultiTextureFBO2, RenderThread, GameWindow); its stream-wake patch refuses our WorldStreamer ("unsupported
+bytecode shape"). Mod options live in `~/Zomboid/Lua/ModOptions.ini` as `tickbox|ZBBetterFPS|<key>|…` — the
+zombie combos under a **second id, `combobox|ZBBetterFPS_Zombies|max3DZombies|1`** (index 1 = vanilla); a
+line under `ZBBetterFPS` is silently ignored (run `zbu2-lou-both-vanillaq` was a wasted repeat of the defaults).
+
+`--preset louisville`, uncapped, no dashboard, in-game overlay, 5120x2160. The 01:00 runs are on the 00:5x
+build, the 12:4x runs on the 12:24 build (zombie simulation on all cores, characters-draw pass, player LOS,
+zoom retain, strong re-bake budget).
+
+| run | build | mod | fps mean | p50 / p99 / p99.9 / max ms | >33 ms | jitter | GPU (sysmon / GL timer) | game thread |
+|---|---|---|---|---|---|---|---|---|
+| `zbu-lou-stock` 00:53 | 72 keys off (stock behaviour) | – | 22.3 | 42.9 / 75.9 / 111.4 / 125.4 | 477 of 558 | 17.6 | 40 % / 43 % | 98 % |
+| `zbu-lou-mod2` 00:58 | 72 keys off | defaults | 32.4 | 29.5 / 61.8 / 89.3 / 95.5 | 256 of 811 | 13.8 | 38 % / 44 % | 97 % |
+| `zbu-lou-both2` 01:00 | 00:5x defaults | defaults + six graphics boxes on | 11.6 | 86.9 / 134.5 / 152.4 / 156.2 | 295 of 295 | 20.0 | 99 % / 91 % | 73 % (26 % waiting on the GPU) |
+| `zbu-lou-both-nogfx` 01:02 | 00:5x defaults | defaults | 42.2 | 22.5 / 45.3 / 71.6 / 109.4 | 85 of 1055 | 9.3 | 33 % / 43 % | 98 % |
+| `zbu2-lou-ours` 12:42 | 12:24 defaults | – | 55.9 | 16.4 / 35.5 / 95.5 / 138.4 | 26 of 1401 | 4.3 | 58 % / 84 % | 95 % |
+| `zbu2-lou-both` 12:44 | 12:24 defaults | defaults (192 / 12) | 81.7 | 11.0 / 29.3 / 61.9 / 100.0 | 12 of 2042 | 2.5 | 62 % / 87 % | 90 % (9 % waiting) |
+| `zbu2-lou-both-vanillaq` 12:47 | 12:24 defaults | defaults again (wrong ini id) | 84.2 | 10.8 / 27.4 / 55.8 / 112.8 | 9 of 2106 | 2.2 | 61 % / 88 % | 89 % (9 % waiting) |
+| `zbu2-lou-both-vq2` 12:50 | 12:24 defaults | vanilla caps 510 / 20 | 26.3 | 28.6 / 173.8 / 258.8 / 277.2 | 240 of 692 | 26.8 | 65 % / 88 % | 73 % (32 % waiting) |
+| `zbu2-lou-both-vq2-rec` 12:53 | 12:24 defaults | vanilla caps 510 / 20, `--record --shot-at 12` | 59.6 | 15.0 / 34.6 / 185.1 / 425.4 | 22 of 1851 | 4.2 | 61 % / 83 % | 92 % (5 % waiting) |
+
+- **The mod's gain on top of our build is its quality caps.** With its defaults it is +46 % (55.9 → 81.7 fps,
+  p99 35.5 → 29.3 ms, jitter 4.3 → 2.5 ms) because 192 instead of 510 zombies are skinned 3D models (the rest
+  are atlas sprites: game thread −4.3 ms a frame, of which zombies −1.8 and postupdate −1.4, and GPU 12.7 →
+  8.7 ms a frame in the settle phase) and 12 instead of 20 blend animations. With the caps at vanilla the
+  same mod is 59.6 fps against 55.9 alone (recorded, so slightly loaded): its remaining patches are within
+  noise of our build. Stock + mod (32.4) vs our build alone (55.9): the build is 1.7x the mod, 2.5x stock.
+- **`zbu2-lou-both-vq2` collapsed into the strong-re-bake flood** (the `see_all` regime of the Louisville
+  notes): it settled at 45-58 fps / 14-15 ms GPU, took a 345 ms frame at the route start and then sat at
+  16-22 fps with 50-59 ms of GPU per frame; `bake_counters` = 24,914 bakes / 386,822 deferred / 343,237
+  strong marks / 299,645 re-bakes held (the healthy runs: ~8k / 22-29k / 14-16k / 13-14k), 0 creations
+  deferred. The maintainer watched it and saw black chunk squares — that is the held-re-bake state (levels
+  shown before their re-bake), but the run was not recorded, so it is not confirmed on video: the recorded
+  repeat of the same config did not tip (59.6 fps, normal counters) and a 2 fps scan of its route window
+  (black 16 px tiles per frame, overlay panels masked: min / median / max 369 / 695 / 1916 vs 372 / 640 / 1799
+  on the stock recording, no step beyond the stock recording's own roof-edge steps) shows no square. The large
+  black blocks in every Louisville capture (`shot-game.png` at t=12 s vs `tri-lou-stock` at the same second)
+  are the tall buildings' roofs at this zoom in stock too.
+- **Three further recorded attempts did not reproduce it** (13:11–13:31, `zbu2-lou-flood-a|b|forced`, same
+  config): 41.4 fps with the re-bake hold half-way up (20k bakes / 99k deferred / 111k strong marks / 66k held),
+  46.3 fps with healthy counters, and 56.4 fps with `lightingStrongBudget=1` forced — which does *not*
+  reproduce the regime (held re-bakes 17k against the flood's 300k): the flood comes from the grid-wide strong
+  marking (343k marks), not from the budget. All three recordings scanned at 10 fps with the overlay panels
+  masked (`/tmp/zbu2-flood-scan.py`, fully-black 16 px tiles per frame against the ±2 s local median): every
+  outlier is 40-80 tiles and drifts smoothly over a second of camera spin, i.e. roofs turning into frame — a
+  held level would step by hundreds of tiles in one frame. So the black squares the maintainer saw at 26 fps
+  remain unconfirmed on video; the tipped regime is roughly a 1-in-3 event per run and did not recur in three.
+- The six graphics patches stay a no-go with our renderer (11.6 fps, GPU 99 %).
+- Worth a key of our own: the 3D-zombie cap and the blend count as an Optimizations-tab quality knob
+  (stock 510 / 20 by default) would give the same +50 % on hordes without the mod; our `IsoWorld`
+  override already owns `sceneCullZombies`.
+
+## 2026-09-22 (11:40–13:20): the Dell again — a broken window, a machine-state halving, and the upscaler on a low-end box
+
+Goal: fresh numbers from the Dell (i5-6300HQ / GTX 960M, 1920x1080, G1, cosmos, Steam down) on the
+day's build, and a second Options-tab profile that adds the upscaler to the low-end set. Three
+findings, in the order they appeared.
+
+### 1. Every run presented a quarter of the screen (fixed)
+
+From 11:43 on, the Dell drew the frame's bottom-left 640x480 at the top-left of the screen and black
+elsewhere — with the stock shim too (`--install stock`-equivalent probes `lo2-probe-stockshim*`). The
+LWJGL2 shim creates its GLFW window at 640x480 and lets `Core.setDisplayModeInternal` resize it to
+fullscreen afterwards; under NVIDIA PRIME render offload on XWayland the GL drawable kept the creation
+size. On 09-21 KWin had grown the window to 1920x1022 before the switch ("Display mode changed to
+1920x1022" in every 09-21 Dell console), which masked it. Fixed in the `Display` override (create the
+window at `Core.width x Core.height` / fullscreen, wait for the WM's resize before re-binding the
+context; `docs/override-edits.md`, "Fourth edit in `Display`"). Verified with the game's own capture
+(`--shot-at`, `dell-lo2-fix-probe`: the whole 1920x1080 frame) and on the desktop's windowed
+5120x2160 runs; a peer's desktop A/B of the same change is a wash (484.3 → 483.6 fps).
+**Numbers from the 11:43–12:12 Dell runs are void** (a quarter of the pixels = ~2x the fps).
+
+### 2. The Dell itself is ~2x slower today than on 09-21, in every configuration
+
+| walk route (S:120 speed=3 turn=90, max zoom) | fps | mean | p99 | load |
+|---|---|---|---|---|
+| 09-21 stock | 51.9 | 19.3 | 64 | 75 s |
+| 09-21 low-end profile | **81.4** | 12.3 | 30 | 23 s |
+| 09-22 stock (`enabled=false`) | 36.6 | 27.3 | 78 | 85 s |
+| 09-22 low-end profile | 41.9 | 23.9 | 57 | 34 s |
+| 09-22, **the 09-21 build rebuilt and installed** (`ctl0921`) | 44.3 | 22.5 | 64 | 31 s |
+
+Ruled out, each with its own run: the build (the 09-21 tree gives today's number, not yesterday's),
+`zoomRetain`, `treeAppend`+`puddleVbo`, `charDrawPrep`+the parallel zombie keys, `textureCompression`,
+`texture2x`, fullscreen vs borderless vs windowed, Steam (down), thermals (68 °C, zero throttle
+events), the PCIe link (gen3 x8) and the GPU clocks. The scene work is identical (same chunk counts,
+same bake counters) and `gpu_ms` is 5–6 ms both days, but **every frame costs twice the CPU**
+(141 s of process CPU / 3,298 frames on 09-21 vs 146 s / 1,792 today) while the machine sits at 99 %
+CPU on both days, and the game thread gets *less* of it (game_load 54 % → 36–42 %). The extra time is
+in the process's non-Java threads (live Java threads 71 s of 141 s on 09-21, 62 s of 146 s today),
+i.e. the GL driver / present path, not our code. Boot-to-menu is unchanged (20.0 s vs 18.6 s), so the
+CPU and disk are not slower.
+
+The one machine-state difference found: today's boot logs `nvidia 0000:02:00.0: [drm] No compatible
+format found` (boot of 11:37; also present in the 09-21 08:38 boot, absent from the 09-21 09:31 boot
+that produced every good 09-21 number). Next step when the Dell is free: **reboot it and re-run
+`ctl0921-walk-prof`** — if it returns to ~80 fps, the day's absolute numbers below are a floor and the
+low-end section of `README.md` / `docs/media/dell-lowend-comparison.png` keeps its 09-21 figures.
+Until then the 09-22 Dell numbers are only comparable **to each other**.
+
+### 3. FSR 1.0 on a low-end box: free on clear scenes, a third off the tail in heavy weather
+
+Same machine state, same session, profile = `workers=1 loadWorkers=2 treeBakeMaxChunksPerSec=24
+lightFPS=10 uiRenderFPS=30 -XX:MaxGCPauseMillis=25`:
+
+| route | keys | fps | mean | p99 | p99.9 / max | >33 ms | GPU |
+|---|---|---|---|---|---|---|---|
+| walk | profile | 41.9 | 23.9 | 57 | 168 / 453 | 197 | 47 % |
+| walk | + fsr1 quality (67 %) | 42.0 | 23.8 | 59 | 192 / 280 | 184 | 49 % |
+| walk | + fsr1 performance (50 %) | 41.4 | 24.1 | 62 | 211 / 270 | 215 | 46 % |
+| drive 120 | profile | 30.8 | 32.5 | 90 | 160 / 210 | 440 | 41 % |
+| drive 120 | + fsr1 quality | 31.2 | 32.1 | 92 | 172 / 262 | 429 | 40 % |
+| drive 120 | + fsr1 performance | 29.6 | 33.8 | 97 | 196 / 279 | 452 | 39 % |
+| **storm + fog, night, 120 km/h** | profile | 25.9 | 38.6 | **145** | 230 / 271 | 450 | 48 % |
+| storm + fog | + fsr1 quality | 26.6 | 37.6 | **111** | 175 / 204 | 554 | 42 % |
+| storm + fog | + fsr1 performance | 27.2 | 36.7 | **92** | 196 / 215 | 534 | 40 % |
+
+On the clear routes this box is CPU-bound (GPU 40–49 %), so the upscaler is free but idle — within
+noise on mean and tail. In the night thunderstorm with heavy fog, where the GPU does carry weight,
+FSR 1.0 takes the p99 from 145 ms to 111 (Quality) / 92 ms (Performance) and the GPU load from 48 %
+to 40 % at no cost in mean. Hence the new profile button uses **Quality (67 %)**: no visible cost in
+normal play, the tail relief when the weather turns. A GPU-bound low-end machine (the Ayaneo Flip's
+iGPU, 4K) should gain the pixel ratio outright, as the desktop numbers show.
+
+### The second Options-tab profile
+
+Options > Optimizations now has a fourth button, **"Low-end hardware + FSR 1.0 upscaling"**: the
+low-end set plus `upscaler=fsr1`, `upscalerQuality=quality`. The plain "Low-end hardware (4 cores or
+less)" button is unchanged.
+
+The button was verified in game on the desktop (`preset-check6`): clicking it and pressing Accept
+leaves `~/Zomboid/pzopt/options.ini` as exactly `workers=1 loadWorkers=2 treeBakeMaxChunksPerSec=24
+upscaler=fsr1 upscalerQuality=quality` (every other saved key cleared) and the stock Display page at
+`lightFPS=10 uiRenderFPS=30`. Rig note: `xdotool click 1` on a tab button only hovers it (the tooltip
+appears, the handler never runs); `mousedown 1; sleep 0.15; mouseup 1` fires it.
+
+## Zombie game-thread pass (2026-09-22 afternoon, runs `zt*`)
+
+Goal: the `zombies` sub-phase of the game-thread profile (`IsoZombie.update` + `IsoZombie.postupdate`, as
+`analyze.py` prints it) under 5 % on the Louisville horde preset. Every number below is the same build measured
+with the keys off and on, on the desktop, `--preset louisville --prop uncappedFps=true --no-dashboard`; runs that
+tipped into the preset's strong-re-bake flood (`strongMarks` ~350 k instead of ~15 k) were discarded and repeated.
+
+| Configuration | zombies | fps | run |
+|---|---|---|---|
+| all new keys off (start of the pass) | 23 % | 54.4 | `zt1-off` |
+| + snapshot name filter, emitter gate, separation specialisation, sleep and state-param memos | 18 % | 59.6 | `zt1-on` |
+| + second callback audit, handle-direct operand resolution | 16 % | 59.3 | `zt2-on` |
+| + `separateParallel` | 12 % | 58.5 | `zt3-sep` |
+| + `State` override, action-group cache, profiler thread memo, snapshot dedupe | 11 % | 58.2 | `zt13-plain` |
+| + `zombieSimLodTiles=12 zombieSimLodSteps=2 zombieCheckSpread=4` (opt-in) | 6 % | 64.4 | `zt13-lod` |
+| + `zombieSimLodTiles=8 zombieSimLodSteps=2 zombieCheckSpread=4` (opt-in) | **5.4 / 5.8 / 6.5 %** | 63.2 / 65.4 / 61.0 | `zt15-lod8x2`, `zt20-r1`, `zt20-r2` |
+
+The last row is three repeats of the same configuration: the run-to-run spread of the sub-phase share on this
+preset is about ±0.6 points, so the best usable setting sits at roughly 6 %, not reliably under 5 %. Going further
+was tried and does not work: every configuration with a third LOD step, or with the first step closer than 8 tiles,
+tipped the preset into its strong-re-bake flood (six attempts, all discarded).
+
+In frame time the `zombies` sub-phase went 4.2 ms → 1.9 ms with no behaviour change, and → 0.85 ms with the LOD
+key on. Adopted as defaults (no behaviour change): `actionSnapshotFilter`, `emitterParamSkip`, `separateFast`,
+`separateParallel`, `sleepCheckMemo`, `stateParamMemo`, `actionGroupCache`, `profilerThreadMemo`.
+`zombieSimLodTiles` / `zombieSimLodSteps` / `zombieCheckSpread` default to off: they change how often a distant
+zombie is simulated, which is the game's own mechanism (it already steps at 30 / 60 / 80 tiles) but is still a
+behaviour change.
+
+Checks run on every step: `console.txt` had no exception in any of the runs; `devActionEvalCheck` over 1,361,996
+batched contexts reported `mismatches=0 filterMisses=0` (the second number is the rig for the snapshot name
+filter: it resolves every operand the filter dropped and counts the ones that would have needed a snapshot);
+`harness/parity-judge.py` on recorded pairs of the same route and the same window gave parity 0.98 for
+`separateParallel` alone, 0.97 for `zombieSimLodTiles=15` alone, and 0.88 for the two-step LOD with the thump
+spread; the 120 km/h drive route is unchanged (257.6 fps with the keys on, 259.0 with them off).
+
+Findings worth keeping:
+
+- **Three LOD steps tip the preset.** Every run with `zombieSimLodSteps=3` (four attempts) landed in the
+  strong-re-bake flood; two steps did not in eight attempts. Not understood; two steps is the usable setting.
+- **The preset's `see_all=true` is a rendering multiplier, not a simulation one.** With `--flag see_all=false` the
+  same horde runs at 102.6 fps instead of 58.2 — and the `zombies` share *rises* to 20 %, because the render phase
+  it is a share of has collapsed. Percentages of the game thread move when any other phase moves; compare frame
+  time as well.
+- **`updateSeenVisibility` must run every frame** — see the dead end in `docs/override-edits.md`.
+- With the pass in, the Louisville horde is GPU-bound again: 13-14 % of the game thread is the frame hand-off wait
+  and `gpu_load` is 88 %.

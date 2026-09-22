@@ -193,6 +193,167 @@ import zombie.vehicles.BaseVehicle.HitVars;
 
 @UsedFromLua
 public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
+   /**
+    * pzopt: separateFast / separateParallel. The separation pass specialised for a zombie, split into a pure compute
+    * and an apply. Stock's IsoMovingObject.separate() re-derives per neighbouring object whether the asker is a player
+    * (it never is, here), which makes the charged-spear branch and the whole bump block dead code for a zombie, and
+    * asks the grid "is my square blocked to that neighbour" once per character instead of once per square
+    * (pzopt.SeparateMask caches that answer for the frame). Everything reachable for a zombie is kept exactly: the
+    * solid / pushable gates, the order of the square and object walks, the early stop on a non-character non-vehicle
+    * object, the contact, the running position the pushes accumulate into, Vector2.normalize()'s "already unit"
+    * shortcut, the camera-distance gate and the collideWith calls in their original order.
+    *
+    * <p>The compute only reads the world (positions, widths, the grid, the state comparisons of the three
+    * pushed-by predicates); every write — the position, the contact, the wasSeparated flag and the collideWith calls,
+    * which run Lua events and can start a window climb or a thump — is recorded and applied here, on the game thread,
+    * at the point in this zombie's update where stock would have done it. So with {@code separateParallel} the compute
+    * runs on the frame workers before the update loop (pzopt.SeparateBatch) and the only difference from stock is that
+    * the neighbours' positions are read at the top of the frame instead of as the loop advances.
+    */
+   @Override
+   public void separate() {
+      if (!pzopt.Config.SEPARATE_FAST || !pzopt.Overrides.enabled()) {
+         super.separate();
+         return;
+      }
+
+      if (this.pzoptSepFrame != pzopt.FrameTick.frame()) {
+         this.pzoptSeparateCompute();
+      }
+
+      this.pzoptSeparateApply();
+   }
+
+   private int pzoptSepFrame; // no initialiser: FrameTick starts at 1, so 0 always means "not computed"
+   private float pzoptSepDx;
+   private float pzoptSepDy;
+   private boolean pzoptSepWasSeparated;
+   private IsoMovingObject pzoptSepContact;
+   private IsoMovingObject[] pzoptSepCollide;
+   private int pzoptSepCollideCount;
+
+   private static final int PZOPT_SEP_MAX_COLLIDE = 32; // 12 spilled ~20 times in a 25 s Louisville run; the array is only allocated for a zombie that actually collides
+
+   /** Worker or game thread: the separation of this zombie, read-only, recorded into the fields above. */
+   public void pzoptSeparateCompute() {
+      this.pzoptSepFrame = pzopt.FrameTick.frame();
+      this.pzoptSepDx = 0.0F;
+      this.pzoptSepDy = 0.0F;
+      this.pzoptSepWasSeparated = false;
+      this.pzoptSepContact = null;
+      this.pzoptSepCollideCount = 0;
+      if (!this.isSolidForSeparate() || !this.isPushableForSeparate()) {
+         return;
+      }
+
+      IsoGridSquare current = this.getCurrentSquare();
+      if (current == null) {
+         return;
+      }
+
+      IsoGridSquare[] nav = current.getSurroundingSquares();
+      float thisZ = this.getZ();
+      float curX = this.getNextX();
+      float curY = this.getNextY();
+      boolean camGate = GameServer.server || this.distToNearestCamCharacter() < 60.0F;
+
+      for (int i = 0; i <= 8; i++) {
+         IsoGridSquare sq = i == 8 ? current : nav[i];
+         if (sq == null) {
+            continue;
+         }
+
+         java.util.ArrayList<IsoMovingObject> objects = sq.getMovingObjects();
+         int size = objects.size();
+         if (size == 0 || sq != current && pzopt.SeparateMask.blocked(current, sq, i)) {
+            continue;
+         }
+
+         for (int n = 0; n < size; n++) {
+            IsoMovingObject obj = objects.get(n);
+            if (obj == this || !obj.isSolidForSeparate() || Math.abs(thisZ - obj.getZ()) > 0.3F) {
+               continue;
+            }
+
+            boolean objIsCharacter = obj instanceof IsoGameCharacter;
+            float twidth = this.width + obj.getWidth();
+            float dx = curX - obj.getNextX();
+            float dy = curY - obj.getNextY();
+            float len = (float)Math.sqrt(dx * dx + dy * dy);
+            if (!objIsCharacter && !(obj instanceof BaseVehicle)) {
+               if (len < twidth) {
+                  this.pzoptSepContact = obj;
+               }
+
+               return; // stock leaves the whole pass here, not just this object
+            }
+
+            if (!objIsCharacter || len >= twidth || !camGate) {
+               continue;
+            }
+
+            this.pzoptSepWasSeparated = true;
+            if (this.isPushedByForSeparate(obj)) {
+               float pushLength = (len - twidth) / 8.0F;
+               float lengthSq = dx * dx + dy * dy;
+               if (!PZMath.equal(lengthSq, 1.0F, 1.0E-5F)) { // Vector2.normalize() leaves an already-unit vector alone
+                  if (lengthSq == 0.0F) {
+                     dx = 0.0F;
+                     dy = 0.0F;
+                  } else {
+                     float length = (float)Math.sqrt(lengthSq);
+                     dx /= length;
+                     dy /= length;
+                  }
+               }
+
+               curX -= dx * pushLength;
+               curY -= dy * pushLength;
+               this.pzoptSepDx -= dx * pushLength;
+               this.pzoptSepDy -= dy * pushLength;
+            }
+
+            if (this.pzoptSepCollide == null) {
+               this.pzoptSepCollide = new IsoMovingObject[PZOPT_SEP_MAX_COLLIDE];
+            }
+
+            if (this.pzoptSepCollideCount < PZOPT_SEP_MAX_COLLIDE) {
+               this.pzoptSepCollide[this.pzoptSepCollideCount++] = obj;
+            } else {
+               pzopt.SeparateMask.collideSpills++; // more overlapping characters than the record holds: that one call is dropped
+            }
+         }
+      }
+   }
+
+   /** Game thread, in loop order: the writes the compute recorded. */
+   private void pzoptSeparateApply() {
+      if (this.pzoptSepDx != 0.0F || this.pzoptSepDy != 0.0F) {
+         this.setNextX(this.getNextX() + this.pzoptSepDx);
+         this.setNextY(this.getNextY() + this.pzoptSepDy);
+      }
+
+      if (this.pzoptSepWasSeparated) {
+         this.getECSComponent(NetworkZombieComponent.class).getNetworkAI().wasSeparated = true;
+      }
+
+      if (this.pzoptSepContact != null) {
+         zombie.CollisionManager.instance.AddContact(this, this.pzoptSepContact);
+         this.pzoptSepContact = null;
+      }
+
+      for (int i = 0; i < this.pzoptSepCollideCount; i++) {
+         IsoMovingObject obj = this.pzoptSepCollide[i];
+         this.pzoptSepCollide[i] = null;
+         this.collideWith(obj);
+      }
+
+      this.pzoptSepCollideCount = 0;
+      this.pzoptSepDx = 0.0F;
+      this.pzoptSepDy = 0.0F;
+      this.pzoptSepWasSeparated = false;
+   }
+
    // pzopt: marker so the game log shows the loose class was loaded, not the jar's copy
    static {
       pzopt.Overrides.onClassLoaded("zombie.characters.IsoZombie");
@@ -602,7 +763,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       this.finder.maxSearchDistance = 20;
       this.hurtSound = this.descriptor.getVoicePrefix() + "Hurt";
       this.initializeStates();
-      this.getActionContext().setGroup(ActionGroup.getActionGroup("zombie"));
+      this.getActionContext().setGroup(pzoptGroup(false));
       this.initWornItems("Human");
       this.initAttachedItems("Human");
       this.clearAggroList();
@@ -3419,15 +3580,15 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       }
 
       if (this.crawling) {
-         if (this.getActionContext().getGroup() != ActionGroup.getActionGroup("zombie-crawler")) {
+         if (this.getActionContext().getGroup() != pzoptGroup(true)) {
             this.getAdvancedAnimator().OnAnimDataChanged(false);
             this.initializeStates();
-            this.getActionContext().setGroup(ActionGroup.getActionGroup("zombie-crawler"));
+            this.getActionContext().setGroup(pzoptGroup(true));
          }
-      } else if (this.getActionContext().getGroup() != ActionGroup.getActionGroup("zombie")) {
+      } else if (this.getActionContext().getGroup() != pzoptGroup(false)) {
          this.getAdvancedAnimator().OnAnimDataChanged(false);
          this.initializeStates();
-         this.getActionContext().setGroup(ActionGroup.getActionGroup("zombie"));
+         this.getActionContext().setGroup(pzoptGroup(false));
       }
 
       if (this.getThumpTimer() > 0) {
@@ -3591,7 +3752,11 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
 
                         this.shootable = true;
                         this.solid = true;
-                        this.tryThump(null);
+                        if (pzopt.Config.ZOMBIE_CHECK_SPREAD <= 1 || !pzopt.Overrides.enabled()
+                           || (pzopt.FrameTick.frame() + this.getID()) % pzopt.Config.ZOMBIE_CHECK_SPREAD == 1) {
+                           this.tryThump(null); // pzopt: zombieCheckSpread, the "is something thumpable in front of me"
+                                                // grid probe spread over N frames (a thump starts at most N-1 frames late)
+                        }
                         this.damageSheetRope();
                         this.allowRepathDelay = PZMath.clamp(this.allowRepathDelay - GameTime.instance.getMultiplier(), 0.0F, Float.MAX_VALUE);
                         if (this.timeSinceSeenFlesh > this.memory && this.target != null) {
@@ -4531,7 +4696,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
    public void resetForReuse() {
       this.setCrawler(false);
       this.initializeStates();
-      this.getActionContext().setGroup(ActionGroup.getActionGroup("zombie"));
+      this.getActionContext().setGroup(pzoptGroup(false));
       this.getAdvancedAnimator().OnAnimDataChanged(false);
       this.setStateMachineLocked(false);
       this.setDefaultState();
@@ -6152,6 +6317,58 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
 
    private static boolean pzoptEcsFast() {
       return pzopt.Overrides.enabled() && pzopt.Config.ECS_LOOKUP_FAST;
+   }
+
+   // pzopt: actionGroupCache. updateInternal asks ActionGroup for the "zombie" and "zombie-crawler" groups by name on
+   // every zombie on every frame; the lookup lower-cases the name into a new String and probes a HashMap for a group
+   // that is loaded once at startup and never replaced. The two groups are resolved here on first use instead.
+   private static ActionGroup pzoptZombieGroup;
+   private static ActionGroup pzoptCrawlerGroup;
+
+   private static ActionGroup pzoptGroup(boolean crawler) {
+      if (!pzopt.Config.ACTION_GROUP_CACHE || !pzopt.Overrides.enabled()) {
+         return ActionGroup.getActionGroup(crawler ? "zombie-crawler" : "zombie");
+      }
+
+      if (crawler) {
+         if (pzoptCrawlerGroup == null) {
+            pzoptCrawlerGroup = ActionGroup.getActionGroup("zombie-crawler");
+         }
+
+         return pzoptCrawlerGroup;
+      }
+
+      if (pzoptZombieGroup == null) {
+         pzoptZombieGroup = ActionGroup.getActionGroup("zombie");
+      }
+
+      return pzoptZombieGroup;
+   }
+
+   // pzopt: stateParamMemo. Every State.Param read (the AI states keep their per-character scratch there) goes through
+   // getStateMachineParams(state class), which probes the entity-component map and then an IdentityHashMap keyed by the
+   // class, before the param's own map probe; a state's execute() reads several params of the same class in a row.
+   // The component is created once per zombie and its per-class map object is only ever cleared, never replaced, so the
+   // last (class, map) pair is an exact memo. No field initialiser: the IsoGameCharacter constructor runs these
+   // accessors before this class's initialisers would.
+   private Class<?> pzoptParamClass;
+   private Map<State.Param<?>, Object> pzoptParamMap;
+
+   @Override
+   public Map<State.Param<?>, Object> getStateMachineParams(Class<?> clazz) {
+      if (!pzoptEcsFast() || !pzopt.Config.STATE_PARAM_MEMO) {
+         return super.getStateMachineParams(clazz);
+      }
+
+      Map<State.Param<?>, Object> map = this.pzoptParamMap;
+      if (map != null && this.pzoptParamClass == clazz) {
+         return map;
+      }
+
+      map = this.pzoptStateMachineComponent().getStateMachineParams(clazz);
+      this.pzoptParamClass = clazz;
+      this.pzoptParamMap = map;
+      return map;
    }
 
    @Override

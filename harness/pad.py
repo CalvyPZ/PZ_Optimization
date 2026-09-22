@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Virtual Xbox 360 pad (uinput) that drives the game's menus from a script.
+
+  harness/pad.py serve <fifo>   # creates the pad, runs the commands written to the fifo until "quit"
+
+Commands, one per line: a b x y start back up down left right (a press: down, 0.12 s, up; the game samples
+the pad once per frame), "sleep <s>", "quit". The device is the xpad layout (vendor 045e product 028e,
+buttons BTN_A..BTN_THUMBR, sticks/triggers on ABS_X..ABS_RZ, D-pad on HAT0), so GLFW's GUID is
+030000005e0400008e02000010010000 and media/gamecontrollerdb.txt maps it (dpad = h0.x, a = b0, b = b1).
+"""
+import sys
+import time
+
+from evdev import AbsInfo, UInput, ecodes as e
+
+BUTTONS = {"a": e.BTN_A, "b": e.BTN_B, "x": e.BTN_X, "y": e.BTN_Y, "start": e.BTN_START, "back": e.BTN_SELECT}
+HATS = {"up": (e.ABS_HAT0Y, -1), "down": (e.ABS_HAT0Y, 1), "left": (e.ABS_HAT0X, -1), "right": (e.ABS_HAT0X, 1)}
+
+
+def make_pad():
+    stick = AbsInfo(0, -32768, 32767, 16, 128, 0)
+    trigger = AbsInfo(0, 0, 255, 0, 0, 0)
+    hat = AbsInfo(0, -1, 1, 0, 0, 0)
+    cap = {
+        e.EV_KEY: [e.BTN_A, e.BTN_B, e.BTN_X, e.BTN_Y, e.BTN_TL, e.BTN_TR, e.BTN_SELECT, e.BTN_START, e.BTN_MODE,
+                   e.BTN_THUMBL, e.BTN_THUMBR],
+        e.EV_ABS: [(e.ABS_X, stick), (e.ABS_Y, stick), (e.ABS_Z, trigger), (e.ABS_RX, stick), (e.ABS_RY, stick),
+                   (e.ABS_RZ, trigger), (e.ABS_HAT0X, hat), (e.ABS_HAT0Y, hat)],
+    }
+    return UInput(cap, name="Microsoft X-Box 360 pad", vendor=0x045E, product=0x028E, version=0x0110, bustype=e.BUS_USB)
+
+
+def press(ui, name, hold=0.12):
+    if name in BUTTONS:
+        ui.write(e.EV_KEY, BUTTONS[name], 1)
+        ui.syn()
+        time.sleep(hold)
+        ui.write(e.EV_KEY, BUTTONS[name], 0)
+        ui.syn()
+    elif name in HATS:
+        axis, value = HATS[name]
+        ui.write(e.EV_ABS, axis, value)
+        ui.syn()
+        time.sleep(hold)
+        ui.write(e.EV_ABS, axis, 0)
+        ui.syn()
+    else:
+        print("unknown command:", name, flush=True)
+
+
+def serve(fifo):
+    ui = make_pad()
+    print("pad ready:", ui.device.path, flush=True)
+    try:
+        while True:
+            with open(fifo) as f:
+                for line in f:
+                    parts = line.split()
+                    if not parts:
+                        continue
+                    if parts[0] == "quit":
+                        print("pad quit", flush=True)
+                        return
+                    if parts[0] == "sleep":
+                        time.sleep(float(parts[1]))
+                        continue
+                    if parts[0] == "hold":              # hold <button> <seconds>
+                        print("hold", parts[1], parts[2], flush=True)
+                        press(ui, parts[1], float(parts[2]))
+                        continue
+                    print("press", parts[0], flush=True)
+                    press(ui, parts[0])
+    finally:
+        ui.close()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "serve":
+        serve(sys.argv[2])
+    else:
+        print(__doc__)
+        sys.exit(2)

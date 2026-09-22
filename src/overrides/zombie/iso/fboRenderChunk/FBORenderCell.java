@@ -4697,6 +4697,7 @@ public final class FBORenderCell {
       sb.append(" | ").append(pzopt.ActionEval.describe()); // pzopt: the zombies' transition-evaluation batch
       sb.append(" | ").append(pzopt.CharDraw.describe()); // pzopt: charDrawPrep, the characters draw pre-pass
       sb.append(" | ").append(pzopt.LightingBatch.describe()); // pzopt: the lighting reads on the workers
+      sb.append(" | ").append(pzopt.SeparateMask.describe()); // pzopt: separateFast, the cached grid answers
       sb.append(" | top tilesets:");
          pzoptTlSets.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(8)
                .forEach(e -> sb.append(' ').append(e.getKey()).append('=').append(e.getValue() / frames));

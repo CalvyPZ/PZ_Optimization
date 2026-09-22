@@ -670,7 +670,8 @@ remote_wrapper() { # <job> <machine> <install> <argv...> -> $job/remote-job.sh (
       if [[ "$install" == opt ]]; then
         case "$(mcfg "$m" install install.sh)" in
           pzopt.sh) echo 'scripts/pzopt.sh reinstall || exit 1' ;;
-          *) echo "./install.sh --from build/classes --dir $game_dir || exit 1" ;;
+          *) echo "./install.sh --uninstall --dir $game_dir >/dev/null || exit 1"   # install.sh refuses over an install; --uninstall is a no-op without one
+             echo "./install.sh --from build/classes --dir $game_dir || exit 1" ;;
         esac
       fi
       echo "$(mcfg "$m" runner harness/run.sh) $q$(mcfg "$m" run_args)"

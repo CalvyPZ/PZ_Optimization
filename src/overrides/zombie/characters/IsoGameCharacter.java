@@ -1550,7 +1550,17 @@ public abstract class IsoGameCharacter
    }
 
    public void updateEmitter() {
-      this.getFMODParameters().update();
+      // pzopt: emitterParamSkip. Stock recomputes every FMOD parameter of every character every frame (the footstep
+      // material walks the square's objects, the zone parameter the room) although a parameter value only goes
+      // anywhere through the event instances of this character's own emitter. With no instance running and none about
+      // to start, the computed values are written to nothing; the cached value they would leave behind is refreshed
+      // here before the emitter starts a sound, which is the only place startEventInstance reads it. 2,389 silent
+      // zombies were ~2 % of the game thread on the Louisville horde.
+      if (!pzopt.Config.EMITTER_PARAM_SKIP || !pzopt.Overrides.enabled() || this.emitter == null || !this.emitter.isClear()
+            || this.emitter.hasSoundsToStart()) {
+         this.getFMODParameters().update();
+      }
+
       if (IsoWorld.instance.emitterUpdate || this.emitter.hasSoundsToStart()) {
          if (this.isZombie() && this.isProne()) {
             CombatManager.getBoneWorldPos(this, "Bip01_Head", tempVectorBonePos);
@@ -4802,7 +4812,7 @@ public abstract class IsoGameCharacter
    }
 
    public boolean CanSee(IsoMovingObject obj) {
-      return this.CanSee(obj);
+      return this.CanSee((IsoObject)obj); // pzopt: Vineflower dropped the cast (self-recursion -> StackOverflowError)
    }
 
    public boolean CanSee(IsoObject obj) {
@@ -8655,6 +8665,9 @@ public abstract class IsoGameCharacter
             }
 
             if (!GameServer.server) {
+               // pzopt: this must run every frame. It writes isVisibleToPlayer[], which decides whether the zombie is
+               // drawn at all and feeds the scheduler's own LOD; spreading it over frames (tried 2026-09-22) makes
+               // most of the horde stop rendering, which shows up as a large, entirely fake frame-rate win.
                this.updateSeenVisibility();
             }
 

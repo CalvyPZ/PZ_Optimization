@@ -493,6 +493,45 @@ and recompile without fixes; `Display`'s inner classes `$Window` and
 logs "Display mode changed to 5120x2160", the recording is full-screen and the
 route numbers match the XWayland runs.
 
+Fourth edit in `Display` (added 2026-09-22, midday): **the window is created at
+its final size.** The stock shim creates the GLFW window at the shim's 640x480
+placeholder, makes the context current, and `Core.setDisplayModeInternal` then
+resizes it (`glfwSetWindowMonitor`) to the options' resolution and fullscreen
+state; the window manager applies that resize asynchronously, after the shim has
+already re-bound the context. On the Dell (GTX 960M rendering through NVIDIA
+PRIME render offload over XWayland, first boot into KWin 6.7.5 / Xwayland
+24.1.13) the GL drawable kept the 640x480 geometry the context was first made
+current with: the fullscreen 1920x1080 window showed the frame's bottom-left
+640x480 and black elsewhere, with the stock shim as well (`dell-lo2-probe-*`
+runs, the game's own `--shot-at` capture of the default framebuffer lit only
+that corner). The previous day the same box was fine because KWin had grown the
+fresh window to 1920x1022 before the switch ("Display mode changed to
+1920x1022" in every 09-21 Dell console), i.e. the bug was masked, not absent.
+
+- `create()`: when `Core.width` / `Core.height` are known (or the fullscreen
+  option is set) the window is created at `Core.width x Core.height` — the
+  desktop size for a borderless window — and, for fullscreen, directly on the
+  primary monitor with `GLFW_REFRESH_RATE` = the desktop's rate so no video mode
+  switch happens; `gameWindowMode` is set to the matching `DisplayMode` (the
+  4-argument constructor for fullscreen, read back from the window in case GLFW
+  chose another mode) so `Core.setDisplayModeInternal`'s first check
+  (`getWidth() == width && getHeight() == height && isFullscreen() == fullscreen`)
+  returns before any switch. The "closest width=" search and the "Display mode
+  changed to 640x480" line therefore no longer appear at boot.
+- `setDisplayModeAndFullscreenInternal()`: after `glfwSetWindowMonitor` (a
+  resolution change from the options screen, the fallback path) a new
+  `pzoptAwaitWindowSize()` polls `glfwGetFramebufferSize` (a synchronous
+  `XGetWindowAttributes`) until the window reaches the requested size, or its
+  size has stopped changing for 200 ms, or 1 s has passed, records the size in
+  `displayFramebufferWidth/Height` and `latestWidth/Height`, and the context is
+  then unbound and re-bound (`glfwMakeContextCurrent(0)` + the window) so a
+  driver that latches the drawable geometry on MakeCurrent sees the final size.
+
+Not gated on `Overrides.enabled()` (like the HiDPI edit: a display-correctness
+fix with no game-internal dependency). Verified 2026-09-22 on the Dell with the
+`--shot-at` capture (`dell-lo2-fix-probe-*`: the whole 1920x1080 frame) and on
+the desktop's windowed 5120x2160 runs.
+
 ## zombie.scripting.ScriptParser (added 2026-09-19, evening, boot)
 
 `stripComments` first tries `pzopt.ScriptText.stripComments` (one forward pass
@@ -1994,6 +2033,11 @@ directly, i.e. the stock sequence. Note for the regen: CFR renders the model-les
 wrongly (as two sequential blocks); the bytecode and Vineflower have `if (!hasActiveModel()) updateAnimPlayer else
 updateModelSlot`.
 
+Decompiler fix (2026-09-22): Vineflower drops the `(IsoObject)` cast in `CanSee(IsoMovingObject obj)`, so its
+body `return this.CanSee(obj);` called itself and threw a StackOverflowError on the first call. It is used by
+`IsoAnimal`, `DeviceData` and Lua. The cast is back in place. A scan of every override for a method whose whole
+body calls a same-named method with the same arguments found no other case; check for this after a regen.
+
 ## zombie.characters.action.ActionContext (added 2026-09-22, evaluate on a worker, apply on the game thread)
 
 `actionEvalParallel` (`pzopt.ActionEval`). `updateInternal` is stock's set / evaluate / transfer, with a first check:
@@ -2280,3 +2324,133 @@ zombie whose draw data the pre-pass built (`CharDraw.isPrepared`) skips the squa
 tests (the pre-pass applied both on the game thread this frame); the square is read once into a local; before
 `render`, an object of class `IsoZombie` is offered to `pzoptRenderFlat`; true = drawn, the method returns; false =
 the stock `render` call as before.
+
+## Zombie game-thread pass (2026-09-22 afternoon; `actionSnapshotFilter`, `emitterParamSkip`, `separateFast`, `sleepCheckMemo`, `stateParamMemo`)
+
+Goal of the pass: the `zombies` sub-phase of the game-thread profile (`IsoZombie.update` + `IsoZombie.postupdate`)
+under 5 % on the Louisville horde; it was 21 % on `zbu2-lou-ours` (12.1 update + 11.2 postupdate), with the leaf
+profile showing where: the callback snapshot 7.6 %, the separation pass 3.2 %, the FMOD parameters 1.6 %, the
+sleep check 0.7 %, the state-param maps 0.9 %.
+
+### zombie.characters.action.ActionContext + conditions.CharacterVariableCondition (third edit, `actionSnapshotFilter`)
+
+The snapshot the game thread takes before a batch resolved *every* operand of every transition of the current state
+and its sub-states, per zombie, per frame — a grid of string-keyed handle lookups through the component map and the
+state container — only to discover that almost all of them are stored slots or audited pure callbacks that need no
+snapshot at all. The decision does not depend on the zombie: a condition's variable *name* is fixed by the action
+XML, and which names are callbacks is fixed by the character constructor. So `CharacterVariableCondition` gained
+`pzoptNeedsSnapshot(lookup)`, a name-only test (a sub-variable source — another character — stays conservative), and
+`ActionContext` applies it once, when it caches a state's operand array: the per-frame walk now visits only the
+handful of operands whose callback has side effects. `pzopt.ActionEval.initCallbackKeys` reads the callback key set
+off the first batched zombie's variable registry and logs its size; until it has, the filter answers "snapshot",
+so the behaviour is the old one. Rig: with `devActionEvalCheck` the context also resolves every dropped operand and
+counts the ones that did resolve to an impure callback (`filterMisses` on the action-eval log line; must stay 0).
+
+### zombie.characters.IsoGameCharacter (third edit, `emitterParamSkip`)
+
+`updateEmitter` recomputed the character's whole FMOD parameter list every frame — the footstep material walks its
+square's objects and parses a property string, the zone parameter looks up the room — although a parameter value
+only ever reaches FMOD through the event instances of that character's own emitter. With no instance running and
+none queued, the values were written to nothing. The list is now updated only when the emitter is not clear or has
+a sound about to start; that gate is evaluated before `emitter.tick()` starts anything, which is the only place the
+cached value is read (`FMODLocalParameter.startEventInstance`), so a starting sound still gets a fresh value.
+
+### zombie.characters.IsoZombie (sixth edit, `separateFast`) and pzopt.SeparateMask
+
+`IsoMovingObject.separate()` re-derives per neighbouring object whether the asker is a player; for a zombie it never
+is, which makes the charged-spear branch and the whole bump block (with its traits, moodles, RNG roll and
+`wasBumped` event) unreachable. `IsoZombie` now overrides `separate()` with the zombie-only path — the same solid /
+pushable gates, square and object walks, early return on a non-character non-vehicle object, contact, push vector
+(down to `Vector2.normalize()`'s "already unit" shortcut), camera-distance gate and `collideWith` — and asks
+`pzopt.SeparateMask` instead of the grid whether its square is blocked to a neighbour. That answer depends only on
+the two squares' geometry (and, for a diagonal, the two between them), never on who asks, so it is cached per square
+for the frame in a direct-mapped identity table, computed lazily per neighbour: hundreds of zombies standing on a
+few hundred squares used to recompute the same wall / window / door / stair recursion three to eight times a frame.
+A door that opens mid-frame is seen on the next one. `pzopt.FrameTick` (bumped once per frame from the scheduler's
+`update()`) is the stamp.
+
+### zombie.characters.IsoPlayer (third edit, `sleepCheckMemo`)
+
+`GameTime.getMultiplier()` asks `IsoPlayer.allPlayersAsleep()` on the way into every character update, and a zombie
+asks for the multiplier several times per update, so the player array was walked tens of thousands of times a frame
+for an answer that cannot change inside a frame. Memoised on `FrameTick`.
+
+### zombie.characters.IsoZombie (`stateParamMemo`)
+
+Every `State.Param` read (an AI state's per-character scratch) goes through `getStateMachineParams(state class)`:
+the entity-component map, then an `IdentityHashMap` keyed by the class, then the param's own probe — and a state's
+`execute()` reads several params of the same class in a row. The zombie keeps the last (class, map) pair beside the
+`ecsLookupFast` component field; the component is created once per zombie and its per-class map object is only ever
+cleared, never replaced, so the memo returns the identical map.
+
+### zombie.MovingObjectUpdateScheduler (fourth edit)
+
+`update()` bumps `pzopt.FrameTick`, the frame stamp of the simulation memos above.
+
+### Second pass on the snapshot (2026-09-22, same keys)
+
+Measured after the first: the snapshot was still 4.5 % of the game thread, in three parts. (a) The audit only
+knew 95 of the character's 157 callback variables, so 62 names still counted as "may have side effects"; a second
+audit of their getters added 29 (field reads and derived reads of the hand / worn items, the action queue, the fall
+table; the zombie's network-moving test, small-vehicle test, distance to target, canSeeTarget and
+shouldGetUpFromCrawl). The ones left out are listed in `pzopt.ActionEval` beside the set with the reason —
+`battack` / `bhastarget` / `shouldsprint` clear the target through the getter, `bthump` drops the thump target,
+`beatbodytarget` rescans the corpses, `blunge` runs a pathfind line test through a shared pool, `turndirection`
+uses the class's static vectors, and six more are simply not audited yet. (b) Every operand was resolved twice per
+read — once to classify the slot, once inside the value read — and (c) the value read consulted the worker's
+thread-local snapshot map even on the game thread, where it is never set. `CharacterVariableLookup.pzoptResolve`
+now keeps the operand's pooled `AnimationVariableHandle` (allocated from the same pool the reference would have
+used) and asks the owner directly when there is no sub-variable source, which also drops the blank-name scan the
+reference does on every call; the snapshot reads the resolved slot straight.
+
+### zombie.MovingObjectUpdateScheduler (fifth edit, `zombieSimLodTiles`, experiment, default 0)
+
+Stock already drops a visible object's simulation level one step at 30, 60 and 80 tiles from the nearest player
+(the bucket it lands in then updates every 2nd / 4th / 8th frame). The key adds one more step at a chosen distance,
+for zombies only, as an A/B of "simulate fewer of the horde per frame".
+
+### zombie.characters.IsoZombie (seventh edit) + pzopt.SeparateBatch (`separateParallel`, default off)
+
+The separation pass is split into a compute that only reads the world and an apply that does every write. The
+compute walks the nine squares and records the total displacement, the one contact, the wasSeparated flag and the
+`collideWith` partners in order (at most twelve; a thirteenth is counted as a spill and dropped). The apply runs on
+the game thread at the point in the zombie's own update where stock would have done the writes, so the Lua collide
+events, the window climbs and the thumps keep their order. With the key on, the scheduler collects the zombies
+whose bucket matches this frame while it fills the simulation levels in `startFrame` and runs their computes on the
+frame workers at the top of `update()`; a zombie the batch did not reach computes inline exactly as before. The one
+behavioural difference: a neighbour's position is read at the top of the frame rather than as the loop advances.
+
+### Third pass (2026-09-22, `actionGroupCache`, `profilerThreadMemo`, `stateParamMemo` in `zombie.ai.State`, snapshot dedupe)
+
+Measured after the second pass, all from the leaf profile of the `zombies` sub-phase:
+
+- `zombie.ai.State` (new override). `State.Param.get` — the per-character scratch every AI state reads several times
+  per frame — resolved its value with `computeIfAbsent(this, param -> defaultSupplier.get())`. The supplier is a
+  parameter, so the lambda captures and allocates on every read. A get, and a put only when the default was actually
+  produced, is exactly what `computeIfAbsent` does with an `IdentityHashMap` (it stores nothing for a null result and
+  treats a mapping to null as absent). Vineflower's output needed two casts it had dropped. Marker is the quiet one:
+  the AI states initialise before the logger.
+- `zombie.GameProfiler` (new override). Every performance probe in the game — `IsoZombie.update` and `postupdate`
+  have one each — calls `isValidThread()` on the way in and on the way out, and the valid-thread list is an
+  `ArrayList<String>` scanned with `String.equals`. The list is filled once in the static initialiser and a thread
+  keeps its name, so the answer is memoised on the per-thread instance the profiler already holds. 0.7 % of the game
+  thread, paid whether or not the profiler is recording (`profilerThreadMemo`).
+- `IsoZombie` holds the `zombie` and `zombie-crawler` `ActionGroup`s (`actionGroupCache`): `updateInternal` asked for
+  them by name twice per zombie per frame and the lookup lower-cases the name into a new String before probing a map
+  for a group loaded once at startup.
+- `ActionContext` dedupes the snapshot: a state that tests the same variable in several transitions used to resolve
+  and call it once per transition. The duplicate map is built once per state, from the operands' names.
+- The snapshot resolves straight to the character's own slot array when the action-state container holds no state
+  variables at all (checked once per snapshot instead of walked per operand — stock walks the current state and every
+  sub-state before falling back to the character).
+
+### zombie.MovingObjectUpdateScheduler (`zombieSimLodSteps`) and IsoZombie / IsoGameCharacter (`zombieCheckSpread`)
+
+`zombieSimLodTiles` may now take more than one extra step, each at twice the distance of the previous one, like
+stock's own 30 / 60 / 80 ladder (`zombieSimLodSteps`, default 1). `zombieCheckSpread` (default 0 = stock) runs a
+zombie's thump probe — the grid test for something thumpable in front of it — on one frame in N, spread by zombie id.
+
+**Dead end, recorded:** the same spread was first applied to `IsoGameCharacter.updateSeenVisibility` as well. That
+method writes `isVisibleToPlayer[]`, which decides whether the zombie is drawn at all and feeds the scheduler's own
+LOD, so spreading it stopped most of the horde from rendering and produced a large fake frame-rate win (138 and
+152 fps where the same scene runs at 64). It is called every frame again, with a comment saying why.

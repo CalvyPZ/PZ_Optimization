@@ -1001,7 +1001,28 @@ public class IsoPlayer extends IsoLivingCharacter implements IAnimalVisual, IHum
       return new ArrayList<>(Arrays.asList(players));
    }
 
+   // pzopt: sleepCheckMemo. GameTime.getMultiplier() asks this on the way into every character update (and the zombies
+   // ask for the multiplier several times each), so the whole player array was walked tens of thousands of times a
+   // frame on the Louisville horde — 0.7 % of the game thread for an answer that cannot change inside one frame.
+   private static int pzoptAsleepFrame;
+   private static boolean pzoptAsleep;
+
    public static boolean allPlayersAsleep() {
+      if (pzopt.Config.SLEEP_CHECK_MEMO && pzopt.Overrides.enabled()) {
+         if (pzoptAsleepFrame == pzopt.FrameTick.frame()) {
+            return pzoptAsleep;
+         }
+
+         boolean asleep = pzoptAllPlayersAsleep();
+         pzoptAsleepFrame = pzopt.FrameTick.frame();
+         pzoptAsleep = asleep;
+         return asleep;
+      }
+
+      return pzoptAllPlayersAsleep();
+   }
+
+   private static boolean pzoptAllPlayersAsleep() {
       int numLiving = 0;
       int numSleeping = 0;
 

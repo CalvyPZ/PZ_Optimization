@@ -202,6 +202,34 @@ local SECTIONS = {
               choices = { "4", "8", "12", "14" }, tip = "Threads of the zombie draw-data pool; the data has to be ready before the zombies are queued, so on a 16-core machine 14 keep the game thread from waiting. More than cores - 2 is clamped." },
             { key = "zombieAtlasFast", label = "Flat draw call for far zombies",
               tip = "A zombie too far for a 3D model is drawn as a small pre-rendered sprite; its draw goes through a flat copy of the game's render chain (the same tests, the same sprite call) instead of five nested virtual calls per zombie. ~1,100 such zombies per frame in a Louisville horde. Same pixels." },
+            { key = "actionSnapshotFilter", label = "Read only the animation variables that need it",
+              tip = "Before a zombie's transitions are evaluated on a worker, the game thread reads the variables whose engine callback has a side effect. It used to resolve every variable of every transition to find out which those are; the answer only depends on the variable's name, so it is now decided once per state. Same values." },
+            { key = "emitterParamSkip", label = "Skip sound parameters for silent characters",
+              tip = "A character's sound parameters (the floor material under its feet, the room it is in) are recomputed only while it actually has a sound playing or about to start; stock recomputed all of them for every zombie every frame and wrote them nowhere. Same sounds." },
+            { key = "separateFast", label = "Cheap push-apart for zombies",
+              tip = "The pass that pushes overlapping zombies apart skips the half of the engine's version that only ever applies to the player, and the grid answer 'is my square walled off from that neighbour' is computed once per square per frame instead of once per zombie. Same positions." },
+            { key = "separateParallel", label = "Push-apart computed on other cores",
+              tip = "That push-apart is computed for the whole horde on worker threads before the update loop; the game thread applies each zombie's result at the same point in its update as before, so the collide events and window climbs keep their order. The neighbours' positions are read at the top of the frame instead of as the loop advances." },
+            { key = "sleepCheckMemo", label = "Check 'everyone asleep' once per frame",
+              tip = "The game asks whether all players are asleep on the way into every character update, and a zombie asks several times per update; the answer cannot change inside a frame, so it is computed once." },
+            { key = "stateParamMemo", label = "Faster AI scratch lookups",
+              tip = "The per-character scratch values the AI states keep were looked up through two maps and allocated a throwaway object on every read. Same values, one probe, no allocation." },
+            { key = "actionGroupCache", label = "Keep the zombie action group",
+              tip = "Every zombie asked the engine for its action group by name twice a frame, which copied the name into a new lower-case string and probed a map for a group loaded once at startup. It is held instead." },
+            { key = "profilerThreadMemo", label = "Cheap profiler thread check",
+              tip = "Every performance probe in the game asks twice whether it is on a profiled thread, and the engine answers by scanning a list of thread names. The answer per thread is remembered. Costs nothing when the profiler is off, which is always in normal play." },
+            { key = "zombieSimLodTiles", label = "Simulate distant zombies less often (tiles)",
+              choices = { "0", "8", "12", "15", "20", "25" },
+              note = { ["0"] = "stock: the game's own 30 / 60 / 80 tile steps only" },
+              tip = "The game already updates a zombie every 2nd, 4th or 8th frame once it is 30, 60 or 80 tiles from you. This adds one more step at a closer distance. It roughly halves what the horde costs the game thread, and distant zombies move in slightly coarser steps - it is a change to how the world is simulated, so it is off by default." },
+            { key = "zombieSimLodSteps", label = "How many of those extra steps",
+              choices = { "1", "2", "3" },
+              note = { ["3"] = "not recommended: three steps made the Louisville test scene unstable" },
+              tip = "Each further step applies at twice the distance of the previous one, like the game's own ladder. Two steps is the measured sweet spot." },
+            { key = "zombieCheckSpread", label = "Spread the zombie thump probe (frames)",
+              choices = { "0", "2", "3", "4", "6" },
+              note = { ["0"] = "stock: every frame" },
+              tip = "The grid test for 'is there a door or window in front of me to thump' runs on one frame in N per zombie, spread evenly by zombie. A thump starts at most N-1 frames later than it would." },
         },
     },
     {
@@ -247,7 +275,7 @@ local SECTIONS = {
         title = "Multiplayer", clip = "drive",
         entries = {
             { key = "luaChecksumExempt", label = "Leave the pzopt Lua files out of the server file check",
-              tip = "When joining a server the game lists every Lua file under media/lua to the server; the four pzopt files (this tab, the frame cap combo, the key binding, the update item) only exist on clients and a server without them refused the join with \"File doesn't exist on the server\". They are skipped like the game skips SandboxVars.lua. Applies on the next launch." },
+              tip = "When joining a server the game lists every Lua file under media/lua to the server; the pzopt files (this tab and its search index, the frame cap combo, the key binding, the update item) only exist on clients and a server without them refused the join with \"File doesn't exist on the server\". They are skipped like the game skips SandboxVars.lua. Applies on the next launch." },
         },
     },
     {
@@ -459,6 +487,14 @@ local function tooltipFor(entry, pinnedBy)
     return t
 end
 
+-- The Java classes that read a key: PzoptOptionClasses from pzopt_optimizations_classes.lua, generated by
+-- scripts/option-classes.py at build time (looked up late: the client files load in name order, after this one
+-- is parsed but before the options screen is built).
+local function optionClasses(key)
+    local t = PzoptOptionClasses
+    return (t and t[key]) or {}
+end
+
 -- ---------------------------------------------------------------------------------------------------
 -- Preview panel: the two clips, the description and the effect bars of the setting under the mouse.
 
@@ -481,14 +517,24 @@ local CLIP_TITLES = {
     ovverdict = "The verdict line: what holds the frame rate below the cap",
     ovgraph = "The frame-time graph: one bar per presented frame, GPU time in blue, the budget line and ms ticks",
     ovflame = "The flame graph: the last 5 s of game-thread stacks, root at the bottom, biggest first from the left",
+    -- the Louisville horde, one group of keys at a time (overlay + profiler on both sides)
+    zombies = "Downtown Louisville horde: stock vs stock + only the zombie simulation settings (all cores, lookups, push-apart)",
+    player = "Downtown Louisville horde: stock vs stock + only the player line-of-sight settings",
+    zgt = "Downtown Louisville horde: every optimization on, without vs with the zombie game-thread settings (on their own over stock they gain nothing: the stock frame waits on other work)",
 }
+-- Clips whose stock side is a shared GIF (one stock run for several group clips): <STOCK_FILE[clip]>-stock.gif.
+local STOCK_FILE = { zombies = "lou", player = "lou" }
 -- The captions over the two clips; the overlay clips are "off" / "on" rather than stock / optimized.
 local CLIP_SIDES = {
     default = { "STOCK GAME", "OPTIMIZED (every optimization on)" },
     overlay = { "OVERLAY OFF", "OVERLAY ON (F9)" },
+    alone = { "STOCK GAME", "STOCK + THESE SETTINGS ONLY" },
+    without = { "EVERYTHING ON EXCEPT THESE", "EVERYTHING ON" },
 }
 local function clipSides(clip)
     if string.sub(clip, 1, 2) == "ov" then return CLIP_SIDES.overlay end
+    if STOCK_FILE[clip] then return CLIP_SIDES.alone end
+    if clip == "zgt" then return CLIP_SIDES.without end
     return CLIP_SIDES.default
 end
 local KEY_CLIP = {
@@ -498,10 +544,14 @@ local KEY_CLIP = {
     fogPass = "fog", fogScalePct = "fog", fogMaskFrames = "fog",
     upscaler = "drive", upscalerQuality = "drive", upscalerScalePct = "drive", fsrSharpnessPct = "drive", upscalerObjectMv = "drive", dlssPreset = "drive", dlssSharpen = "drive",
     lightingStrongDelta = "torch", lightingStrongBudget = "horde", lightingStrongFrameMs = "horde", lightingFlush = "torch", lightingBudget = "torch",
-    lightSwitchCheckFrames = "horde", soundZoneCache = "horde", worldSoundFast = "horde", animBonesParallel = "horde", vehicleCull = "horde", gridStackInterval = "horde",
-    playerLosFast = "horde", zombieSpotFast = "horde", charDrawPrep = "horde", zombieAtlasFast = "horde", charDrawThreads = "horde",
-    frameThreads = "horde", actionEvalParallel = "horde", ecsLookupFast = "horde", actionConditionFast = "horde", skinTransformsPrecompute = "horde",
-    skinPalettePrecompute = "horde", shadowPrep = "horde", boneIndexCache = "horde", lightingReadParallel = "horde", zombieCullSortFast = "horde",
+    lightSwitchCheckFrames = "horde", soundZoneCache = "horde", worldSoundFast = "horde", gridStackInterval = "horde",
+    playerLosFast = "player", zombieSpotFast = "player", charDrawPrep = "horde", zombieAtlasFast = "horde", charDrawThreads = "horde",
+    actionSnapshotFilter = "zgt", emitterParamSkip = "zgt", separateFast = "zgt", separateParallel = "zgt", sleepCheckMemo = "zgt",
+    stateParamMemo = "zgt", actionGroupCache = "zgt", profilerThreadMemo = "zgt", zombieSimLodTiles = "zgt", zombieSimLodSteps = "zgt",
+    zombieCheckSpread = "zgt",
+    animBonesParallel = "zombies", vehicleCull = "zombies", frameThreads = "zombies", actionEvalParallel = "zombies", ecsLookupFast = "zombies",
+    actionConditionFast = "zombies", skinTransformsPrecompute = "zombies", skinPalettePrecompute = "zombies", shadowPrep = "zombies",
+    boneIndexCache = "zombies", lightingReadParallel = "zombies", zombieCullSortFast = "zombies",
     bakeBudget = "drive", rebakeBudget = "drive", rebakeMaxFrames = "drive", treeBakeMaxChunksPerSec = "drive",
     curtainDepthNudgePct = "spin", treeBakePass = "spin", treeBakeDirect = "spin", roofHideDebounceFrames = "spin",
     overlaySampling = "overlay", overlay = "overlay", overlayLog = "overlay", overlayCorner = "overlay", overlayFont = "overlay",
@@ -580,6 +630,17 @@ local EFFECTS = {
     zombieSpotFast = { cpu = -1 },
     charDrawPrep = { cpu = -2, cores = 1 },
     zombieAtlasFast = { cpu = -1 },
+    actionSnapshotFilter = { cpu = -2 },
+    emitterParamSkip = { cpu = -1 },
+    separateFast = { cpu = -1 },
+    separateParallel = { cpu = -2, cores = 1 },
+    sleepCheckMemo = { cpu = -1 },
+    stateParamMemo = { cpu = -1, ram = -1 },
+    actionGroupCache = { cpu = -1, ram = -1 },
+    profilerThreadMemo = { cpu = -1 },
+    zombieSimLodTiles = { cpu = -3 },
+    zombieSimLodSteps = { cpu = -1 },
+    zombieCheckSpread = { cpu = -1 },
     charDrawThreads = { cores = 1 },
     lightingGlobalDeltaPct = { cpu = -1 },
     lightingFlush = { cpu = 1 },
@@ -673,6 +734,7 @@ local C_DIM = { r = 0.40, g = 0.40, b = 0.45 }
 local CLIP_W, CLIP_H = 512, 216
 
 local function clipPath(clip, side)
+    if side == "stock" and STOCK_FILE[clip] then clip = STOCK_FILE[clip] end
     return "media/ui/pzopt/compare/" .. clip .. "-" .. side .. ".gif"
 end
 
@@ -714,7 +776,7 @@ function PzoptPreview:layoutSlots()
         for _, entry in ipairs(section.entries) do count(entry.tip) end
     end
     self.descLines = lines
-    local fixed = pad + self.hM + 2 + self.hS + 8          -- title + values
+    local fixed = pad + self.hM + 2 + self.hS + 2 + self.hS + 8 -- title, values, Java classes
         + self.hS + 2 + 4 + self.hS + 8                    -- clip captions, clip title line
         + lines * self.hS + 8                              -- description
         + self.hM + 4 + #AXES * (self.hS + 6)              -- bars
@@ -750,7 +812,7 @@ function PzoptPreview:pick()
     local mx, my = panel:getMouseX(), panel:getMouseY()
     if mx >= self.x then return end
     for _, row in ipairs(self.rows) do
-        if my >= row.y and my < row.y + row.h then
+        if not row.hidden and my >= row.y and my < row.y + row.h then
             self:select(row)
             return
         end
@@ -861,6 +923,10 @@ function PzoptPreview:prerender()
         .. "   next launch: " .. row.option:pzoptCurrent()
     if pinnedBy ~= "" then values = values .. "   (pinned by " .. pinnedBy .. ")" end
     self:text(getTextManager():WrapText(self.fontS, values, w, 1, "..."), x, y, C_GREY)
+    y = y + self.hS + 2
+    local classes = optionClasses(entry.key)
+    local java = #classes > 0 and ("Java: " .. table.concat(classes, ", ")) or "Java: read by pzopt.Config only"
+    self:text(getTextManager():WrapText(self.fontS, java, w, 1, "..."), x, y, C_DIM)
     y = y + self.hS + 8
     -- the two clips, centred in the column
     local iw, ih, gap = self.clipW, self.clipH, pad
@@ -882,6 +948,393 @@ function PzoptPreview:prerender()
     y = self:drawBars(x, y, w, EFFECTS[entry.key] or {})
     self:drawWrapped("Against the stock game, from the measurements in docs/results.md: green = less load (or a shorter "
         .. "load, chunks sooner), amber = more, blue = idle cores put to work. " .. RESTART_NOTE, x, y + 4, w, C_DIM)
+end
+
+-- ---------------------------------------------------------------------------------------------------
+-- Search: BM25 over every setting's label, key, description, combo notes, section, the resources its EFFECTS bars
+-- move (the AXES names) and the Java classes that read its key, with fuzzy term matching (prefix, substring, one
+-- typo from 4 letters, two from 7). Each typed word must match (camelCase and dotted names count as one word:
+-- "FogPass" matches the class or both "fog" and "pass"); a word may also match a term that is a longer form of it.
+
+local STOPWORDS = {}
+for w in string.gmatch("a an and are as at be by for from in into is it its of on or so than that the then this to with", "%a+") do
+    STOPWORDS[w] = true
+end
+local BM25_K1, BM25_B = 1.2, 0.75
+-- field weights (term-frequency multipliers, BM25F-style)
+local W_LABEL, W_KEY, W_CLASS, W_RESOURCE, W_SECTION, W_TIP = 3, 3, 2, 2, 1, 1
+
+-- The parts of one identifier-ish word: "treesInChunkTexture" -> trees chunk texture, "FBORenderCell" -> fbo render
+-- cell, "pzopt.FogPass" -> pzopt fog pass.
+local function parts(word)
+    local spaced = string.gsub(word, "(%l)(%u)", "%1 %2")
+    spaced = string.gsub(spaced, "(%u)(%u%l)", "%1 %2")
+    local out = {}
+    for w in string.gmatch(string.lower(spaced), "%w+") do
+        if not STOPWORDS[w] then table.insert(out, w) end
+    end
+    return out
+end
+
+-- Adds the terms of a text to tf with a weight: every part, and the whole word (dots dropped) when it had several.
+local function addTerms(tf, text, weight)
+    local n = 0
+    for word in string.gmatch(tostring(text or ""), "[%w%.]+") do
+        local ps = parts(word)
+        for _, t in ipairs(ps) do
+            tf[t] = (tf[t] or 0) + weight
+            n = n + weight
+        end
+        local whole = string.lower((string.gsub((string.gsub(word, "^pzopt%.", "")), "%.", "")))
+        if #ps > 1 and whole ~= "" then
+            tf[whole] = (tf[whole] or 0) + weight
+            n = n + weight
+        end
+    end
+    return n
+end
+
+-- Levenshtein distance, giving up (limit + 1) once every path is past the limit.
+local function editDistance(a, b, limit)
+    local la, lb = #a, #b
+    if math.abs(la - lb) > limit then return limit + 1 end
+    local prev = {}
+    for j = 0, lb do prev[j] = j end
+    for i = 1, la do
+        local cur = { [0] = i }
+        local best = i
+        local ca = string.byte(a, i)
+        for j = 1, lb do
+            local v = math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + ((ca == string.byte(b, j)) and 0 or 1))
+            cur[j] = v
+            if v < best then best = v end
+        end
+        if best > limit then return limit + 1 end
+        prev = cur
+    end
+    return prev[lb]
+end
+
+-- The index over the tab's rows: one document per setting.
+local function buildIndex(rows, sectionOf)
+    local index = { docs = {}, df = {}, vocab = {}, expand = {}, avgdl = 1 }
+    local total = 0
+    for _, row in ipairs(rows) do
+        local entry, tf, len = row.entry, {}, 0
+        len = len + addTerms(tf, entry.label, W_LABEL)
+        len = len + addTerms(tf, entry.key, W_KEY)
+        len = len + addTerms(tf, entry.tip, W_TIP)
+        if entry.note then
+            for _, v in pairs(entry.note) do len = len + addTerms(tf, v, W_TIP) end
+        end
+        len = len + addTerms(tf, sectionOf[row] and sectionOf[row].title, W_SECTION)
+        local fx = EFFECTS[entry.key] or {}
+        for _, axis in ipairs(AXES) do
+            if fx[axis.id] and fx[axis.id] ~= 0 then
+                len = len + addTerms(tf, axis.id .. " " .. axis.label, W_RESOURCE)
+            end
+        end
+        for _, name in ipairs(optionClasses(entry.key)) do
+            len = len + addTerms(tf, name, W_CLASS)
+        end
+        table.insert(index.docs, { row = row, tf = tf, len = len })
+        total = total + len
+        for t in pairs(tf) do
+            if not index.df[t] then table.insert(index.vocab, t) end
+            index.df[t] = (index.df[t] or 0) + 1
+        end
+    end
+    local n = #index.docs
+    if n > 0 then index.avgdl = total / n end
+    index.idf = {}
+    for t, df in pairs(index.df) do
+        index.idf[t] = math.log(1 + (n - df + 0.5) / (df + 0.5))
+    end
+    return index
+end
+
+-- The vocabulary terms a query word stands for, with a weight: exact 1, a longer form 0.8, the word inside a term
+-- 0.5, one typo 0.6, two typos 0.35.
+local function expand(index, q)
+    local hit = index.expand[q]
+    if hit then return hit end
+    hit = {}
+    local lq = #q
+    for _, t in ipairs(index.vocab) do
+        local w
+        if t == q then
+            w = 1
+        elseif lq >= 2 and string.sub(t, 1, lq) == q then
+            w = 0.8
+        elseif #t >= 4 and lq > #t and lq - #t <= 2 and string.sub(q, 1, #t) == t then
+            w = 0.7 -- "chunks" -> "chunk"
+        elseif lq >= 3 and string.find(t, q, 1, true) then
+            w = 0.5
+        elseif lq >= 4 and (string.byte(t, 1) == string.byte(q, 1) or string.byte(t, 2) == string.byte(q, 2)) then
+            -- a typo rarely hits both of the first two letters; the check keeps the scan cheap under Kahlua
+            local d = editDistance(q, t, lq >= 7 and 2 or 1)
+            if d == 1 then w = 0.6 elseif d == 2 and lq >= 7 then w = 0.35 end
+        end
+        if w then table.insert(hit, { t = t, w = w }) end
+    end
+    index.expand[q] = hit
+    return hit
+end
+
+local function termScore(index, doc, t)
+    local tf = doc.tf[t]
+    if not tf then return 0 end
+    local norm = 1 - BM25_B + BM25_B * doc.len / index.avgdl
+    return index.idf[t] * tf * (BM25_K1 + 1) / (tf + BM25_K1 * norm)
+end
+
+-- Best weighted BM25 score of one query term in one document (0 = no match).
+local function wordScore(index, doc, q)
+    local best = 0
+    for _, e in ipairs(expand(index, q)) do
+        local s = doc.tf[e.t] and e.w * termScore(index, doc, e.t) or 0
+        if s > best then best = s end
+    end
+    return best
+end
+
+-- Scores every row for a query: { [row] = score } of the rows every query word matched (all words must match;
+-- if no row has them all, the rows matching any word), and how many matched.
+local function search(index, query)
+    local units = {}
+    for word in string.gmatch(query, "[%w%.]+") do
+        local ps = parts(word)
+        local whole = string.lower((string.gsub((string.gsub(word, "^pzopt%.", "")), "%.", "")))
+        if #ps > 0 or (whole ~= "" and not STOPWORDS[whole]) then
+            table.insert(units, { whole = whole, parts = ps })
+        end
+    end
+    if #units == 0 then return nil, 0 end
+    local all, any = {}, {}
+    local nAll, nAny = 0, 0
+    for _, doc in ipairs(index.docs) do
+        local total, matched = 0, 0
+        for _, u in ipairs(units) do
+            local s = wordScore(index, doc, u.whole)
+            if #u.parts > 1 then
+                local sum = 0
+                for _, p in ipairs(u.parts) do
+                    local ps = wordScore(index, doc, p)
+                    if ps == 0 then sum = 0 break end
+                    sum = sum + ps
+                end
+                if sum > s then s = sum end
+            end
+            if s > 0 then matched = matched + 1 end
+            total = total + s
+        end
+        if matched == #units then all[doc.row] = total; nAll = nAll + 1 end
+        if matched > 0 then any[doc.row] = total; nAny = nAny + 1 end
+    end
+    local hits, n = all, nAll
+    if nAll == 0 then hits, n = any, nAny end
+    -- drop the weak tail fuzzy matching drags in
+    local top = 0
+    for _, s in pairs(hits) do if s > top then top = s end end
+    for row, s in pairs(hits) do
+        if s < 0.15 * top then hits[row] = nil; n = n - 1 end
+    end
+    return hits, n
+end
+
+-- ---------------------------------------------------------------------------------------------------
+-- Collapsible sections. Every row below the search box (section headings, settings, the closing note) remembers its
+-- UI elements and their offsets; pzoptRelayout places the visible ones top to bottom, hides the rest and rebuilds
+-- the controller navigation in the same order. Which sections are folded is kept for the session.
+
+local COLLAPSED = {}
+
+local function placeRow(row, y)
+    for _, e in ipairs(row.elems) do
+        e.el:setY(y + e.dy)
+        e.el:setVisible(true)
+    end
+    row.hidden = false
+    if row.controlDy then row.y = y + row.controlDy end
+end
+
+local function hideRow(row)
+    for _, e in ipairs(row.elems) do e.el:setVisible(false) end
+    row.hidden = true
+end
+
+local function relayout(S)
+    local panel = S.panel
+    local y = S.top
+    local joy = {}
+    local order = S.sections
+    if S.hits then
+        order = {}
+        for _, sec in ipairs(S.sections) do table.insert(order, sec) end
+        table.sort(order, function(a, b)
+            if a.best ~= b.best then return a.best > b.best end
+            return a.index < b.index
+        end)
+    end
+    for _, sec in ipairs(order) do
+        local shown = {}
+        if S.hits and #sec.hitRows == 0 then
+            hideRow(sec.header)
+        else
+            placeRow(sec.header, y)
+            y = y + sec.header.step
+            table.insert(joy, { sec.header.button })
+            if S.hits or not COLLAPSED[sec.title] then
+                for _, row in ipairs(S.hits and sec.hitRows or sec.rows) do
+                    placeRow(row, y)
+                    y = y + row.step
+                    shown[row] = true
+                    table.insert(joy, { row.option.control })
+                end
+            end
+        end
+        for _, row in ipairs(sec.rows) do
+            if not shown[row] then hideRow(row) end
+        end
+    end
+    placeRow(S.footer, y)
+    y = y + S.footer.step
+    panel:setScrollHeight(y + 20)
+    local maxScroll = math.max(0, y + 20 - panel:getHeight())
+    if -panel:getYScroll() > maxScroll then panel:setYScroll(-maxScroll) end
+    -- controller navigation: the fixed rows at the top, then the visible rows in display order
+    for i = #panel.joypadButtonsY, S.joyTop + 1, -1 do table.remove(panel.joypadButtonsY, i) end
+    for _, line in ipairs(joy) do table.insert(panel.joypadButtonsY, line) end
+    panel.joypadButtons = panel.joypadButtonsY[#panel.joypadButtonsY]
+    if (panel.joypadIndexY or 1) > #panel.joypadButtonsY then
+        panel.joypadIndexY = #panel.joypadButtonsY
+        panel.joypadIndex = 1
+    end
+end
+
+local function runSearch(S, text)
+    local hits, n = nil, 0
+    if text and string.match(text, "%w") then
+        hits, n = search(S.index, text)
+    end
+    S.hits = hits
+    for _, sec in ipairs(S.sections) do
+        sec.hitRows, sec.best = {}, 0
+        if hits then
+            for _, row in ipairs(sec.rows) do
+                local s = hits[row]
+                if s then
+                    table.insert(sec.hitRows, row)
+                    if s > sec.best then sec.best = s end
+                end
+            end
+            table.sort(sec.hitRows, function(a, b)
+                if hits[a] ~= hits[b] then return hits[a] > hits[b] end
+                return a.index < b.index
+            end)
+        end
+    end
+    if not hits then
+        S.status:setName(S.total .. " settings")
+    elseif n == 0 then
+        S.status:setName("Nothing matches")
+    else
+        S.status:setName(n .. " of " .. S.total .. " match")
+    end
+    S.panel:setYScroll(0)
+    relayout(S)
+end
+
+-- A section heading that folds its section: a rule stopping short of the preview panel, "+" / "-", the title, and
+-- how many settings it holds (or match the search). It is a button, so the mouse and a controller's A both work.
+local function addSectionHeader(self, S, sec, y, x0, width)
+    local spacing = MainOptions.style.borderSpacing
+    local hM = MainOptions.style:getFontHeight("Medium")
+    local hS = getTextManager():getFontHeight(UIFont.Small)
+    local b = ISButton:new(x0, self.addY + y, width, spacing + hM, "", S, function(target)
+        if target.hits then return end -- a search shows every match unfolded
+        COLLAPSED[sec.title] = not COLLAPSED[sec.title] or nil
+        relayout(target)
+    end)
+    b:initialise()
+    b.prerender = function() end
+    b.render = function(o)
+        local hot = o:isMouseOver() or o.joypadFocused
+        o:drawRect(0, 0, o.width, 1, 1.0, 0.5, 0.5, 0.5)
+        local open = S.hits or not COLLAPSED[sec.title]
+        local c = hot and 1 or 0.85
+        local markW = getTextManager():MeasureStringX(UIFont.Medium, "+ ")
+        o:drawText(open and "-" or "+", 2, spacing, c, c, c, 1, UIFont.Medium)
+        local count = S.hits and (#sec.hitRows .. " of " .. #sec.rows) or (#sec.rows .. (#sec.rows == 1 and " setting" or " settings"))
+        local countW = getTextManager():MeasureStringX(UIFont.Small, count)
+        o:drawTextRight(count, o.width, spacing + math.floor((hM - hS) / 2), C_GREY.r, C_GREY.g, C_GREY.b, 1, UIFont.Small)
+        -- the title is cut with "..." before the count (WrapText does not cut a single line reliably)
+        local room, title = math.max(20, o.width - markW - countW - 16), sec.title
+        local tm = getTextManager()
+        if tm:MeasureStringX(UIFont.Medium, title) > room then
+            while #title > 1 and tm:MeasureStringX(UIFont.Medium, title .. "...") > room do
+                title = string.sub(title, 1, #title - 1)
+            end
+            title = title .. "..."
+        end
+        o:drawText(title, markW + 2, spacing, c, c, c, 1, UIFont.Medium)
+    end
+    self.mainPanel:addChild(b)
+    self.addY = self.addY + spacing * 2 + hM
+    return b
+end
+
+-- The search box and, under it, "Collapse all" / "Expand all" and the match count.
+local function addSearchRows(self, S, splitpoint, y, width)
+    local style = MainOptions.style
+    local BUTTON_HGT = style.buttonHeight
+    local spacing = style.borderSpacing
+    local label = ISLabel:new(splitpoint, y + self.addY, BUTTON_HGT, "Search settings", 1, 1, 1, 1, UIFont.Small)
+    label:initialise()
+    self.mainPanel:addChild(label)
+    local entry = ISTextEntryBox:new("", splitpoint + 20, y + self.addY, width, BUTTON_HGT)
+    entry:initialise()
+    entry:instantiate()
+    entry:setClearButton(true)
+    entry.tooltip = "Type words from a setting's name, description or key, a resource (gpu, vram, game thread, "
+        .. "load time...) or a Java class that reads it (FBORenderCell, IsoChunk, pzopt.FogPass...). Typos and "
+        .. "partial words are fine; the best matches come first."
+    -- the text is polled each frame (the clear button and pasting do not all go through onTextChange) and searched
+    -- once it has been still for 120 ms, so typing a word runs one search, not one per letter
+    entry.prerender = function(o)
+        ISTextEntryBox.prerender(o)
+        local text, now = o:getText(), getTimestampMs()
+        if text ~= S.typed then
+            S.typed, S.typedAt = text, now
+        elseif text ~= S.lastText and now - S.typedAt >= 120 then
+            S.lastText = text
+            runSearch(S, text)
+        end
+    end
+    self.mainPanel:addChild(entry)
+    self.mainPanel:insertNewLineOfButtons(entry)
+    self.addY = self.addY + BUTTON_HGT + spacing
+    local x = splitpoint + 20
+    local fold = ISButton:new(x, y + self.addY, 100, BUTTON_HGT, "Collapse all", S, function(target)
+        for _, sec in ipairs(target.sections) do COLLAPSED[sec.title] = true end
+        relayout(target)
+    end)
+    fold:initialise()
+    fold:setWidthToTitle()
+    self.mainPanel:addChild(fold)
+    local unfold = ISButton:new(x + fold:getWidth() + spacing, y + self.addY, 100, BUTTON_HGT, "Expand all", S, function(target)
+        for _, sec in ipairs(target.sections) do COLLAPSED[sec.title] = nil end
+        relayout(target)
+    end)
+    unfold:initialise()
+    unfold:setWidthToTitle()
+    self.mainPanel:addChild(unfold)
+    local status = ISLabel:new(unfold:getX() + unfold:getWidth() + spacing * 2, y + self.addY, BUTTON_HGT, "", C_GREY.r, C_GREY.g, C_GREY.b, 1, UIFont.Small, true)
+    status:initialise()
+    self.mainPanel:addChild(status)
+    self.mainPanel:insertNewLineOfButtons(fold, unfold)
+    self.addY = self.addY + BUTTON_HGT + spacing
+    S.entry, S.status = entry, status
 end
 
 local function comboLabels(entry, default, saved)
@@ -1028,6 +1481,18 @@ end
 
 -- Profiles: one button sets a named group of controls (the rest go back to the build's default),
 -- master on; Apply / Accept saves them like the other buttons. Values are the option strings.
+-- The low-end set (2026-09-21, docs/results.md): no chunk worker pool (its threads took the game thread's
+-- core on four cores), trees baked into chunk textures only while walking, and on the Display page lighting
+-- updates 10/s and the UI redrawn 30/s. The stock Display-page combos go by GameOption name -> combo index
+-- (MainOptions.lua lists): lightingFPS {5, 10, 15, 20, 25, 30, 45, 60}, UIRenderFPS {120, 60, 30, 25, 20, 15, 10}.
+local LOW_END_VALUES = { workers = "1", loadWorkers = "2", treeBakeMaxChunksPerSec = "24" }
+local LOW_END_STOCK = { lightingFPS = 2, UIRenderFPS = 3 }
+local function withValues(base, extra)
+    local t = {}
+    for k, v in pairs(base) do t[k] = v end
+    for k, v in pairs(extra) do t[k] = v end
+    return t
+end
 local PROFILES = {
     {
         button = "Low-end hardware (4 cores or less)",
@@ -1038,14 +1503,19 @@ local PROFILES = {
            .. "times a second (the lighting thread and the Lua UI were the next biggest users of the four cores). "
            .. "Everything else goes back to the build's default. 120 km/h drive 44 -> 68 fps, walking 49 -> 81 "
            .. "(p99 80 -> 40 ms / 69 -> 30 ms); the launcher's G1 collector JSON is needed on top. See docs/results.md.",
-        values = {
-            workers = "1",
-            loadWorkers = "2",
-            treeBakeMaxChunksPerSec = "24",
-        },
-        -- stock Display-page combos by GameOption name -> combo index (MainOptions.lua lists):
-        -- lightingFPS {5, 10, 15, 20, 25, 30, 45, 60}, UIRenderFPS {120, 60, 30, 25, 20, 15, 10}
-        stock = { lightingFPS = 2, UIRenderFPS = 3 },
+        values = LOW_END_VALUES,
+        stock = LOW_END_STOCK,
+    },
+    {
+        button = "Low-end hardware + FSR 1.0 upscaling",
+        tip = "The Low-end hardware set above, plus the world rendered at 67 % of the screen per axis (44 % of the "
+           .. "pixels) and scaled back up with AMD FidelityFX Super Resolution 1.0, which runs on any GPU; the "
+           .. "interface, text and cursor stay at full resolution. For a machine whose GPU is the wall as well as "
+           .. "its CPU: measured on the same Core i5-6300HQ / GTX 960M at 1920x1080 (2026-09-22, docs/results.md) "
+           .. "the GPU-bound scenes gain the most. Everything else goes back to the build's default; the launcher's "
+           .. "G1 collector JSON is needed on top.",
+        values = withValues(LOW_END_VALUES, { upscaler = "fsr1", upscalerQuality = "quality" }),
+        stock = LOW_END_STOCK,
     },
 }
 
@@ -1141,7 +1611,7 @@ local function layout(self, comboWidth)
     local previewW = math.max(360, W - 2 * margin - sbar - controlsW - gap)
     local x0 = margin
     return { x0 = x0, splitpoint = x0 + labelW, previewX = x0 + controlsW + gap, previewW = previewW,
-             lineW = controlsW + gap / 2, margin = margin }
+             lineW = controlsW + gap / 2, margin = margin, controlW = controlW }
 end
 
 function MainOptions:pzoptAddOptimizationsPanel()
@@ -1172,29 +1642,65 @@ function MainOptions:pzoptAddOptimizationsPanel()
         if p:getPzoptOptionPinnedBy(MASTER.key) ~= "" then pinned = pinned + 1 end
     end
     addAllButtons(self, splitpoint, y)
-    for _, section in ipairs(SECTIONS) do
-        addSectionLine(self, y, section.title, L.x0, L.lineW)
+    -- Everything below the search rows is placed by relayout: each row records the elements the stock add*
+    -- helpers create (caught by wrapping the page's addChild) and their offsets from the row's top.
+    local S = { panel = panel, sections = {}, total = 0 }
+    self.pzoptSearch = S
+    addSearchRows(self, S, splitpoint, y, math.max(comboWidth, L.controlW))
+    S.top = y + self.addY
+    S.joyTop = #panel.joypadButtonsY
+    local sink
+    panel.addChild = function(o, child)
+        if sink then table.insert(sink, child) end
+        return ISPanelJoypad.addChild(o, child)
+    end
+    local function capture(fn)
+        local top = y + self.addY
+        sink = {}
+        local result = fn()
+        local row = { elems = {}, step = y + self.addY - top }
+        for _, el in ipairs(sink) do table.insert(row.elems, { el = el, dy = el:getY() - top }) end
+        sink = nil
+        return row, result, top
+    end
+    local sectionOf = {}
+    local managed = {}
+    for si, section in ipairs(SECTIONS) do
+        local sec = { title = section.title, index = si, rows = {}, hitRows = {}, best = 0 }
+        local header, button = capture(function() return addSectionHeader(self, S, sec, y, L.x0, L.lineW) end)
+        header.button = button
+        sec.header = header
         for _, entry in ipairs(section.entries) do
             if p:isPzoptOptionKnown(entry.key) then
-                local option
-                if entry.choices then
-                    option = addIntOption(self, entry, splitpoint, y, comboWidth)
-                else
-                    option = addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
-                end
+                local row, option, top = capture(function()
+                    if entry.choices then
+                        return addIntOption(self, entry, splitpoint, y, comboWidth)
+                    end
+                    return addBoolOption(self, entry, splitpoint, y, BUTTON_HGT)
+                end)
                 table.insert(self.pzoptOptions, option)
                 addRow(entry, option, KEY_CLIP[entry.key] or section.clip or "drive")
+                local r = rows[#rows]
+                r.elems, r.step, r.controlDy, r.index = row.elems, row.step, option.control:getY() - top, #managed + 1
+                table.insert(sec.rows, r)
+                table.insert(managed, r)
+                sectionOf[r] = sec
                 added = added + 1
                 if p:getPzoptOptionPinnedBy(entry.key) ~= "" then pinned = pinned + 1 end
             else
                 print("[pzopt] options tab: unknown key " .. entry.key .. ", skipped")
             end
         end
+        if #sec.rows > 0 then table.insert(S.sections, sec) else hideRow(header) end
     end
-    addSectionLine(self, y, "Changes take effect on the next launch. File: Zomboid/pzopt/options.ini", L.x0, L.lineW)
-    -- Same as the stock pages: without a scroll height the panel never scrolls, so the
-    -- controls below the window edge are unreachable.
-    panel:setScrollHeight(y + self.addY + 20)
+    S.footer = capture(function()
+        addSectionLine(self, y, "Changes take effect on the next launch. File: Zomboid/pzopt/options.ini", L.x0, L.lineW)
+    end)
+    panel.addChild = nil -- back to the class method
+    S.total = #managed
+    S.index = buildIndex(managed, sectionOf)
+    S.lastText, S.typed, S.typedAt = "", "", 0
+    runSearch(S, "")
     -- The preview panel: a child of the page that does not scroll with it, full page height, the master
     -- switch shown until the mouse points at another row.
     local preview = PzoptPreview:new(L.previewX, L.margin, L.previewW, panel:getHeight() - 2 * L.margin, panel, rows)
