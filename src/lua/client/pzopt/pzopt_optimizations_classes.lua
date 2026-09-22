@@ -23,6 +23,7 @@ PzoptOptionClasses = {
     cutawayInvalidateChanged = { "FBORenderCutaways" },
     cutawayRadius = { "FBORenderCell" },
     cutawayVisitPrefilter = { "FBORenderCutaways" },
+    depthMapFast = { "TileDepthTexture" },
     dev = { "pzopt.Guard" },
     devActionEvalCheck = { "ActionContext", "pzopt.ActionEval" },
     devActionEvalUnitMultiplier = { "pzopt.ActionEval", "pzopt.ThumpRig" },

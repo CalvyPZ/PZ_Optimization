@@ -2750,3 +2750,21 @@ Mac Continue -> world ready: 8.16 s (mac-dwait) -> 6.25-6.64 s with the first tw
 with the filter (mac-paeth-on; 6.46 s with `pngPaethFast=false`). The assetLock2 wait is the boot backlog, so it is
 this long only when Continue is pressed as soon as the menu shows, as the harness does.
 
+### Depth maps and palette images (`pngPaethFast`, `depthMapFast`, 2026-09-23)
+
+The 218 tile depth maps (mostly 8-bit palette PNGs, 5.8 MB on disk, 685 megapixels decoded) were 8.9 s of file-pool
+time per boot on the Mac. Offline on the largest one (1024 x 7680): half the decode was the palette-to-RGBA copy writing
+four single bytes per pixel, and after the decode `TileDepthTexture.load` read every tile pixel with two bounds-checked
+buffer gets.
+
+- `zombie.core.textures.PNGDecoder.copyPALtoRGBA` (under `pngPaethFast`): the palette and its alpha entries become one
+  256-entry table of 4-byte pixels on first use, and a scan line is written with one lookup a pixel and one bulk put
+  (`pzopt.PngFilters.paletteToRgba`), leaving the buffer position and byte order as the per-byte copy did; 19.5 -> 6.0 ms
+  on that map, byte-identical (`PngFiltersTest`).
+- `zombie.tileDepth.TileDepthTexture.load` (new override, `depthMapFast`): the tile's rows are read with one bulk get
+  each and converted in a plain array loop (`pzopt.PngFilters.depthTile`), the same values and the same empty test;
+  11.6 -> 6.1 ms for that map's 240 tiles.
+
+Mac (one run each, same build): depth-map task time 8.9 -> 7.7 s, image decode 4.1 -> 2.8 s, Continue -> world ready
+6.37 -> 5.96 s (mac-depth-off / mac-depth-on).
+

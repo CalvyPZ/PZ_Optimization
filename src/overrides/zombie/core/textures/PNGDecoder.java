@@ -12,6 +12,8 @@ import org.lwjgl.system.MemoryUtil;
 import zombie.core.utils.BooleanGrid;
 
 public final class PNGDecoder {
+   private int[] pzoptRgbaTable; // pzopt: pngPaethFast palette lookup (built on first use; the palette is fixed per image)
+   private int[] pzoptScratch; // pzopt
    private static final byte[] SIGNATURE = new byte[]{-119, 80, 78, 71, 13, 10, 26, 10};
    private static final int IHDR = 1229472850;
    private static final int PLTE = 1347179589;
@@ -577,6 +579,16 @@ public final class PNGDecoder {
    }
 
    private void copyPALtoRGBA(ByteBuffer buffer, byte[] curLine) {
+      if (pzopt.Config.PNG_PAETH_FAST && pzopt.Overrides.enabled()) { // pzopt: pngPaethFast, one table lookup and a bulk put per line
+         if (this.pzoptRgbaTable == null) {
+            this.pzoptRgbaTable = pzopt.PngFilters.rgbaTable(this.palette, this.paletteA);
+         }
+         if (this.pzoptScratch == null || this.pzoptScratch.length < curLine.length) {
+            this.pzoptScratch = new int[curLine.length];
+         }
+         pzopt.PngFilters.paletteToRgba(buffer, curLine, this.pzoptRgbaTable, this.pzoptScratch);
+         return;
+      }
       if (this.paletteA != null) {
          int i = 1;
 

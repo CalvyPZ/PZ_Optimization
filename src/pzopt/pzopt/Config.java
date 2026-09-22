@@ -152,7 +152,11 @@ import java.util.Properties;
  *                            system's own priority order matters again (the pool's queue is first come, first served)
  *   pngPaethFast    true/false   PNG decode: the Paeth row filter of 4-byte pixels (every texture-pack page) runs as one
  *                            interleaved loop with the neighbours in locals (pzopt.PngFilters), byte-identical, the filter
- *                            40 % faster (it was 69 % of a page decode) (default true)
+ *                            40 % faster (it was 69 % of a page decode); palette images (every tile depth map) also copy
+ *                            to RGBA with one table lookup a pixel and a bulk put a line, 3.2x faster (default true)
+ *   depthMapFast    true/false   tile depth maps: each tile's pixels read with one bulk get per row instead of two
+ *                            bounds-checked gets per pixel (TileDepthTexture override, pzopt.PngFilters.depthTile), the
+ *                            same values (default true)
  *   fileThreadsWait int          file pool width while the loader thread only waits for the file tasks (assetLock2, the
  *                            main thread idle too); back to fileThreads afterwards (default: cores)
  *   textureBufferMb int          decoded-texture bytes that may wait for the render thread before the decoders pause
@@ -432,6 +436,7 @@ public final class Config {
    public static final int FILE_THREADS = Math.max(1, integer("fileThreads", Math.max(4, Runtime.getRuntime().availableProcessors() / 2)));
    public static final int FILE_INFLIGHT = Math.max(1, integer("fileInflight", 4 * FILE_THREADS));
    public static final boolean PNG_PAETH_FAST = bool("pngPaethFast", true);
+   public static final boolean DEPTH_MAP_FAST = bool("depthMapFast", true);
    public static final int FILE_INFLIGHT_LOAD = Math.max(FILE_INFLIGHT, integer("fileInflightLoad", 128));
    public static final int FILE_THREADS_WAIT = Math.max(1, integer("fileThreadsWait", Runtime.getRuntime().availableProcessors()));
    public static final int TEXTURE_BUFFER_MB = Math.max(1, integer("textureBufferMb", 50));
