@@ -43,6 +43,20 @@ saturated" is itself a finding. Chunk-latency wins are done; do not spend more o
 - **Real saves are never loaded or written** by a harness run. Runs use the copied bench save
   `Saves/Sandbox/pzopt-bench` and must quit on their own. Launching the game via
   `harness/run.sh` is authorized without asking.
+- **Verify every Louisville run before using its numbers** (maintainer, 2026-09-22). About one
+  `--preset louisville` run in three flips into a broken state a few seconds after world-ready. Cause: the
+  preset's `see_all` flag turns on the lighting engine's B41 spectator path, which spreads NaN light values,
+  so the roofs flicker and our lighting re-bakes flood (fps halves, pale blue-grey blotches on the black roofs).
+  It is a preset artefact (stock B42 never takes that path) and is left as is. So:
+  1. Always pass `--record`.
+  2. Before reading anything, check the frames of the settle window (world-ready → route start, before the
+     measured route begins) for visual artifacts. `schedule.log` says `world ready N s after launch; route starts at
+     +M s` and the recording starts at launch. Pull single frames, e.g. `ffmpeg -v error -ss <M-1> -i <run>/recording.mp4
+     -frames:v 1 /tmp/lou-check.png` (plus one or two between N+2 and M), and look at them: roofs of the tall
+     blocks must be uniform black, with no pale patches, no black/white speckle, no chunk-shaped holes.
+  3. Check `bake_counters=` in `pzopt-bench.out`: a healthy 25 s route has strongMarks ≈ 14k and
+     strongPastBudget ≈ 12k, fps ≈ 55 at the cap; a flooded one has 90k-350k marks and 20-26 fps.
+  Any artifact or flooded counter: discard the run, re-run it, and say in the report which runs were thrown out.
 - Commit and push only when asked. Commits end with
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 
