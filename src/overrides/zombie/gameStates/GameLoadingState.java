@@ -106,6 +106,32 @@ public final class GameLoadingState extends GameState {
    public static int convertingFileMax = -1;
    private volatile boolean waitForAssetLoadingToFinish1;
    private volatile boolean waitForAssetLoadingToFinish2;
+   private long pzoptWaitLogMs; // pzopt: assetLock2 wait diagnostic
+   /** pzopt: loader-thread steps handed to the main thread (pzoptOnMain), run at the top of update() */
+   private final java.util.concurrent.ConcurrentLinkedQueue<java.util.concurrent.FutureTask<Void>> pzoptMainTasks = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+   /**
+    * pzopt: run r on the main thread and wait for it when the world was entered early (centerFirstLoad: the main thread
+    * loads chunks meanwhile), else here as stock does.
+    */
+   private void pzoptOnMain(Runnable r) {
+      if (!pzopt.Overrides.enabled() || !pzopt.CenterFirstLoad.enteredEarly()) {
+         r.run();
+         return;
+      }
+      java.util.concurrent.FutureTask<Void> task = new java.util.concurrent.FutureTask<>(r, null);
+      this.pzoptMainTasks.add(task);
+      try {
+         task.get();
+      } catch (InterruptedException e) {
+         Thread.currentThread().interrupt();
+      } catch (java.util.concurrent.ExecutionException e) {
+         if (e.getCause() instanceof RuntimeException re) {
+            throw re;
+         }
+         throw new RuntimeException(e.getCause());
+      }
+   }
    private final Object assetLock1 = "Asset Lock 1";
    private final Object assetLock2 = "Asset Lock 2";
    private float time;
@@ -131,6 +157,9 @@ public final class GameLoadingState extends GameState {
       pzopt.ResumeShot.startLoad(); // pzopt: resumeShot, decode the save's last view for the loading screen
       if (GameWindow.fileSystem instanceof zombie.fileSystem.FileSystemImpl) {
          pzopt.BootPump.onLoadStart(((zombie.fileSystem.FileSystemImpl)GameWindow.fileSystem).pzoptExecutor()); // pzopt: file pool back to its play width
+         if (pzopt.Overrides.enabled()) {
+            ((zombie.fileSystem.FileSystemImpl)GameWindow.fileSystem).pzoptSetMaxInFlight(pzopt.Config.FILE_INFLIGHT_LOAD); // pzopt: a second load
+         }
       }
 
       pzopt.BootAsync.joinAnimSets(); // pzopt: the loader thread's IsoPlayer needs "player"; normally done long ago
@@ -351,31 +380,25 @@ public final class GameLoadingState extends GameState {
                      }
                   }
 
-                  for (int pzoptTry = 0; ; pzoptTry++) { // pzopt: with centerFirstLoad the world already renders (and lazily registers textures in the shared table this scan iterates) while the loader runs; retry the read-only scan
-                     try { // pzopt
-                        ChatUtility.InitAllowedChatIcons();
-                        break; // pzopt
-                     } catch (java.util.ConcurrentModificationException pzoptCme) { // pzopt
-                        if (pzoptTry >= 50) { // pzopt
-                           throw pzoptCme; // pzopt
-                        } // pzopt
-                        try { // pzopt
-                           Thread.sleep(5L); // pzopt
-                        } catch (InterruptedException pzoptIe) { // pzopt
-                           Thread.currentThread().interrupt(); // pzopt
-                           throw pzoptCme; // pzopt
-                        } // pzopt
-                     } // pzopt
-                  } // pzopt
+                  // pzopt: with centerFirstLoad the main thread already loads chunks, and registers their textures in the
+                  // shared texture table (an unsynchronised HashMap), while this thread finishes; the steps that read or
+                  // write that table run on the main thread (pzoptOnMain; a ConcurrentModificationException stopped 2 of 3
+                  // Dell loads on the error screen)
+                  GameLoadingState.this.pzoptOnMain(ChatUtility::InitAllowedChatIcons);
                   ChatManager.getInstance().init(true, IsoPlayer.getInstance());
                   Bullet.startLoadingPhysicsMeshes();
-                  Texture.getSharedTexture("media/textures/NewShadow.png");
-                  Texture.getSharedTexture("media/wallcutaways.png", 3);
-                  Texture.getSharedTexture("media/windowframe_cutaways.png", 3);
-                  Texture.getSharedTexture("media/windowframe_cutaways_2.png", 3);
-                  Texture.getSharedTexture("media/windowframe_cutaways_3.png", 3);
+                  GameLoadingState.this.pzoptOnMain(() -> { // pzopt: the shared texture table, see above
+                     Texture.getSharedTexture("media/textures/NewShadow.png");
+                     Texture.getSharedTexture("media/wallcutaways.png", 3);
+                     Texture.getSharedTexture("media/windowframe_cutaways.png", 3);
+                     Texture.getSharedTexture("media/windowframe_cutaways_2.png", 3);
+                     Texture.getSharedTexture("media/windowframe_cutaways_3.png", 3);
+                  }); // pzopt
                   DebugType.General.println("bWaitForAssetLoadingToFinish2 start");
                   GameLoadingState.this.waitForAssetLoadingToFinish2 = true;
+                  java.util.concurrent.ExecutorService pzoptPool = GameWindow.fileSystem instanceof zombie.fileSystem.FileSystemImpl pzoptFs
+                     ? pzoptFs.pzoptExecutor() : null; // pzopt
+                  pzopt.BootPump.onAssetWait(pzoptPool, true); // pzopt: every core decodes while nothing else runs
                   synchronized (GameLoadingState.this.assetLock2) {
                      while (GameLoadingState.this.waitForAssetLoadingToFinish2) {
                         try {
@@ -384,6 +407,8 @@ public final class GameLoadingState extends GameState {
                         }
                      }
                   }
+                  pzopt.BootPump.onAssetWait(pzoptPool, false); // pzopt
+                  pzopt.Log.info(pzopt.FileTaskStats.summary()); // pzopt: the whole boot + load, per task class
 
                   DebugType.General.println("bWaitForAssetLoadingToFinish2 end");
                   if (PerformanceSettings.fboRenderChunk) {
@@ -432,6 +457,9 @@ public final class GameLoadingState extends GameState {
    public void exit() {
       pzopt.JitGovernor.onWorldStart(); // pzopt: C2 off for play on few-core machines (jitMode)
       zombie.iso.fboRenderChunk.FBORenderCell.pzoptPrewarmRenderChunks(); // pzopt: render-chunk textures made on the loading screen (renderChunkPrewarm)
+      if (pzopt.Overrides.enabled() && GameWindow.fileSystem instanceof zombie.fileSystem.FileSystemImpl pzoptFs) {
+         pzoptFs.pzoptSetMaxInFlight(pzopt.Config.FILE_INFLIGHT); // pzopt: play order follows the file system's priorities again
+      }
       boolean useUIFBO = UIManager.useUiFbo;
       UIManager.useUiFbo = false;
       if (!(pzopt.Config.NO_LOAD_FADE && pzopt.Overrides.enabled())) { // pzopt: skip the 350 ms fade to black before the world (docs/plan-instant-load.md L8)
@@ -1006,6 +1034,9 @@ public final class GameLoadingState extends GameState {
    }
 
    public StateAction update() {
+      for (java.util.concurrent.FutureTask<Void> pzoptTask; (pzoptTask = this.pzoptMainTasks.poll()) != null; ) {
+         pzoptTask.run(); // pzopt: loader steps that touch main-thread state (pzoptOnMain)
+      }
       if (this.waitForAssetLoadingToFinish1 && !OutfitManager.instance.isLoadingClothingItems()) {
          if (Core.debug) {
             OutfitManager.instance.debugOutfits();
@@ -1015,6 +1046,13 @@ public final class GameLoadingState extends GameState {
             this.waitForAssetLoadingToFinish1 = false;
             this.assetLock1.notifyAll();
          }
+      }
+
+      if (this.waitForAssetLoadingToFinish2 && pzopt.Config.INSTRUMENT && System.currentTimeMillis() - this.pzoptWaitLogMs >= 250L) {
+         // pzopt: load-trace diagnostic, what the assetLock2 wait is waiting on (instrumented runs only)
+         this.pzoptWaitLogMs = System.currentTimeMillis();
+         String files = GameWindow.fileSystem instanceof zombie.fileSystem.FileSystemImpl impl ? impl.pzoptWorkSummary() : " ?";
+         pzopt.Log.info("assetLock2 wait: animations=" + ModelManager.instance.isLoadingAnimations() + " files (queued+running):" + files);
       }
 
       if (this.waitForAssetLoadingToFinish2 && !ModelManager.instance.isLoadingAnimations() && !GameWindow.fileSystem.hasWork()) {

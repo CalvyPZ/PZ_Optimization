@@ -32,8 +32,8 @@ import zombie.iso.IsoUtils;
  * resumeShot (2026-09-22, the maintainer's design: "the illusion of an instant load"): when the game exits, the ground
  * around the player (floors only, ground level, at the player's zoom: no walls, objects, trees, characters, vehicles, UI)
  * is kept next to the save with the chunk grid's screen geometry; Continue shows it at full brightness in the square of
- * chunks around the player that pzopt.CenterFirstLoad loads first (the player's chunk at once, the other tiles popping in
- * as if those squares were loading, the rest black), and the live world (objects and all) then builds over it from the
+ * chunks around the player that pzopt.CenterFirstLoad loads first (tiles popping in from the top-left to the bottom-right
+ * of the screen as if those squares were loading, the rest black), and the live world (objects and all) then builds over it from the
  * centre outwards.
  *
  * Capture (SavefileThumbnail.create, exit saves only: Core.exiting or GameWindow.exit): floorOnly makes FBORenderCell
@@ -316,13 +316,24 @@ public final class ResumeShot {
       float tyy = g[5] / 8.0F;
       int lo = -SQUARE_RADIUS * 8;
       int hi = (SQUARE_RADIUS + 1) * 8;
+      // the sweep runs along screen x + y (pixels): its range over the square's four corners
+      float sMin = Float.MAX_VALUE;
+      float sMax = -Float.MAX_VALUE;
+      for (int k = 0; k < 4; k++) {
+         int ci = (k & 1) == 0 ? lo : hi;
+         int cj = (k & 2) == 0 ? lo : hi;
+         float sc = (g[0] + ci * txx + cj * tyx) * sw + (g[1] + ci * txy + cj * tyy) * sh;
+         sMin = Math.min(sMin, sc);
+         sMax = Math.max(sMax, sc);
+      }
       for (int i = lo; i < hi; i++) {
          for (int j = lo; j < hi; j++) {
-            if (!shown(i, j, t)) {
-               continue;
-            }
             float x0 = g[0] + i * txx + j * tyx;
             float y0 = g[1] + i * txy + j * tyy;
+            float sweep = ((x0 + (txx + tyx) * 0.5F) * sw + (y0 + (txy + tyy) * 0.5F) * sh - sMin) / (sMax - sMin);
+            if (!shown(i, j, t, sweep)) {
+               continue;
+            }
             float x1 = x0 + txx;
             float y1 = y0 + txy;
             float x2 = x1 + tyx;
@@ -337,10 +348,10 @@ public final class ResumeShot {
    }
 
    /**
-    * the loading effect, looping: the player's chunk is shown from the start; every other tile pops in (no fade) at a
-    * delay within expandMs set mostly by a random draw per tile and loop (JITTER) plus its distance from the player's
-    * tile, so neighbours appear out of order like the real streamed squares while the square still fills from the
-    * centre; after HOLD_MS they pop out the same way with a fresh draw, and after GAP_MS the next loop starts.
+    * the loading effect, looping: every tile pops in (no fade) at a delay within expandMs set by its place along a sweep
+    * from the square's top-left corner on screen to its bottom-right one, plus a random draw per tile and loop (JITTER),
+    * so neighbours appear out of order like streamed squares while the fill moves across the screen; after HOLD_MS they
+    * pop out the same way with a fresh draw, and after GAP_MS the next loop starts.
     * expandMs is FILL_SHARE of this save's last loading-frame-to-world-entry time (LOAD_TIME, written by onWorldEntered),
     * so the square is complete just before the world appears; DEFAULT_EXPAND_MS before the first measured Continue.
     * The stored time is the average of the last value and this load's, and a load that beats the pace finishes the fill
@@ -357,18 +368,14 @@ public final class ResumeShot {
    private static volatile long lastLoadMs;
    /** tiles still black at world entry pop in within this */
    static final float FINISH_MS = 300.0F;
-   /** share of a tile's delay drawn at random (the rest follows its distance from the player) */
-   static final float JITTER = 0.6F;
+   /** share of a tile's delay drawn at random (the rest follows its place along the sweep) */
+   static final float JITTER = 0.35F;
 
-   /** whether tile i, j (relative to the player's chunk corner) is shown at time t */
-   static boolean shown(int i, int j, long t) {
-      if (i >= 0 && i < 8 && j >= 0 && j < 8) {
-         return true; // the player's chunk
-      }
-      float c = SQUARE_RADIUS * 8 + 4.0F; // the square's half size in tiles, about the player's tile
-      float di = i - 4.0F;
-      float dj = j - 4.0F; // the player stands about the middle of their chunk
-      float d = (float)Math.sqrt(di * di + dj * dj) / (c * 1.4142135F); // 0 at the player, 1 at the square's corners
+   /**
+    * whether tile i, j (relative to the player's chunk corner) is shown at time t; d is its place along the sweep, 0 at
+    * the square's top-left corner on screen, 1 at its bottom-right one
+    */
+   static boolean shown(int i, int j, long t, float d) {
       float e = expandMs;
       float cycle = e + HOLD_MS + e + GAP_MS;
       long loop = t / (long)cycle;

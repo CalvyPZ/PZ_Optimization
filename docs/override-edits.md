@@ -2677,9 +2677,9 @@ inside `IngameState.enter`, ~0.65 s before the first world frame (stock runs inc
   `pzoptSetOcclusion` flips the package-private occlusion switch; `pzoptFrameBakeCounters` logs the capture frame.
 - `zombie.gameStates.GameLoadingState`: `enter` starts decoding the save's shot; `render` draws a black frame plus
   `ResumeShot.draw` when the save has a shot (no error screens pending), else the stock loading screen. The shot shows
-  the 7 x 7 chunks around the player tile by tile at full brightness, the rest black: the player's chunk from the
-  first frame, every other tile popping in (no fade) at a delay that is 60 % a random draw per tile and 40 % its
-  distance from the player, over 85 % of this save's last loading time (`pzopt-resume-load.txt`, written at world
+  the 7 x 7 chunks around the player tile by tile at full brightness, the rest black: every tile popping in (no
+  fade) at a delay that is 65 % its place along a sweep from the square's top-left corner on screen to its bottom-right
+  one and 35 % a random draw per tile, over 85 % of this save's last loading time (`pzopt-resume-load.txt`, written at world
   entry, averaged with the previous value; 3 s before the first measured Continue), so the square is whole just
   before the world appears. `org.lwjglx.opengl.Display.imguiEndFrame` keeps drawing it over the world (tiles the load
   outran pop in within 0.3 s), its opacity falling as the chunk map lights up (full up to 20 % lit, gone at 80 % or
@@ -2712,9 +2712,41 @@ texture width does not depend on the level count and the scale only on a debug o
 Dell walk: render chunks created during play 114 -> 4-9, p99.9 241 -> 148-197 ms; load time unchanged (the prewarm
 takes ~1.3 s of the loading screen).
 
-### zombie.gameStates.GameLoadingState (chat-icon scan retry)
+### zombie.gameStates.GameLoadingState (loader steps on the main thread)
 
-Since `centerFirstLoad` (d36540a) the world renders, and lazily registers textures in `Texture.s_sharedTextureTable`,
-while the loader thread is still running; its `ChatUtility.InitAllowedChatIcons` iterates that table and threw a
-`ConcurrentModificationException` in two of three Dell loads, hanging the game on the error. The call is retried (up
-to 50 x 5 ms); the scan only clears and refills its two icon maps.
+Since `centerFirstLoad` (d36540a) the main thread loads chunks, and lazily registers their textures in
+`Texture.s_sharedTextureTable` (an unsynchronised HashMap), while the loader thread is still running; its
+`ChatUtility.InitAllowedChatIcons` iterates that table and threw a `ConcurrentModificationException` in two of three
+Dell loads, hanging the game on the error, and its five `getSharedTexture` calls for the shadow and cutaway textures write
+to the same table. When the world was entered early, the loader thread now hands both steps to the main thread
+(`pzoptOnMain`: queued, run at the top of `update()`, the loader waits for them), so every access to the table stays on
+one thread; otherwise they run in place as in stock. This replaces the first fix (cbcd436), which retried the scan up to
+50 x 5 ms.
+
+## Continue asset wait: file tasks in flight, a full-width pool, a faster Paeth filter (2026-09-23; `fileInflightLoad`, `fileThreadsWait`, `pngPaethFast`)
+
+On the Mac the Continue spent 3.4 s in `GameLoadingState`'s second asset wait (assetLock2: animations loaded and no file
+task left). A new instrumented-run log line (`assetLock2 wait:`, every 250 ms, from the file system's queued / running
+tasks by class) showed the boot backlog still draining: 1,144 cached-animation tasks, 216 tile-depth loads and a few
+hundred images, at exactly 16 tasks a frame, because the file system hands the pool 16 tasks at a time and collects
+them once a frame.
+
+- `zombie.fileSystem.FileSystemImpl`: the in-flight limit is no longer final. From boot until the world is entered it is
+  `fileInflightLoad` (128); `GameLoadingState.exit` sets it back to `fileInflight` for play, where the file system's own
+  priority order matters again (the pool's queue is first come, first served), and `enter` raises it for a second load.
+  `pzoptWorkSummary` gives the queued / running tasks by class for the log line above.
+- `zombie.gameStates.GameLoadingState`: while the loader thread waits on assetLock2 (the main thread only renders the
+  loading frame) the file pool takes every core (`fileThreadsWait`, `pzopt.BootPump.onAssetWait`), back to `fileThreads`
+  afterwards; the file-task summary is logged after the wait.
+- `zombie.core.textures.TextureIDAssetManager.waitFileTask`: the time decoders sleep on the decoded-bytes throttle is
+  counted in the file-task summary as `waitFileTask(sleep)` (5.5 s of 33 s of pack-page task time on the Mac).
+- `zombie.core.textures.PNGDecoder` (new override): the Paeth un-filter of 4-byte pixels goes to `pzopt.PngFilters.paeth4`,
+  one interleaved loop over the four channels with the left and upper-left neighbours in locals; the output is
+  byte-identical (`PngFiltersTest`). The stock loop was 69 % of a texture-pack page decode in a JFR profile of a
+  1024 x 1014 page; the new one takes 8.4 ms instead of 14 ms per page on the desktop CPU, on the Mac the pack-page task
+  time falls 31.0 -> 29.1 s (the rest is inflate, the sleep above and the copy).
+
+Mac Continue -> world ready: 8.16 s (mac-dwait) -> 6.25-6.64 s with the first two (mac-dwait2, mac-waitstat) and 6.29 s
+with the filter (mac-paeth-on; 6.46 s with `pngPaethFast=false`). The assetLock2 wait is the boot backlog, so it is
+this long only when Continue is pressed as soon as the menu shows, as the harness does.
+

@@ -68,11 +68,18 @@ public final class TextureIDAssetManager extends AssetManager {
    }
 
    public void waitFileTask() {
+      long pzoptT0 = 0L; // pzopt: time the decoders sleep here, in the file-task summary as "waitFileTask(sleep)"
       while (DirectBufferAllocator.getBytesAllocated() > WAIT_BYTES) { // pzopt: was 52428800L
+         if (pzoptT0 == 0L) {
+            pzoptT0 = System.nanoTime();
+         }
          try {
             Thread.sleep(20L);
          } catch (InterruptedException var2) {
          }
+      }
+      if (pzoptT0 != 0L) {
+         pzopt.FileTaskStats.add("waitFileTask(sleep)", System.nanoTime() - pzoptT0); // pzopt
       }
    }
 }

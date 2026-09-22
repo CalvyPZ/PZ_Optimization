@@ -12,7 +12,12 @@ public final class FileTaskStats {
    }
 
    public static void add(Class<?> task, long ns) {
-      long[] v = byClass.computeIfAbsent(task.getSimpleName(), k -> new long[2]);
+      add(task.getSimpleName(), ns);
+   }
+
+   /** a named row (e.g. time the decoders slept in TextureIDAssetManager.waitFileTask) */
+   public static void add(String name, long ns) {
+      long[] v = byClass.computeIfAbsent(name, k -> new long[2]);
       synchronized (v) {
          v[0]++;
          v[1] += ns;

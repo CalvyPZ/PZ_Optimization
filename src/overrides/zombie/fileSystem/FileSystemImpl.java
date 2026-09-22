@@ -28,7 +28,7 @@ public final class FileSystemImpl extends FileSystem {
    private final ArrayList<FileSystemImpl.AsyncItem> added = new ArrayList<>();
    public static final HashMap<String, Boolean> TexturePackCompression = new HashMap<>();
    // pzopt: tasks handed to the worker threads at once (stock 16)
-   private final int maxInFlight;
+   private int maxInFlight; // pzopt: not final, pzoptSetMaxInFlight
 
    static {
       pzopt.Overrides.onClassLoaded("zombie.fileSystem.FileSystemImpl");
@@ -46,7 +46,7 @@ public final class FileSystemImpl extends FileSystem {
          // pzopt: wider while the boot pump feeds it (the main thread is the only other busy core then); shrunk to
          // FILE_THREADS when the loading screen starts (pzopt.BootPump.onLoadStart)
          numThreads = pzopt.Config.BOOT_PUMP ? Math.max(pzopt.Config.FILE_THREADS, pzopt.Config.BOOT_FILE_THREADS) : pzopt.Config.FILE_THREADS;
-         this.maxInFlight = pzopt.Config.FILE_INFLIGHT;
+         this.maxInFlight = pzopt.Config.FILE_INFLIGHT_LOAD; // pzopt: the boot and load width; FILE_INFLIGHT in play
       } else {
          this.maxInFlight = 16;
       }
@@ -182,6 +182,14 @@ public final class FileSystemImpl extends FileSystem {
    // GameWindow.init (font loading); one pump at a time (docs/plan-instant-load.md B10)
    private final java.util.concurrent.locks.ReentrantLock pzoptPumpLock = new java.util.concurrent.locks.ReentrantLock();
 
+   /** pzopt: tasks handed to the pool at once (FILE_INFLIGHT_LOAD while booting / loading, FILE_INFLIGHT in play) */
+   public void pzoptSetMaxInFlight(int n) {
+      if (this.maxInFlight != n) {
+         pzopt.Log.info("file system: " + this.maxInFlight + " -> " + n + " tasks in flight");
+         this.maxInFlight = n;
+      }
+   }
+
    public java.util.concurrent.ExecutorService pzoptExecutor() {
       return this.executor;
    }
@@ -257,6 +265,20 @@ public final class FileSystemImpl extends FileSystem {
             canAdd--;
          }
       }
+   }
+
+   /** pzopt: the queued and running tasks by class, for load-trace diagnostics (main thread, like hasWork) */
+   public String pzoptWorkSummary() {
+      java.util.TreeMap<String, int[]> n = new java.util.TreeMap<>();
+      for (FileSystemImpl.AsyncItem item : this.pending) {
+         n.computeIfAbsent(item.task.getClass().getSimpleName(), k -> new int[2])[0]++;
+      }
+      for (FileSystemImpl.AsyncItem item : this.inProgress) {
+         n.computeIfAbsent(item.task.getClass().getSimpleName(), k -> new int[2])[1]++;
+      }
+      StringBuilder sb = new StringBuilder();
+      n.forEach((k, v) -> sb.append(' ').append(k).append('=').append(v[0]).append('+').append(v[1]));
+      return sb.length() == 0 ? " none" : sb.toString();
    }
 
    public boolean hasWork() {

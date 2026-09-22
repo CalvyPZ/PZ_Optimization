@@ -98,6 +98,28 @@ public final class BootPump {
    }
 
    /**
+    * The loader thread waits for the file tasks (GameLoadingState, assetLock2) and the main thread only renders the
+    * loading frame: the file pool takes every core meanwhile (FILE_THREADS_WAIT), then goes back to FILE_THREADS.
+    */
+   public static void onAssetWait(ExecutorService executor, boolean waiting) {
+      if (!Overrides.enabled() || !(executor instanceof ThreadPoolExecutor)) {
+         return;
+      }
+      ThreadPoolExecutor pool = (ThreadPoolExecutor) executor;
+      int want = waiting ? Math.max(Config.FILE_THREADS, Config.FILE_THREADS_WAIT) : Config.FILE_THREADS;
+      if (pool.getCorePoolSize() != want) {
+         if (want > pool.getMaximumPoolSize()) {
+            pool.setMaximumPoolSize(want);
+            pool.setCorePoolSize(want);
+         } else {
+            pool.setCorePoolSize(want);
+            pool.setMaximumPoolSize(want);
+         }
+         Log.info("file pool " + want + " threads " + (waiting ? "while the load waits for file tasks" : "after the wait"));
+      }
+   }
+
+   /**
     * Called when the loading screen starts: the meta-grid loaders and the recalc pool need the cores now, so
     * the file pool shrinks back to its play width (idle threads exit as they finish their task).
     */

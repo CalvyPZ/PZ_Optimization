@@ -146,6 +146,15 @@ import java.util.Properties;
  *                            import, depth maps); stock is 2 on <= 4 cores, else 4 (default: max(4, cores / 2): with cores - 2
  *                            the game's own 8 meta-grid loader threads ran 2.5x slower and the load was 0.65 s longer, load-s3 vs load-s3f8)
  *   fileInflight    int          file tasks handed to those threads at once (stock 16; default 4 * fileThreads)
+ *   fileInflightLoad int         the same from boot until the world is entered (default 128, at least fileInflight): the
+ *                            game takes finished tasks once a frame, so 16 in flight drained the boot backlog at 16 a
+ *                            frame and the Continue waited on it (Mac: assetLock2 wait 3.4 -> 2.0 s); in play the file
+ *                            system's own priority order matters again (the pool's queue is first come, first served)
+ *   pngPaethFast    true/false   PNG decode: the Paeth row filter of 4-byte pixels (every texture-pack page) runs as one
+ *                            interleaved loop with the neighbours in locals (pzopt.PngFilters), byte-identical, the filter
+ *                            40 % faster (it was 69 % of a page decode) (default true)
+ *   fileThreadsWait int          file pool width while the loader thread only waits for the file tasks (assetLock2, the
+ *                            main thread idle too); back to fileThreads afterwards (default: cores)
  *   textureBufferMb int          decoded-texture bytes that may wait for the render thread before the decoders pause
  *                            (stock 50; default 50: 256 MB let ~200 MB of uploads pile up on the render thread and
  *                            gave a 5 s frame a few seconds into the world, run load-s1-155507)
@@ -211,8 +220,8 @@ import java.util.Properties;
  *                            chunks do while walking (pzopt.CenterFirstLoad) (default true)
  *   resumeShot      true/false   the exit save also keeps the ground around the player (floors of ground level only, at their
  *                            zoom, pzopt-resume.jpg + .properties with the chunk grid's screen geometry); Continue shows the
- *                            7 x 7 chunks around the player from it at full brightness, the player's chunk at once and the
- *                            other tiles popping in, in a random centre-biased order paced to the save's last load time,
+ *                            7 x 7 chunks around the player from it at full brightness, tiles popping in from the top-left
+ *                            to the bottom-right of the screen (randomised), paced to the save's last load time,
  *                            until the live world builds over it; a save without it gets the stock loading screen
  *                            (pzopt.ResumeShot) (default true)
  *   fmodAsync       true/false   FMODManager.init (system + 12 banks, ~1.6 s) runs on a thread from the top of
@@ -422,6 +431,9 @@ public final class Config {
    public static final boolean LIGHT_INFO_ONCE_PER_FRAME = bool("lightInfoOncePerFrame", true);
    public static final int FILE_THREADS = Math.max(1, integer("fileThreads", Math.max(4, Runtime.getRuntime().availableProcessors() / 2)));
    public static final int FILE_INFLIGHT = Math.max(1, integer("fileInflight", 4 * FILE_THREADS));
+   public static final boolean PNG_PAETH_FAST = bool("pngPaethFast", true);
+   public static final int FILE_INFLIGHT_LOAD = Math.max(FILE_INFLIGHT, integer("fileInflightLoad", 128));
+   public static final int FILE_THREADS_WAIT = Math.max(1, integer("fileThreadsWait", Runtime.getRuntime().availableProcessors()));
    public static final int TEXTURE_BUFFER_MB = Math.max(1, integer("textureBufferMb", 50));
    public static final boolean PARALLEL_DEPTH_MAPS = bool("parallelDepthMaps", true);
    public static final boolean LOADER_CPU_FIXES = bool("loaderCpuFixes", true);
