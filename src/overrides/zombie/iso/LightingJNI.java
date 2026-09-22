@@ -60,6 +60,7 @@ public final class LightingJNI {
    private static final ColorInfo lightTransmissionE = new ColorInfo();
    private static final ColorInfo lightTransmissionS = new ColorInfo();
    private static final IsoDirections[] DIRECTIONS = IsoDirections.values();
+   private static IsoChunk[] pzoptVisionChunks = new IsoChunk[64]; // pzopt: VisionBatch scratch
    public static final int ROOM_SPAWN_DIST = 50;
    public static boolean init;
    public static final int[][] ForcedVis = new int[][]{
@@ -648,20 +649,24 @@ public final class LightingJNI {
                                  || sq.has(IsoObjectType.stairsMN)
                                  || sq.has(IsoObjectType.stairsTW)
                                  || sq.has(IsoObjectType.stairsMW);
-                              int visionUnblocked = 0;
-
-                              for (int i = 0; i < DIRECTIONS.length; i++) {
-                                 IsoDirections dir = DIRECTIONS[i];
-                                 if (sq.testVisionAdjacent(dir.dx(), dir.dy(), 0, true, false) != TestResults.Blocked) {
-                                    visionUnblocked |= 1 << i;
-                                 }
-                              }
+                              int pzoptVision = pzopt.VisionBatch.get(chunkLevel, x + y * 8); // pzopt: precomputed on the workers (bit 31 set) or 0
+                              if (pzoptVision == 0 || pzopt.Config.DEV_VISION_CHECK) { // pzopt
+                                 int stock = pzopt.VisionBatch.compute(sq, DIRECTIONS); // pzopt: the stock tests, same order
+                                 if (pzoptVision != 0) { // pzopt
+                                    pzopt.VisionBatch.checks++; // pzopt
+                                    if (pzoptVision != stock) { // pzopt
+                                       pzopt.VisionBatch.mismatches++; // pzopt
+                                    } // pzopt
+                                 } // pzopt
+                                 pzoptVision = stock; // pzopt
+                              } // pzopt
+                              int visionUnblocked = pzoptVision & 0xFF; // pzopt
 
                               BuildingDef buildingDef = sq.getBuildingDef();
                               squareSet(
                                  visionUnblocked,
-                                 sq.testVisionAdjacent(0, 0, 1, true, false) != TestResults.Blocked,
-                                 sq.testVisionAdjacent(0, 0, -1, true, false) != TestResults.Blocked,
+                                 (pzoptVision & 1 << 8) != 0, // pzopt
+                                 (pzoptVision & 1 << 9) != 0, // pzopt
                                  hasElevatedFloor,
                                  visionMatrix,
                                  buildingDef == null ? -1L : buildingDef.getID(),
@@ -996,6 +1001,23 @@ public final class LightingJNI {
                      IsoWorld.instance.currentCell.invalidatePeekedRoom(playerIndex);
                   }
 
+                  if (pzopt.VisionBatch.ENABLED) { // pzopt: the dirty levels' vision tests on the workers first (lightingVisionParallel)
+                     int n = 0; // pzopt
+                     IsoChunk[] dirty = pzoptVisionChunks; // pzopt
+                     for (int cy = 0; cy < IsoChunkMap.chunkGridWidth; cy++) { // pzopt
+                        for (int cx = 0; cx < IsoChunkMap.chunkGridWidth; cx++) { // pzopt
+                           IsoChunk mchunk = cm.getChunk(cx, cy); // pzopt
+                           if (mchunk != null && mchunk.loaded && mchunk.lightCheck[playerIndex]) { // pzopt
+                              if (n == dirty.length) { // pzopt
+                                 dirty = pzoptVisionChunks = java.util.Arrays.copyOf(dirty, n * 2); // pzopt
+                              } // pzopt
+                              dirty[n++] = mchunk; // pzopt
+                           } // pzopt
+                        } // pzopt
+                     } // pzopt
+                     pzopt.VisionBatch.prepare(dirty, n, playerIndex, DIRECTIONS); // pzopt
+                  } // pzopt
+
                   for (int cy = 0; cy < IsoChunkMap.chunkGridWidth; cy++) {
                      for (int cx = 0; cx < IsoChunkMap.chunkGridWidth; cx++) {
                         IsoChunk mchunk = cm.getChunk(cx, cy);
@@ -1009,6 +1031,9 @@ public final class LightingJNI {
                         }
                      }
                   }
+                  if (pzopt.VisionBatch.ENABLED) { // pzopt
+                     pzopt.VisionBatch.clear(); // pzopt: precomputed bits never outlive this pass
+                  } // pzopt
                } finally {
                   stateEndUpdate();
                }

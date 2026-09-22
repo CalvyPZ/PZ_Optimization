@@ -472,6 +472,32 @@ public final class IsoChunkMap {
    }
 
    public IsoGridSquare getGridSquareDirect(int chunkMapSquareX, int chunkMapSquareY, int worldSquareZ) {
+      if (pzopt.Config.CHUNK_MAP_FAST) { // pzopt: the same lookup without the helper calls (C1 code on few-core machines, jitMode)
+         int w = chunkWidthInTiles; // pzopt
+         if (chunkMapSquareX < 0 || chunkMapSquareX >= w || chunkMapSquareY < 0 || chunkMapSquareY >= w || worldSquareZ < -32 || worldSquareZ > 31) { // pzopt
+            return null; // pzopt
+         } // pzopt
+         int gw = chunkGridWidth; // pzopt
+         int cx = chunkMapSquareX >> 3; // pzopt: non-negative here, so / 8
+         int cy = chunkMapSquareY >> 3; // pzopt
+         if (cx >= gw || cy >= gw) { // pzopt
+            return null; // pzopt
+         } // pzopt
+         IsoChunk c = (this.readBufferA ? this.chunksSwapA : this.chunksSwapB)[gw * cy + cx]; // pzopt
+         if (c == null || !c.loaded) { // pzopt
+            return null; // pzopt
+         } // pzopt
+         int half = gw / 2; // pzopt: mid-scroll guard as below
+         if (c.wx != this.worldX - half + cx || c.wy != this.worldY - half + cy) { // pzopt
+            return null; // pzopt
+         } // pzopt
+         if (worldSquareZ > c.maxLevel || worldSquareZ < c.minLevel) { // pzopt
+            return null; // pzopt
+         } // pzopt
+         IsoGridSquare[][] sq = c.squares; // pzopt
+         int zz = worldSquareZ - c.minLevel; // pzopt: IsoChunk.squaresIndexOfLevel
+         return zz < sq.length ? sq[zz][(chunkMapSquareY & 7) * 8 + (chunkMapSquareX & 7)] : null; // pzopt
+      } // pzopt
       if (!this.isChunkMapSquareOutOfRangeXY(chunkMapSquareX)
          && !this.isChunkMapSquareOutOfRangeXY(chunkMapSquareY)
          && !this.isWorldSquareOutOfRangeZ(worldSquareZ)) {
@@ -1014,8 +1040,9 @@ public final class IsoChunkMap {
       int max = 0;
       int min = 0;
 
-      for (int xx = 0; xx < this.chunksSwapA.length; xx++) {
-         for (int yy = 0; yy < this.chunksSwapA.length; yy++) {
+      int n = pzopt.Config.CHUNK_MAP_FAST ? chunkGridWidth : this.chunksSwapA.length; // pzopt: stock loops length x length (the array already holds width x width chunks; getChunk is null past the width)
+      for (int xx = 0; xx < n; xx++) { // pzopt
+         for (int yy = 0; yy < n; yy++) { // pzopt
             IsoChunk c = this.getChunk(xx, yy);
             if (c != null) {
                max = Math.max(c.maxLevel, max);

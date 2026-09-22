@@ -1020,7 +1020,12 @@ public final class Harness {
          if (isStreet(square(sx, sy, z))) { min = Math.min(min, w); max = Math.max(max, w); }
       }
       if (min == Integer.MAX_VALUE) return null;
-      if (max - min >= 13) return 0f; // street all across the scan (a wide junction): hold course
+      if (max - min >= 13) {
+         // street all across the scan (a wide junction): steer back to the route line instead of holding course. Holding
+         // kept the heading error of the last curve: on the Dell (~30 fps) the car drifted 8 tiles off the line through the
+         // wide stretch after the start, overcorrected at 100 km/h and ended in a yard (2026-09-22, three drive timeouts)
+         return Math.max(-3f, Math.min(3f, -lateralError()));
+      }
       return (min + max) / 2f;
    }
 

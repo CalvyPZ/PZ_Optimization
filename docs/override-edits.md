@@ -2588,3 +2588,25 @@ that with a global ThreadDump safepoint, not a handshake: on the Dell it stopped
 time, single stops up to 175 ms, in every instrumented run and whenever a player shows the overlay. It now samples with
 `Thread.getStackTrace()` on the game thread, a handshake with that thread only (`-Xlog:safepoint` shows no ThreadDump
 safepoints any more); `profileHandshake=false` restores the old call.
+
+### zombie.iso.IsoChunkMap (`chunkMapFast`)
+
+`calculateZExtentsForChunkMap`, run whenever a chunk arrives, looped over the chunk array's length squared (169 x 169
+`getChunk` calls on the 13-wide grid, all but 169 out of range and null); it now loops over the grid width, the same
+result. `getGridSquareDirect`, the lookup behind every `IsoCell.getGridSquare`, does its range checks, chunk index
+(shift / mask instead of divide / modulo on the already range-checked coordinates), mid-scroll guard and level index
+inline instead of through five helper calls: with C2 excluded during play on few cores (`jitMode`) C1 code pays for
+each call. Dell drive: game-thread "chunk map" 15 -> 11 %, 36.4 -> 39.5 fps (two runs each).
+
+### zombie.iso.LightingJNI (`lightingVisionParallel`, default off)
+
+Before the chunk loop of a lighting pass, `pzopt.VisionBatch` can compute the ten neighbour vision tests of every
+square of every dirty chunk level on the FrameBatch workers; `updateChunk` then reads the bits instead of calling
+`testVisionAdjacent`. Exact (`devVisionCheck`: 225,153 values, 0 mismatches), but off by default: on the CPU-bound
+4-core Dell the workers got no core, the game thread ran most of the batch itself and fps did not change.
+
+### pzopt.Harness road following (not a game class)
+
+Where the street is wider than the 15-tile scan the controller held course, keeping the heading error of the last
+curve; at the Dell's ~30 fps the car drifted off the route line through the wide stretch after the Rosewood start,
+overcorrected at 100 km/h and stopped in a yard (three drive timeouts). It now steers back to the route line there.
