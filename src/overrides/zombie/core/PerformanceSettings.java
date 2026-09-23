@@ -196,6 +196,20 @@ public final class PerformanceSettings {
       return pzopt.Updater.install();
    }
 
+   // pzopt: the "Performance overlay" item of the main and pause menus (media/lua/client/pzopt/pzopt_mainscreen_overlay.lua),
+   // the same toggle as the key binding; with overlaySampling off the toggle shows the restart notice instead.
+   public void togglePzoptOverlay() {
+      pzopt.Overlay.toggle();
+   }
+
+   public boolean isPzoptOverlayVisible() {
+      return pzopt.Overlay.isVisible();
+   }
+
+   public boolean isPzoptOverlaySampling() {
+      return pzopt.Overlay.isSampling();
+   }
+
    public void setLightingQuality(int lighting) {
    }
 

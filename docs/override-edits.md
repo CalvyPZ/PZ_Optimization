@@ -819,6 +819,19 @@ release notes, a progress bar and Update now / Later, then Quit game / Later:
 classes the JVM already loaded stay the old ones until a restart. Never in the
 pause menu; no joypad entry (the stock list is hard-coded).
 
+Performance overlay item (added 2026-09-23): three forwards to `pzopt.Overlay`
+for `media/lua/client/pzopt/pzopt_mainscreen_overlay.lua`: `togglePzoptOverlay()`
+(`Overlay.toggle()`, the same path as the key binding, which now calls it too:
+show / hide, or the "sampling is off" notice while `overlaySampling` is off),
+`isPzoptOverlayVisible()` and `isPzoptOverlaySampling()`. The Lua adds an
+`ISLabel` styled like the stock items right below Options in both the main menu
+and the pause menu (every item under Options moves down one row; the
+multiplayer pause menu's per-frame re-layout in `MainScreen:render` is redone
+after the stock one), "SHOW / HIDE PERFORMANCE OVERLAY" following the overlay's
+state. Controller: the label gets a row after Options in `joypadButtonsY`
+(after the stock `onGainJoypadFocus` rebuild and every frame while the menu has
+the focus) and A on it toggles. Not added with `enabled=false`.
+
 ## zombie.core.skinnedmodel.model.Model (added 2026-09-19, night, game load; GitHub issue #1)
 
 `CreateShader(name)`: the stock method always posts a lambda to the render

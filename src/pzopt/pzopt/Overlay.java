@@ -385,6 +385,29 @@ public final class Overlay {
       visible = on;
    }
 
+   /** Whether the overlay measures (and so can be shown) this session; without it a toggle only shows {@link #NOTICE}. */
+   public static boolean isSampling() {
+      return SAMPLING;
+   }
+
+   /**
+    * The toggle key, or the "Performance overlay" item of the main and pause menus
+    * (pzopt_mainscreen_overlay.lua, game thread): show / hide, or the notice while sampling is off.
+    */
+   public static void toggle() {
+      if (!ACTIVE) {
+         return;
+      }
+      if (SAMPLING) {
+         visible = !visible;
+         steadyLeftW = 0;
+         Log.info("overlay: " + (visible ? "shown" : "hidden"));
+      } else {
+         noticeUntilNs = System.nanoTime() + NOTICE_NS;
+         Log.info("overlay: sampling is off (overlaySampling=false); " + NOTICE[1] + " " + NOTICE[2]);
+      }
+   }
+
    /** Whether the frame log is being written (harness runs, {@code overlayLog}): the game-thread profile samples for it too. */
    static boolean logging() {
       return LOG;
@@ -397,14 +420,7 @@ public final class Overlay {
       }
       long now = System.nanoTime();
       if (toggled()) {
-         if (SAMPLING) {
-            visible = !visible;
-            steadyLeftW = 0;
-            Log.info("overlay: " + (visible ? "shown" : "hidden"));
-         } else {
-            noticeUntilNs = now + NOTICE_NS;
-            Log.info("overlay: sampling is off (overlaySampling=false); " + NOTICE[1] + " " + NOTICE[2]);
-         }
+         toggle();
       }
       if (!SAMPLING) {
          if (noticeUntilNs > now && !fontFailed) {
