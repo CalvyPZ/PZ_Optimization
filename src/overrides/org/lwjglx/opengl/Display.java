@@ -169,13 +169,17 @@ public class Display {
          }
       }
       Display.Window.handle = GLFW.glfwCreateWindow(gameWindowMode.getWidth(), gameWindowMode.getHeight(), windowTitle, pzoptMonitor, 0L);
-      if (Display.Window.handle != 0L && pzoptMonitor != 0L) {
-         // pzopt: GLFW may have picked another video mode; keep gameWindowMode equal to what Core will look for
+      if (Display.Window.handle != 0L) {
+         // pzopt: keep gameWindowMode equal to the size the window really got. Fullscreen: GLFW may have picked
+         // another video mode. Windowed: Windows clamps a new decorated window to the screen's max track size, so a
+         // 1920x1080 window on a 1920x1080 screen is created 1920x1061; with gameWindowMode already 1920x1080,
+         // Core's switch right after found "no change" and never issued the (unclamped) resize the stock 640x480
+         // placeholder always got, and every launch stayed at 1920x1061. Recording the clamped size lets it resize.
          int[] pw = new int[1];
          int[] ph = new int[1];
          GLFW.glfwGetWindowSize(Display.Window.handle, pw, ph);
          if (pw[0] > 0 && ph[0] > 0 && (pw[0] != gameWindowMode.getWidth() || ph[0] != gameWindowMode.getHeight())) {
-            gameWindowMode = new DisplayMode(pw[0], ph[0], monitorBitPerPixel, monitorRefreshRate);
+            gameWindowMode = pzoptMonitor != 0L ? new DisplayMode(pw[0], ph[0], monitorBitPerPixel, monitorRefreshRate) : new DisplayMode(pw[0], ph[0]);
          }
       }
       if (Display.Window.handle == 0L) {

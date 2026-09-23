@@ -532,6 +532,17 @@ fix with no game-internal dependency). Verified 2026-09-22 on the Dell with the
 `--shot-at` capture (`dell-lo2-fix-probe-*`: the whole 1920x1080 frame) and on
 the desktop's windowed 5120x2160 runs.
 
+Follow-up (2026-09-23, user report "opens with 1920x1061 instead of 1920x1080"):
+on Windows a new decorated window is clamped to the screen's maximum track size, so
+a windowed 1920x1080 window on a 1920x1080 screen is created with a 1920x1061
+client area. `gameWindowMode` already said 1920x1080, so `Core.setDisplayModeInternal`
+saw a mismatch and called `Display.setDisplayMode(1920x1080)`, but
+`setDisplayModeAndFullscreenInternal` found `gameWindowMode` unchanged and did
+nothing. The stock resize from 640x480 (a `SetWindowPos`, not clamped) never ran,
+and every launch stayed at 1061. `create()` now reads the window size back for
+windowed windows too and stores it in `gameWindowMode`, so the stock switch
+issues that resize whenever the window came out smaller than asked.
+
 ## zombie.scripting.ScriptParser (added 2026-09-19, evening, boot)
 
 `stripComments` first tries `pzopt.ScriptText.stripComments` (one forward pass
