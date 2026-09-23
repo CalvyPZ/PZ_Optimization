@@ -718,7 +718,7 @@ public final class Harness {
                 + "\nroute_start_epoch_ms=" + runStartEpochMs + "\nroute_end_epoch_ms=" + runEndEpochMs
                 + "\nroute_seconds=" + secs + "\nchunks_loaded=" + chunks + "\nchunks_per_second=" + (secs > 0f ? chunks / secs : 0f)
                 + "\nsettings=" + Config.describe()
-                + "\nzombie_batches=" + AnimBatch.describe() + " | " + ActionEval.describe() + " | " + LightingBatch.describe() + " | " + FrameBatch.describe()
+                + "\nzombie_batches=" + AnimBatch.describe() + " | " + ActionEval.describe() + " | " + AnimParallel.describe() + " | " + LightingBatch.describe() + " | " + FrameBatch.describe()
                 + "\nbake_counters=" + zombie.iso.fboRenderChunk.FBORenderCell.pzoptBakeCounters() + "\n"); // pzopt: the per-frame batch and bake counters at route end
       } catch (IOException e) {
          Log.warn("harness: could not write summary: " + e);

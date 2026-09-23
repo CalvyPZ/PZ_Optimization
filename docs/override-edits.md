@@ -2799,3 +2799,90 @@ buffer gets.
 Mac (one run each, same build): depth-map task time 8.9 -> 7.7 s, image decode 4.1 -> 2.8 s, Continue -> world ready
 6.37 -> 5.96 s (mac-depth-off / mac-depth-on).
 
+## Zombie postupdate pass (2026-09-23 night; `animatorParallel`, `animBatchAsync`, `animatorPipeline`, `guardedCallbacks`, `modelLockPerInstance`, `poolStatsBatched`, `headOnWorker`)
+
+Goal: `MovingObjectUpdateScheduler.postupdate` under 4 % of the game thread on the Louisville horde. Numbers in
+`docs/results.md` ("Zombie postupdate pass"). The pass moves the per-zombie finish of the postupdate loop to the frame
+workers (`pzopt.AnimParallel`) and fixes the shared state that kept them serial.
+
+### zombie.characters.IsoGameCharacter (`animatorParallel`, `headOnWorker`)
+
+`pzoptPostUpdateAnimatingRest` is split into its three stock steps: the state change (`pzoptRestContext`), the animator
+and everything after it (`pzoptRestAnimatorAndAfter` / `pzoptRestAfterAnimator`), in stock order when called in sequence.
+New worker task `pzoptRestWorker`: the animator, the move deltas and the model update (the track tick; model-less zombies
+the non-visual update) with the time step computed on the game thread. The anim events of that update are captured in an
+`AnimCapture` instead of dispatched (`OnAnimEvent` checks the capture; the old body is `pzoptDispatchAnimEvent`); a zombie
+whose animator step fired any event stops there and finishes on the game thread after its events, so everything after
+the animator sees the handlers' effects as in stock. `pzoptRestFinish` (game thread, queue order) dispatches the captured
+events around the context's event clear in stock's order, then the finishing report. `applyDeltas` uses a per-thread copy
+of stock's shared move-delta scratch on a worker, seeded with the shared one's twist delta: stock never resets that field,
+so it holds the first value of the session and the copy must start from it (a zombie is only armed once it is set).
+The model-less update flips `PerformanceSettings.interpolateAnims` per thread (`AnimParallel.setNoInterpolate`) instead of
+the static. `headOnWorker` (default off): the head of `postUpdateAnimating` (forward direction, aim angle, the turning
+flags) runs first in the zombie's transition-evaluation task; a turn-around that would fire Turn180Started /
+TargetChanged is left to the game thread with a stock evaluation. Off by default because every run with it on tipped the
+Louisville preset into its re-bake flood (3 of 3, 0 of 3 with it off on the same build) while the evaluation check stayed
+exact; the head only touches the zombie's own fields, so the effect looks like timing of the native see_all NaN race, not
+a data race, but it is not understood.
+
+### zombie.characters.IsoZombie (`guardedCallbacks`, `animatorParallel`)
+
+The variable callbacks with side effects carry a guard (`AnimParallel.impureGuard` / `conditionalGuard`) that throws on a
+worker before the side effect. For eight of them the side effect is a rare branch, and only that branch is guarded:
+bHasTarget and shouldSprint (a target that became a reanimated corpse), battack (a target on the floor, the vehicle walks
+of the crawler / fake-dead branches), bthump (dropping a far or timed-out thump target), blunge (ghost target, the
+staircase reset, the pathfind line test within 3.5 tiles), battackvehicle and bPassengerExposed (only with the target in
+a vehicle), beatbodytarget (the eat-target update is a no-op without a body). These are read on the workers like pure
+callbacks; the transition evaluation that hits a guard is left unstamped (the game thread evaluates it stock-wise in the
+apply loop, `guardedFallbacks=`), the animator task that hits one finishes on the game thread (`impure=`, 0 in every run).
+
+### zombie.characters.action.ActionContext
+
+`pzoptEvaluate` publishes a per-generation "evaluation done" stamp (volatile) for the pipelined apply loop, and treats a
+guard exception as "not evaluated here".
+
+### zombie.core.skinnedmodel.animation.AnimationTrack (new override)
+
+The deferred-motion keyframe scratch (`L_updateDeferredValues`) is per thread, the track id counter atomic, and the
+keyframe sampling reads the interpolation switch through `AnimParallel.interpolateAnims` (a worker's model-less update
+samples without interpolation, like stock's flip of the static).
+
+### zombie.core.skinnedmodel.animation.AnimationMultiTrack (new override)
+
+The static temp list of `removeTracks` is per thread. A track removed while a worker captures anim events is released
+after the events are dispatched (an event can name the track its own update just finished).
+
+### zombie.core.skinnedmodel.animation.AnimationPlayer (`animBatchAsync`)
+
+Every public accessor or mutator of the bone state first joins the asynchronous bone batch when the player's bones are in
+flight and the caller is the game thread (`pzoptInFlight`; counter `guardJoins`, 0 in every run).
+
+### zombie.core.skinnedmodel.model.ModelInstance (`modelLockPerInstance`)
+
+Stock's `lock` is a string literal, i.e. one interned object shared by every model instance, and `ModelSlot.Update` (its
+only user) holds it across the track tick. Harmless on one thread; with the animators on eight workers it serialised them
+(each animator task 2.4x slower than on one thread). It is a new object per instance now.
+
+### zombie.network.statistics.data.PerformanceStatistic (new override, `poolStatsBatched`)
+
+The pool statistics counters every pooled alloc / release bumps are `AtomicDouble` compare-and-set loops shared by all
+threads; on a frame worker the counts go to per-thread tallies (`pzopt.PoolStats`) published once per batch.
+
+### zombie.iso.IsoWorld, zombie.MovingObjectUpdateScheduler (`animBatchAsync`)
+
+The bone batch (`pzopt.AnimBatch`) starts on the workers at the end of the postupdate loop without a join; `FinishAnimation`
+(the game's own join point of its threadAnimation debug option, before the render phase) or the next frame batch joins
+it. `IsoWorld.init` also holds `pzopt.SpriteWindow` from the sprite manager's dispose to the missing-tile sprite (below).
+
+### zombie.tileDepth.TileDepthTextures, zombie.fileSystem.FileSystemImpl (sprite-map race)
+
+With earlyTilePacks the tile depth-map loads finish during the world load; the last one walks the global sprite map
+(`TileDepthTextureManager.initSprites`, `TileDepthTextureAssignmentManager.initSprites`) on the main thread while the
+loader refills it, and about a third of the Louisville loads logged a ConcurrentModificationException. A finish during
+the loader's sprite window waits for the next file-system pump; a walk that still meets an on-demand sprite insert
+(early world entry) is repeated there (both walks are idempotent). Log line `spriteWindow:`.
+
+### pzopt.Updater (not a game class)
+
+The main-menu update check is skipped whenever the harness flag file asks for a run (`Harness.REQUESTED`); it used to
+test `Harness.active()`, which is still false at the menu, so every run polled GitHub and logged the 403 of its rate limit.

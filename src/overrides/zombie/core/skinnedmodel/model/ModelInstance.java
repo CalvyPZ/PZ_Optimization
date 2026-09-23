@@ -135,7 +135,7 @@ public class ModelInstance extends ReferencedObject {
    public int renderRefCount;
    private static final int INITIAL_SKIP_VALUE = Integer.MAX_VALUE;
    private int skipped = Integer.MAX_VALUE;
-   public final Object lock = "ModelInstance Thread Lock";
+   public final Object lock = pzopt.Config.MODEL_LOCK_PER_INSTANCE ? new Object() : "ModelInstance Thread Lock"; // pzopt: modelLockPerInstance. Stock's lock is a string literal, i.e. one interned object shared by every model instance: harmless on one thread, but it serialised every frame worker's model update (animatorParallel); its only user is ModelSlot.Update, which locks the instance it updates
    public ModelScript modelScript;
    public String attachmentNameSelf;
    public String attachmentNameParent;

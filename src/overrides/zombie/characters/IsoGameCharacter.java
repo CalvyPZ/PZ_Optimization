@@ -3976,6 +3976,21 @@ public abstract class IsoGameCharacter
    }
 
    public void OnAnimEvent(AnimLayer sender, AnimationTrack track, AnimEvent event) {
+      // pzopt: animatorParallel. Updated on a frame worker: keep the event for the game thread, in order.
+      pzopt.AnimCapture capture = this.pzoptCapture;
+      if (capture != null && capture.armed && pzopt.AnimParallel.currentCapture() == capture) {
+         if (!StringUtils.isNullOrWhitespace(event.eventName)) {
+            capture.add(sender, track, event);
+         }
+
+         return;
+      }
+
+      this.pzoptDispatchAnimEvent(sender, track, event);
+   }
+
+   /** pzopt: animatorParallel, stock's OnAnimEvent body. */
+   public void pzoptDispatchAnimEvent(AnimLayer sender, AnimationTrack track, AnimEvent event) {
       if (!StringUtils.isNullOrWhitespace(event.eventName)) {
          this.animEvent(this, sender, track, event);
          if (Core.debug && DebugOptions.instance.animation.animLayer.allowAnimNodeOverride.getValue()) {
@@ -10523,6 +10538,13 @@ public abstract class IsoGameCharacter
 
    private void postUpdateAnimating() {
       if (GameServer.server || this.isAnimationUpdatingThisFrame()) {
+         // pzopt: headOnWorker. An eligible zombie queues here with its head (the lines below up to the turning flags)
+         // still to do; the transition-evaluation task on a frame worker runs it first (pzoptEvalTask), in the same
+         // per-zombie order as stock.
+         if (pzopt.ActionEval.submitWithHead(this)) {
+            return;
+         }
+
          AnimationPlayer animPlayer = this.getAnimationPlayer();
          animPlayer.updateForwardDirection(this);
          animPlayer.updateVerticalAimAngle(this);
@@ -10545,18 +10567,191 @@ public abstract class IsoGameCharacter
 
    /** pzopt: actionEvalParallel, the part of postUpdateAnimating after the turning flags (the state change, the animator, the model). */
    public void pzoptPostUpdateAnimatingRest() {
+      this.pzoptRestContext();
+      this.pzoptRestAnimatorAndAfter();
+   }
+
+   // pzopt: headOnWorker. pzoptHeadPending: queued with the head still to do; pzoptHeadOnGame: the worker found that the
+   // turn-around flag would fire a global anim event, which must happen on the game thread before the evaluation.
+   public boolean pzoptHeadPending;
+   public boolean pzoptHeadOnGame;
+
+   /** pzopt: headOnWorker, the evaluation task of a queued zombie on a frame worker: its head, then its transitions. */
+   public void pzoptEvalTask() {
+      if (this.pzoptHeadPending) {
+         if (!this.pzoptHeadWorker()) {
+            this.pzoptHeadOnGame = true; // untouched beyond idempotent steps; the game thread does the head and a stock evaluation
+            this.pzoptHeadPending = false;
+            this.getActionContext().pzoptMarkEvalDone();
+            return;
+         }
+
+         this.pzoptHeadPending = false;
+      }
+
+      this.getActionContext().pzoptEvaluate();
+   }
+
+   /**
+    * pzopt: headOnWorker, stock's head of postUpdateAnimating (forward direction, aim angle, the three turning flags) on a
+    * worker. False, before the turn-around flag changes, when setTurningAround would fire Turn180Started or
+    * Turn180TargetChanged: that event must go through the game thread. The steps done by then are idempotent.
+    */
+   private boolean pzoptHeadWorker() {
+      AnimationPlayer animPlayer = this.getAnimationPlayer();
+      animPlayer.updateForwardDirection(this);
+      animPlayer.updateVerticalAimAngle(this);
+      this.setTurning(this.shouldBeTurning());
+      this.setTurning90(this.shouldBeTurning90());
+      boolean around = this.shouldBeTurningAround();
+      boolean isDifferent = this.isTurningAround != around;
+      if (isDifferent && around) {
+         return false;
+      }
+
+      if (!isDifferent && this.isTurningAround
+         && PZMath.abs(PZMath.getClosestAngleDegrees(this.initialTurningAroundTarget, this.getDirectionAngle())) > 90.0F) {
+         return false;
+      }
+
+      this.setTurningAround(around);
+      return true;
+   }
+
+   /** pzopt: headOnWorker, stock's head on the game thread. */
+   private void pzoptHeadGame() {
+      AnimationPlayer animPlayer = this.getAnimationPlayer();
+      animPlayer.updateForwardDirection(this);
+      animPlayer.updateVerticalAimAngle(this);
+      this.setTurning(this.shouldBeTurning());
+      this.setTurning90(this.shouldBeTurning90());
+      this.setTurningAround(this.shouldBeTurningAround());
+   }
+
+   /** pzopt: animatorParallel, step 1 of the finish: the state change. */
+   public void pzoptRestContext() {
+      if (this.pzoptHeadOnGame || this.pzoptHeadPending) {
+         // headOnWorker: the worker left the head to this thread (or the evaluation batch never ran it)
+         this.pzoptHeadOnGame = false;
+         this.pzoptHeadPending = false;
+         this.pzoptHeadGame();
+      }
+
+      this.getActionContext().update();
+      if (GameClient.client) {
+         this.getNetworkCharacterAI().postUpdate();
+      }
+   }
+
+   /** pzopt: animatorParallel, the finish after the state change, stock's order (the path of a zombie not armed). */
+   public void pzoptRestAnimatorAndAfter() {
+      if (this.getCurrentSquare() != null) {
+         float animDeltaT = this.getAnimationTimeDelta();
+         this.getAdvancedAnimator().update(animDeltaT);
+      }
+
+      this.pzoptRestAfterAnimator();
+   }
+
+   // pzopt: animatorParallel. The capture of this character's anim events while a frame worker updates it (pzopt.AnimParallel).
+   private pzopt.AnimCapture pzoptCapture;
+
+   public pzopt.AnimCapture pzoptCapture() {
+      if (this.pzoptCapture == null) {
+         this.pzoptCapture = new pzopt.AnimCapture();
+      }
+
+      return this.pzoptCapture;
+   }
+
+   public pzopt.AnimCapture pzoptCaptureIfAny() {
+      return this.pzoptCapture;
+   }
+
+   /** pzopt: animatorParallel, true once stock's shared move-delta scratch has its session twist delta (the worker copy starts from it). */
+   public boolean pzoptDeltasSeeded() {
+      return IsoGameCharacter.L_postUpdate.moveDeltas.twistDelta != -1.0F;
+   }
+
+   /**
+    * pzopt: animatorParallel, step 2 on a frame worker: the animator, the move deltas and the model update, anim events
+    * captured. Events during the animator step stop it there (the rest runs on the game thread after they are dispatched).
+    */
+   public void pzoptRestWorker() {
+      pzopt.AnimCapture c = this.pzoptCapture;
+      pzopt.AnimParallel.begin(c);
+      try {
+         this.getAdvancedAnimator().update(c.deltaT);
+         if (c.count() > 0) {
+            c.serial = true;
+            return;
+         }
+
+         AnimationPlayer animPlayer = this.getAnimationPlayer();
+         this.applyDeltas(animPlayer);
+         if (!this.hasActiveModel()) {
+            animPlayer.updateBones = false;
+            pzopt.AnimParallel.setNoInterpolate(true);
+            try {
+               animPlayer.updateForwardDirection(this);
+               animPlayer.Update(c.deltaT);
+            } finally {
+               animPlayer.updateBones = true;
+               pzopt.AnimParallel.setNoInterpolate(false);
+            }
+         } else {
+            this.legsSprite.modelSlot.Update(c.deltaT);
+         }
+      } catch (pzopt.AnimParallel.ImpureTouch e) {
+         c.serial = true;
+         c.impure = true;
+      } catch (Throwable t) {
+         c.serial = true;
+         c.failure = t;
+      } finally {
+         pzopt.AnimParallel.end();
+         c.done = true;
+      }
+   }
+
+   /** pzopt: animatorParallel, step 3 on the game thread, queue order: the captured events, then what stock does after them. */
+   public void pzoptRestFinish(pzopt.AnimCapture c) {
+      int n = c.count();
+      if (c.serial) {
+         for (int i = 0; i < n; i++) {
+            this.pzoptDispatchAnimEvent(c.layer(i), c.track(i), c.event(i));
+         }
+
+         Throwable failure = c.failure;
+         c.finish();
+         if (failure != null) {
+            ExceptionLogger.logException(failure);
+         } else {
+            this.pzoptRestAfterAnimator();
+         }
+
+         return;
+      }
+
+      this.getActionContext().clearEvent("ActiveAnimFinished");
+      this.getActionContext().clearEvent("ActiveAnimFinishing");
+      this.getActionContext().clearEvent("ActiveAnimLooped");
+      for (int i = 0; i < n; i++) {
+         this.pzoptDispatchAnimEvent(c.layer(i), c.track(i), c.event(i));
+      }
+
+      c.finish();
+      this.updateLightInfo();
+      if (this.animationFinishing) {
+         this.getActionContext().reportEvent(this.animationFinishingState, "ActiveAnimFinishing");
+         this.animationFinishing = false;
+      }
+   }
+
+   /** pzopt: animatorParallel, stock's postUpdateAnimating after the animator step. */
+   public void pzoptRestAfterAnimator() {
       AnimationPlayer animPlayer = this.getAnimationPlayer();
       {
-         this.getActionContext().update();
-         if (GameClient.client) {
-            this.getNetworkCharacterAI().postUpdate();
-         }
-
-         if (this.getCurrentSquare() != null) {
-            float animDeltaT = this.getAnimationTimeDelta();
-            this.getAdvancedAnimator().update(animDeltaT);
-         }
-
          this.getActionContext().clearEvent("ActiveAnimFinished");
          this.getActionContext().clearEvent("ActiveAnimFinishing");
          this.getActionContext().clearEvent("ActiveAnimLooped");
@@ -10661,6 +10856,10 @@ public abstract class IsoGameCharacter
    }
 
    public void clearHitInfo() {
+      if (this.hitInfoList.isEmpty() && pzopt.Config.LAZY_POSE) {
+         return; // pzopt: an empty list releases and clears nothing; skips a synchronized pool call per character per frame
+      }
+
       CombatManager.getInstance().hitInfoPool.release(this.hitInfoList);
       this.hitInfoList.clear();
    }
@@ -10698,6 +10897,14 @@ public abstract class IsoGameCharacter
 
    private void applyDeltas(AnimationPlayer animPlayer) {
       MoveDeltaModifiers deltas = IsoGameCharacter.L_postUpdate.moveDeltas;
+      if (pzopt.AnimParallel.currentCapture() != null) {
+         // pzopt: animatorParallel, a worker's own scratch. Stock never resets the shared one's twist delta (it keeps the
+         // first value of the session), so the copy starts from it; the other two fields are overwritten below.
+         MoveDeltaModifiers shared = deltas;
+         deltas = PZOPT_MOVE_DELTAS.get();
+         deltas.twistDelta = shared.twistDelta;
+      }
+
       deltas.moveDelta = this.getMoveDelta();
       deltas.turnDelta = this.getTurnDelta();
       boolean hasPath = this.hasPath();
@@ -16721,6 +16928,8 @@ public abstract class IsoGameCharacter
       private static final Vector2 v1 = new Vector2();
       private static final Vector2 v2 = new Vector2();
    }
+
+   private static final ThreadLocal<MoveDeltaModifiers> PZOPT_MOVE_DELTAS = ThreadLocal.withInitial(MoveDeltaModifiers::new); // pzopt: animatorParallel
 
    private static class L_postUpdate {
       static final MoveDeltaModifiers moveDeltas = new MoveDeltaModifiers();

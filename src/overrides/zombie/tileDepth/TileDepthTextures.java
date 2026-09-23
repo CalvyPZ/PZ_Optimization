@@ -209,6 +209,11 @@ public final class TileDepthTextures {
       }
 
       public void done() {
+         if (pzopt.Overrides.enabled()) {
+            // pzopt: the finish walks the sprite maps; during the world loader's sprite refill it waits (pzopt.SpriteWindow)
+            pzopt.SpriteWindow.finish(() -> TileDepthTextureManager.getInstance().finishedLoadTask());
+            return;
+         }
          TileDepthTextureManager.getInstance().finishedLoadTask();
       }
 

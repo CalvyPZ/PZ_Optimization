@@ -134,6 +134,11 @@ public final class ActionEval {
       Log.info("actionSnapshotFilter: " + keys.size() + " callback variables, " + impure + " of them read per frame on the game thread");
    }
 
+   /** animatorParallel: true once the callback variables are classified (before that every name counts as impure). */
+   public static boolean callbackKeysReady() {
+      return callbackKeys != null;
+   }
+
    /** True when a condition operand of this variable name may resolve to a callback with side effects. */
    public static boolean impureCallback(String name) {
       java.util.Set<String> keys = callbackKeys;
@@ -141,8 +146,20 @@ public final class ActionEval {
          return true; // not classified yet: snapshot, i.e. the pre-filter behaves like the full walk
       }
       String lower = name.toLowerCase(java.util.Locale.ENGLISH);
-      return keys.contains(lower) && !PURE_CALLBACKS.contains(lower);
+      return keys.contains(lower) && !PURE_CALLBACKS.contains(lower) && !(Config.GUARDED_CALLBACKS && GUARDED_CALLBACKS.contains(lower));
    }
+
+   /**
+    * guardedCallbacks (2026-09-23): callbacks whose side effect is conditional and rare, with a guard right before it in
+    * the IsoZombie override ({@link AnimParallel#conditionalGuard}): bHasTarget / shouldSprint clear a target that has
+    * become a reanimated corpse, bPassengerExposed walks the vehicle areas only when the target sits in a vehicle. Off
+    * the game thread the guard throws before the effect: the transition evaluation leaves the context unstamped (the
+    * game thread evaluates it stock-wise in the apply loop), the animator task finishes the zombie on the game thread.
+    * Otherwise they are plain reads, so they need no snapshot read on the game thread.
+    */
+   public static final java.util.Set<String> GUARDED_CALLBACKS = java.util.Set.of("bhastarget", "shouldsprint", "bpassengerexposed", "battack", "bthump", "blunge", "battackvehicle", "beatbodytarget");
+
+   public static long guardedFallbacks; // evaluations left to the game thread because a guarded callback hit its side effect
 
    private static final ThreadLocal<java.util.IdentityHashMap<Object, Object>> SNAPSHOT = new ThreadLocal<>();
 
@@ -184,6 +201,17 @@ public final class ActionEval {
     * flush(), in the same order, after the parallel evaluation.
     */
    public static boolean submit(IsoGameCharacter character) {
+      return submit(character, false);
+   }
+
+   /** headOnWorker: queue the zombie before its postUpdateAnimating head; the evaluation task runs the head first. */
+   public static boolean submitWithHead(IsoGameCharacter character) {
+      return HEAD_ON_WORKER && submit(character, true);
+   }
+
+   private static final boolean HEAD_ON_WORKER = Config.HEAD_ON_WORKER;
+
+   private static boolean submit(IsoGameCharacter character, boolean headPending) {
       if (!active) {
          return false;
       }
@@ -202,6 +230,7 @@ public final class ActionEval {
          return false;
       }
       context.pzoptSnapshot(); // the side-effect callbacks, here and now like stock
+      zombie.pzoptHeadPending = headPending;
       if (count == queue.length) {
          queue = java.util.Arrays.copyOf(queue, count * 2);
       }
@@ -223,9 +252,26 @@ public final class ActionEval {
       if (count > maxBatch) {
          maxBatch = count;
       }
+      if (AnimParallel.pipelined()) {
+         // animatorPipeline: the evaluations run on the workers alone; the apply loop takes each zombie as soon as its
+         // evaluation is done (AnimParallel.apply step 1) instead of this thread evaluating a share and then applying
+         FrameBatch.runAsync(count, i -> queue[i].pzoptEvalTask(), ActionEval::evalDone);
+         applying = true;
+         GameTime pipelineTime = GameTime.getInstance();
+         float pipelineMultiplier = pipelineTime.perObjectMultiplier;
+         try {
+            AnimParallel.apply(queue, count, true);
+         } finally {
+            pipelineTime.perObjectMultiplier = pipelineMultiplier; // see the multiplier note below
+            applying = false;
+            java.util.Arrays.fill(queue, 0, count, null);
+            count = 0;
+         }
+         return;
+      }
       long w0 = FrameBatch.workNanos;
       long q0 = FrameBatch.waitNanos;
-      Throwable t = FrameBatch.run(count, i -> queue[i].getActionContext().pzoptEvaluate());
+      Throwable t = FrameBatch.run(count, i -> queue[i].pzoptEvalTask());
       workNanos += FrameBatch.workNanos - w0;
       waitNanos += FrameBatch.waitNanos - q0;
       if (t != null && !failed) {
@@ -240,11 +286,13 @@ public final class ActionEval {
       GameTime gameTime = GameTime.getInstance();
       float multiplier = gameTime.perObjectMultiplier;
       try {
-         for (int i = 0; i < count; i++) {
-            if (!Config.DEV_ACTION_EVAL_UNIT_MULTIPLIER) {
-               gameTime.perObjectMultiplier = queue[i].getCurrentSimulationLevel().getFrameMod();
+         if (AnimParallel.enabled()) {
+            AnimParallel.apply(queue, count, false); // animatorParallel: the animators and models of the queue on the workers (it sets the multiplier per zombie too)
+         } else {
+            for (int i = 0; i < count; i++) {
+               useMultiplier(queue[i]);
+               queue[i].pzoptPostUpdateAnimatingRest();
             }
-            queue[i].pzoptPostUpdateAnimatingRest();
          }
       } finally {
          gameTime.perObjectMultiplier = multiplier;
@@ -254,10 +302,28 @@ public final class ActionEval {
       }
    }
 
+   /**
+    * Game thread: the perObjectMultiplier the zombie's bucket ran its postupdate with (its simulation level's frame mod),
+    * for the rest of its postUpdateAnimating (see the note in flush). Callers restore the frame's value afterwards.
+    */
+   public static void useMultiplier(IsoZombie zombie) {
+      if (!Config.DEV_ACTION_EVAL_UNIT_MULTIPLIER) {
+         GameTime.getInstance().perObjectMultiplier = zombie.getCurrentSimulationLevel().getFrameMod();
+      }
+   }
+
+   private static void evalDone(Throwable t) {
+      if (t != null && !failed) {
+         failed = true;
+         Log.warn("actionEvalParallel: transition evaluation failed on a worker, batching off: " + t);
+      }
+   }
+
    /** One line for the periodic FBORenderCell log. */
    public static String describe() {
       return "action eval: frames=" + frames + " batched=" + batched + " inline=" + inline + " max=" + maxBatch
             + " work ms=" + (workNanos / 1_000_000L) + " wait ms=" + (waitNanos / 1_000_000L)
+            + " guardedFallbacks=" + guardedFallbacks
             + (Config.DEV_ACTION_EVAL_CHECK ? " checked=" + checks + " mismatches=" + mismatches + " filterMisses=" + filterMisses : "") + (failed ? " FAILED" : "");
    }
 }

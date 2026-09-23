@@ -37,12 +37,31 @@ public final class ActionContext {
    private static final java.util.IdentityHashMap<ActionState, int[]> pzoptStateDuplicates = new java.util.IdentityHashMap<>(); // per operand: the earlier operand of the state naming the same variable, or -1
    private Object[] pzoptSnapshotScratch = new Object[16]; // the values read for this state, so a repeated variable is read once
 
+   /** animatorPipeline: the generation whose evaluation has finished (stamped or not), set last by the evaluating thread. */
+   public volatile int pzoptEvalDone;
+
+   /** pzopt: headOnWorker, an evaluation task that left the zombie to the game thread: done, unstamped. */
+   public void pzoptMarkEvalDone() {
+      this.pzoptEvalDone = pzopt.ActionEval.generation();
+   }
+
    /** Worker (or the game thread at the join): the evaluate half of updateInternal, result in nextActionStateContainer. */
    public void pzoptEvaluate() {
+      try {
+         this.pzoptEvaluateInner();
+      } finally {
+         this.pzoptEvalDone = pzopt.ActionEval.generation();
+      }
+   }
+
+   private void pzoptEvaluateInner() {
       this.nextActionStateContainer.set(this.actionStateContainer);
       pzopt.ActionEval.enterSnapshot(this.pzoptSnapshot);
       try {
          this.nextActionStateContainer.evaluateCurrentState(this);
+      } catch (pzopt.AnimParallel.ImpureTouch e) {
+         pzopt.ActionEval.guardedFallbacks++; // guardedCallbacks: a side effect ahead; unstamped, update() evaluates it on the game thread
+         return;
       } finally {
          pzopt.ActionEval.exitSnapshot();
       }

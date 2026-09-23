@@ -1937,6 +1937,7 @@ public final class IsoWorld {
       ZomboidGlobals.toLua();
       ItemPickerJava.InitSandboxLootSettings();
       this.survivorDescriptors.clear();
+      pzopt.SpriteWindow.open(); // pzopt: the sprite maps are disposed and refilled until the missing-tile sprite below
       IsoSpriteManager.instance.Dispose();
       if (GameClient.client && ServerOptions.instance.doLuaChecksum.getValue()) {
          DebugType.General.println("client: DoLuaChecksum start");
@@ -1949,6 +1950,7 @@ public final class IsoWorld {
 
             while (!GameClient.checksumValid) {
                if (GameWindow.serverDisconnected) {
+                  pzopt.SpriteWindow.close(); // pzopt: leaving the sprite window early
                   return;
                }
 
@@ -1957,6 +1959,7 @@ public final class IsoWorld {
                   GameClient.connection.forceDisconnect("world-timeout-response");
                   GameWindow.serverDisconnected = true;
                   GameWindow.kickReason = Translator.getText("UI_GameLoad_TimedOut", new Object[0]);
+                  pzopt.SpriteWindow.close(); // pzopt: leaving the sprite window early
                   return;
                }
 
@@ -2008,6 +2011,7 @@ public final class IsoWorld {
       GameLoadingState.gameLoadingString = "";
       DebugType.General.println("LoadTileDefinitions end");
       spriteManager.AddSprite("media/ui/missing-tile.png");
+      pzopt.SpriteWindow.close(); // pzopt: the refill is complete; depth-map loads that finished meanwhile finish now
       ScriptManager.instance.PostTileDefinitions();
       DebugType.General.println("triggerEvent OnLoadedTileDefinitions");
       LuaEventManager.triggerEvent("OnLoadedTileDefinitions", spriteManager);
@@ -3118,6 +3122,7 @@ public final class IsoWorld {
    }
 
    public void FinishAnimation() {
+      pzopt.AnimBatch.join(); // pzopt: animBatchAsync, the zombies' bone batch started at the end of the postupdate loop
       if (animationThread != null) {
          ProfileArea var1 = GameProfiler.getInstance().profile("Wait Animation");
 

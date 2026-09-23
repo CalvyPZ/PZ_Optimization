@@ -151,6 +151,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public AnimatorsBoneTransform getBoneTransformAt(int i) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (i >= 0 && this.getNumBones() > i) {
          return this.boneTransforms[i];
       } else {
@@ -159,6 +160,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public <T extends BoneTransform> T getBoneTransformAt(int i, T result) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (i >= 0 && this.getNumBones() > i) {
          result.set(this.boneTransforms[i]);
          return result;
@@ -239,6 +241,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public AnimatorsBoneTransform getTwistBoneAt(int twistBoneIdx) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       AnimationBoneBinding twistBoneBinding = this.twistBones.get(twistBoneIdx);
       SkinningBone twistBone = twistBoneBinding.getBone();
       int boneIdx = twistBone.index;
@@ -262,11 +265,13 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void reset() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.multiTrack.reset();
       this.releaseRagdollController();
    }
 
    public void onReleased() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.model = null;
       this.skinningData = null;
       this.propTransforms.setIdentity();
@@ -441,11 +446,13 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public Matrix4f GetPropBoneMatrix(int bone) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.propTransforms.load(this.modelTransforms[bone]);
       return this.propTransforms;
    }
 
    public AnimationTrack startClip(AnimationClip clip, boolean loop, float ragdollMaxTime) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (clip == null) {
          throw new NullPointerException("Supplied clip is null.");
       }
@@ -466,10 +473,12 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public AnimationTrack play(String animName, boolean looped) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.play(animName, looped, false, -1.0F);
    }
 
    public AnimationTrack play(String animName, boolean looped, boolean isRagdoll, float ragdollMaxTime) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (!this.isReady()) {
          DebugType.Animation.warn("AnimationPlayer is not ready. Cannot play animation: %s%s", new Object[]{animName, isRagdoll ? "(Ragdoll)" : ""});
          return null;
@@ -496,6 +505,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public AnimationTrack play(StartAnimTrackParameters params, AnimLayer animLayer) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       AnimationTrack track = this.play(params.animName, params.isLooped, params.isRagdoll, params.ragdollMaxTime);
       if (track == null) {
          return null;
@@ -570,10 +580,12 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void Update() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.Update(GameTime.instance.getTimeDelta());
    }
 
    public void Update(float deltaT) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       ProfileArea var2 = GameProfiler.getInstance().profile("AnimationPlayer.Update");
 
       try {
@@ -650,6 +662,7 @@ public final class AnimationPlayer extends PooledObject {
 
    /** pzopt: shadowPrep, the pair computed by the last deferred update, or 0 when the game thread must compute it. */
    public long pzoptShadowParams() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.pzoptShadowValid ? this.pzoptShadowPacked : 0L;
    }
 
@@ -716,6 +729,7 @@ public final class AnimationPlayer extends PooledObject {
     * matrices itself). Game thread; the set is the one getSkinTransforms would return.
     */
    public java.nio.FloatBuffer pzoptSkinPalette(SkinningData skinnedTo) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (skinnedTo == null) {
          return null;
       }
@@ -738,6 +752,9 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    private static final ThreadLocal<SkinningData[]> pzoptSkinnedTo = ThreadLocal.withInitial(() -> new SkinningData[16]);
+
+   /** pzopt: animBatchAsync, set by the game thread when this player's bone math is queued, cleared when its batch is joined. */
+   public boolean pzoptInFlight;
 
    /** pzopt: pzopt.AnimBatch eligibility: no parent player to copy from, no ragdoll, no recorder. */
    public boolean pzoptBatchable() {
@@ -959,6 +976,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void setTargetDirection(float dirX, float dirY) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (this.targetDir.x != dirX || this.targetDir.y != dirY) {
          this.setTargetAngle(calculateAnimPlayerAngle(dirX, dirY));
          this.targetTwistAngle = PZMath.getClosestAngle(this.angle, this.targetAngle);
@@ -969,10 +987,12 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void setTargetAndCurrentDirection(Vector2 dir) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.setTargetAndCurrentDirection(dir.x, dir.y);
    }
 
    public void setTargetAndCurrentDirection(float dirX, float dirY) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.setTargetAngle(calculateAnimPlayerAngle(dirX, dirY));
       this.setAngleToTarget();
       this.targetTwistAngle = 0.0F;
@@ -980,6 +1000,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void updateForwardDirection(IsoGameCharacter character) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (character != null) {
          this.setTargetDirection(character.getForwardDirectionX(), character.getForwardDirectionY());
          this.characterAllowsTwist = character.allowsTwist();
@@ -988,6 +1009,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void updateVerticalAimAngle(IsoGameCharacter character) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (character != null) {
          float prevAngle = character.getCurrentVerticalAimAngle() * (float) (Math.PI / 180.0);
          float targetAngle = character.getTargetVerticalAimAngle() * (float) (Math.PI / 180.0);
@@ -1016,6 +1038,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void DoAngles(float deltaT) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (!this.isRagdolling()) {
          ProfileArea var2 = GameProfiler.getInstance().profile("AnimationPlayer.doAngles");
 
@@ -1265,6 +1288,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void resetBoneModelTransforms() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (this.skinningData != null && this.modelTransforms != null) {
          this.boneTransformsNeedFirstFrame = true;
          this.boneTransformsTimeDelta = -1.0F;
@@ -1278,6 +1302,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public boolean isBoneTransformsNeedFirstFrame() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.boneTransformsNeedFirstFrame;
    }
 
@@ -1695,11 +1720,13 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void stopAll() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.getMultiTrack().reset();
       this.releaseRagdollController();
    }
 
    public void releaseRagdollController() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.ragdollController = (RagdollController)Pool.tryRelease(this.ragdollController);
       if (this.ragdollAnimationClip != null) {
          this.ragdollAnimationClip.setRagdollSimulationActive(false);
@@ -1721,10 +1748,12 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public int getModelTransformsCount() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return PZArrayUtil.lengthOf(this.modelTransforms);
    }
 
    public Matrix4f getModelTransformAt(int idx) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.modelTransforms[idx];
    }
 
@@ -1778,6 +1807,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void dismember(int bone) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.dismembered.add(bone);
    }
 
@@ -1814,6 +1844,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void transformRootChildBones(String boneName, Quaternion rotation) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       Matrix4f rotationMatrix = HelperFunctions.CreateFromQuaternion(rotation, HelperFunctions.getMatrix());
 
       for (int boneIdx = 0; boneIdx < this.modelTransforms.length; boneIdx++) {
@@ -1829,6 +1860,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public Matrix4f getBoneModelTransform(int boneIdx, Matrix4f modelTransform) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       Matrix4f boneTransform = AnimationPlayer.L_getBoneModelTransform.TL.get().boneTransform;
       modelTransform.setIdentity();
       SkinningBone bone = this.skinningData.getBoneAt(boneIdx);
@@ -1846,6 +1878,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public org.lwjgl.util.vector.Vector3f getBoneWorldPosition(SkeletonBone bone, org.lwjgl.util.vector.Vector3f pos) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.getBoneModelPosition(bone, pos);
       Vector3 pos3 = new Vector3(pos.x, pos.y, pos.z);
       Model.vectorToWorldCoords(this.character, pos3);
@@ -1867,15 +1900,18 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public Matrix4f getBoneTransform(int boneIdx, Matrix4f boneTransform) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.boneTransforms[boneIdx].getMatrix(boneTransform);
       return boneTransform;
    }
 
    public TwistableBoneTransform getBone(int boneIdx) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.boneTransforms[boneIdx];
    }
 
    public Matrix4f getUnweightedModelTransform(AnimationTrack track, int boneIdx, Matrix4f modelTransform) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       Matrix4f boneTransform = AnimationPlayer.L_getUnweightedModelTransform.TL.get().boneTransform;
       boneTransform.setIdentity();
       modelTransform.setIdentity();
@@ -1899,10 +1935,12 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void UpdateSkinTransforms() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.resetSkinTransforms();
    }
 
    public Matrix4f[] getSkinTransforms(SkinningData skinnedTo) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       if (skinnedTo == null) {
          return this.modelTransforms;
       }
@@ -1931,6 +1969,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public Vector2 getDeferredMovement(Vector2 result, boolean reset) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       synchronized (this.deferredMovementLock) {
          result.set(this.deferredMovement);
       }
@@ -1945,20 +1984,24 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public void resetDeferredMovementAccum() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       synchronized (this.deferredMovementAccumLock) {
          this.deferredMovementAccum.set(0.0F, 0.0F);
       }
    }
 
    public Vector3 getDeferredMovementFromRagdoll(Vector3 result) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return result.set(this.deferredMovementFromRagdoll);
    }
 
    public float getDeferredAngleDelta() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.deferredAngleDelta;
    }
 
    public float getDeferredRotationWeight() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.deferredRotationWeight;
    }
 
@@ -2000,6 +2043,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public AnimationMultiTrack getMultiTrack() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.multiTrack;
    }
 
@@ -2014,55 +2058,68 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public float getRenderedAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.angle + (float) (Math.PI / 2);
    }
 
    public float getAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.angle;
    }
 
    public void setAngle(float angle) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.angle = angle;
    }
 
    public void setAngleToTarget() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.setAngle(this.targetAngle);
    }
 
    public void setTargetToAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       float angle = this.getAngle();
       this.setTargetAngle(angle);
    }
 
    public float getTargetAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.targetAngle;
    }
 
    public void setTargetAngle(float targetAngle) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.targetAngle = targetAngle;
    }
 
    public float getMaxTwistAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.maxTwistAngle;
    }
 
    public void setMaxTwistAngle(float radians) {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       this.maxTwistAngle = radians;
    }
 
    public float getExcessTwistAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.excessTwist;
    }
 
    public float getTwistAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.twistAngle;
    }
 
    public float getShoulderTwistAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.shoulderTwistAngle;
    }
 
    public float getTargetTwistAngle() {
+      if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
       return this.targetTwistAngle;
    }
 

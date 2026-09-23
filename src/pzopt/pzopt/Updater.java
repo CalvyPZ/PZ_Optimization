@@ -151,7 +151,7 @@ public final class Updater {
          Log.info("update check off (updateCheck=false)");
          return;
       }
-      if (Harness.active()) {
+      if (Harness.REQUESTED || Harness.active()) { // REQUESTED: at the main menu the harness is still idle (it starts with the world)
          Log.info("update check skipped in a harness run");
          return;
       }

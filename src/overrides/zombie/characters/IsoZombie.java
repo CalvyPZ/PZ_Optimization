@@ -986,12 +986,20 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
             return false;
          } else {
             BaseVehicle vehicle = isoGameCharacter.getVehicle();
+            if (vehicle != null) {
+               pzopt.AnimParallel.conditionalGuard("battackvehicle"); // pzopt: guardedCallbacks, the vehicle test stays on the game thread
+            }
+
             return vehicle != null && vehicle.isCharacterAdjacentTo(this);
          }
       }, owner -> "Is this Zed targeting a vehicle.");
       this.setVariable("beatbodytarget", () -> {
          if (this.isForceEatingAnimation()) {
             return true;
+         }
+
+         if (!GameServer.server && (this.bodyToEat != null || this.eatBodyTarget != null)) {
+            pzopt.AnimParallel.conditionalGuard("beatbodytarget"); // pzopt: guardedCallbacks, the eat-target update (a no-op without a body) stays on the game thread
          }
 
          if (!GameServer.server) {
@@ -1004,6 +1012,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       this.setVariable("bfakedead", () -> this.fakeDead, owner -> "Is this Zed pretending to be dead.");
       this.setVariable("bHasTarget", () -> {
          if (this.target instanceof IsoGameCharacter isoGameCharacter && isoGameCharacter.reanimatedCorpse != null) {
+            pzopt.AnimParallel.conditionalGuard("bHasTarget"); // pzopt: animatorParallel, the side effect below never runs on a frame worker
             this.setTarget(null);
          }
 
@@ -1012,6 +1021,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       this.setVariable("bCanSeeTarget", () -> this.canSeeTarget, owner -> "Can this Zed see its target.");
       this.setVariable("shouldSprint", () -> {
          if (this.target instanceof IsoGameCharacter isoGameCharacter && isoGameCharacter.reanimatedCorpse != null) {
+            pzopt.AnimParallel.conditionalGuard("shouldSprint"); // pzopt: animatorParallel, the side effect below never runs on a frame worker
             this.setTarget(null);
          }
 
@@ -1042,6 +1052,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
             }
 
             if (this.target instanceof IsoPlayer player && player.isGhostMode()) {
+               pzopt.AnimParallel.conditionalGuard("blunge"); // pzopt: guardedCallbacks, this branch never runs off the game thread
                this.setTarget(null);
                return false;
             } else {
@@ -1055,6 +1066,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
                }
 
                if (this.isSideOfStaircaseBetweenSelfAndTarget()) {
+                  pzopt.AnimParallel.conditionalGuard("blunge"); // pzopt: guardedCallbacks, this branch never runs off the game thread
                   this.lungeTimer = 0.0F;
                   return false;
                }
@@ -1064,6 +1076,11 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
                }
 
                float vecToTargetLength = this.vectorToTarget.getLength();
+               if (!(vecToTargetLength > 3.5F)
+                  || vecToTargetLength <= 4.0F && this.target instanceof IsoGameCharacter guardCharacter && guardCharacter.getVehicle() != null) {
+                  pzopt.AnimParallel.conditionalGuard("blunge"); // pzopt: guardedCallbacks, the pathfind line test (shared point pool) stays on the game thread
+               }
+
                return !(vecToTargetLength > 3.5F)
                      || vecToTargetLength <= 4.0F && this.target instanceof IsoGameCharacter isoGameCharacter && isoGameCharacter.getVehicle() != null
                   ? !PolygonalMap2.instance
@@ -1091,7 +1108,13 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       }, owner -> "This Zed intends to stop lunging.");
       this.setVariable(
          "bpassengerexposed",
-         () -> AttackVehicleState.instance().isPassengerExposed(this),
+         () -> {
+            if (this.target instanceof IsoGameCharacter targetCharacter && targetCharacter.getVehicle() != null) {
+               pzopt.AnimParallel.conditionalGuard("bpassengerexposed"); // pzopt: animatorParallel, the vehicle-area path never runs on a frame worker
+            }
+
+            return AttackVehicleState.instance().isPassengerExposed(this);
+         },
          owner -> "When attacking a vehicle, is the target inside the vehicle exposed to attack."
       );
       this.setVariable(
@@ -1117,6 +1140,14 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       this.setVariable(
          "bthump",
          () -> {
+            if (this.getThumpTarget() != null
+               && (this.getThumpTimer() > 0
+                  || this.getThumpTarget() instanceof IsoObject guardObj
+                     && !(this.getThumpTarget() instanceof BaseVehicle)
+                     && (guardObj.getSquare() == null || this.DistToSquared(guardObj.getX() + 0.5F, guardObj.getY() + 0.5F) > 9.0F))) {
+               pzopt.AnimParallel.conditionalGuard("bthump"); // pzopt: guardedCallbacks, dropping the thump target stays on the game thread
+            }
+
             if (this.getThumpTarget() instanceof IsoObject obj
                && !(this.getThumpTarget() instanceof BaseVehicle)
                && (obj.getSquare() == null || this.DistToSquared(obj.getX() + 0.5F, obj.getY() + 0.5F) > 9.0F)) {
@@ -1131,8 +1162,8 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
          },
          owner -> "Is this Zed attacking something that makes a thumping sound. Such as a Door."
       );
-      this.setVariable("bundervehicle", this::isUnderVehicle, owner -> "Is this Zed currently under a vehicle.");
-      this.setVariable("bBeingSteppedOn", this::isBeingSteppedOn, owner -> "Is this Zed currently being stepped on.");
+      this.setVariable("bundervehicle", () -> { pzopt.AnimParallel.impureGuard("bundervehicle"); return this.isUnderVehicle(); }, owner -> "Is this Zed currently under a vehicle.");
+      this.setVariable("bBeingSteppedOn", () -> { pzopt.AnimParallel.impureGuard("bBeingSteppedOn"); return this.isBeingSteppedOn(); }, owner -> "Is this Zed currently being stepped on.");
       this.setVariable(
          "distancetotarget",
          () -> this.target == null ? -1.0F : this.vectorToTarget.getLength() - this.getWidth() + this.target.getWidth(),
@@ -1142,6 +1173,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       this.setVariable("lungetimer", () -> this.lungeTimer, owner -> "Lunge timer countdown, in frames at 30fps. Starts at 180.0. Spins to Zero.");
       this.setVariable("reanimatetimer", this::getReanimateTimer, owner -> "Reanimate timer countdown, in frames at 30fps.");
       this.setVariable("turndirection", () -> {
+         pzopt.AnimParallel.impureGuard("turndirection"); // pzopt: animatorParallel, never on a frame worker
          if (this.getPath2() != null) {
             return "";
          }
@@ -1257,6 +1289,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
       if (this.target != null && !(this.target instanceof IsoGameCharacter gameCharacter && gameCharacter.isZombiesDontAttack())) {
          if (this.target instanceof IsoGameCharacter isoGameCharacter) {
             if (this.target.isOnFloor() && isoGameCharacter.getCurrentState() != BumpedState.instance()) {
+               pzopt.AnimParallel.conditionalGuard("battack"); // pzopt: guardedCallbacks, this branch never runs off the game thread
                this.setTarget(null);
                return false;
             }
@@ -1283,6 +1316,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
             return false;
          } else {
             if (this.fakeDead) {
+               pzopt.AnimParallel.conditionalGuard("battack"); // pzopt: guardedCallbacks, the vehicle walk stays on the game thread
                return !this.isUnderVehicle() && this.DistTo(this.target) < 1.3F;
             }
 
@@ -1297,6 +1331,7 @@ public final class IsoZombie extends IsoGameCharacter implements IHumanVisual {
                float len = this.vectorToTarget.getLength();
                return len <= attackRange;
             } else {
+               pzopt.AnimParallel.conditionalGuard("battack"); // pzopt: guardedCallbacks, the vehicle walk stays on the game thread
                return !this.isUnderVehicle() && this.DistTo(this.target) < 1.3F;
             }
          }

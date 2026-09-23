@@ -4816,6 +4816,7 @@ public final class FBORenderCell {
       if (pzopt.Config.TREE_BAKE_MAX_CHUNKS_PER_SEC > 0) { sb.append(" | trees per-frame frames: ").append(pzoptTreesPerFrameFrames).append(" chunks/s now ").append(String.format(java.util.Locale.ROOT, "%.0f", pzopt.ChunkRate.perSecond())); } // pzopt: treeBakeMaxChunksPerSec
       sb.append(" | ").append(pzopt.AnimBatch.describe()); // pzopt: the zombies' bone-math batch
       sb.append(" | ").append(pzopt.ActionEval.describe()); // pzopt: the zombies' transition-evaluation batch
+      sb.append(" | ").append(pzopt.AnimParallel.describe()); // pzopt: animatorParallel
       sb.append(" | ").append(pzopt.CharDraw.describe()); // pzopt: charDrawPrep, the characters draw pre-pass
       sb.append(" | ").append(pzopt.LightingBatch.describe()); // pzopt: the lighting reads on the workers
       sb.append(" | ").append(pzopt.SeparateMask.describe()); // pzopt: separateFast, the cached grid answers

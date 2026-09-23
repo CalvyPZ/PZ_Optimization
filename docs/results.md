@@ -1722,6 +1722,58 @@ upscaler=fsr1 upscalerQuality=quality` (every other saved key cleared) and the s
 `lightFPS=10 uiRenderFPS=30`. Rig note: `xdotool click 1` on a tab button only hovers it (the tooltip
 appears, the handler never runs); `mousedown 1; sleep 0.15; mouseup 1` fires it.
 
+## Zombie postupdate pass (2026-09-23 night, runs `zt4-*`, worktree branch `zombie-lt4`)
+
+Goal: `MovingObjectUpdateScheduler.postupdate`, the biggest update sub-phase of the game thread on the Louisville horde
+(18 % after the zombie game-thread pass), under 4 %, with no visual change and a clean `console.txt`; secondary: use the
+cores. Desktop, `--preset louisville --prop uncappedFps=true --no-dashboard`, 25 s route, measured on origin/master
+874d3ec (the centerFirstLoad / resumeShot / Dell-hitching base) with this pass's keys off vs on, alternating.
+
+| | keys off | keys on |
+|---|---|---|
+| `postupdate` share (4 alternating pairs) | 15.5 / 17.0 / 14.7 / 16.1 → **15.8 %** | 3.5 / 3.3 / 4.3 / 4.2 → **3.8 %** |
+| all 16 clean keys-on runs (incl. the final build: 3.4 / 4.7 / 4.1) | | mean 4.07 %, 3.1-5.0 (the share moves ±0.8 run to run) |
+| fps (same 4 pairs) | 90.1 | **105.4** (+17 %) |
+
+In frame time the sub-phase went ~3.0 ms → ~0.6 ms a frame. What did it, in order of effect:
+
+1. **The bone batch runs asynchronously** (`animBatchAsync`): started on the workers at the end of the loop, joined at
+   `IsoWorld.FinishAnimation` (the game's own animation join point) or by the next batch. 18 → 10 % on its own.
+   0 early joins in every run (`guardJoins=`).
+2. **The animators on the workers** (`animatorParallel`): each zombie's animator, move deltas and track tick run in a
+   worker task, anim events captured and dispatched on the game thread in order. A zombie whose animator fires an event
+   finishes on the game thread (~15 per frame of ~800). 10 → 8 % at first: the tasks ran 2.4x slower in parallel than on
+   one thread, because
+3. **stock's model lock is one interned string for every model** (`modelLockPerInstance`): the only user,
+   `ModelSlot.Update`, serialised every worker. Per-instance lock: animator task time 5.3 → 2.7 ms a frame.
+4. **Pipelines** (`animatorPipeline`): the workers alone run the transition evaluation and then the animator batch while
+   the game thread applies each zombie as soon as it is ready (and takes an unstarted task while it waits).
+5. **Guarded callbacks** (`guardedCallbacks`): eight side-effecting zombie variables only have a rare side-effect branch;
+   they are read on the workers and that branch falls back to the game thread. Fewer game-thread pre-reads, and the whole
+   zombie anim set became safe for the workers (`statesUnsafe=0`).
+6. `poolStatsBatched` (the pool statistics CAS loops) and `lazyPose` (keyframe spans found at first read) trim the rest.
+
+Visual parity: recorded pair on the final build, keys off (`zt4-pA`) vs on (`zt4-pB`), same route, window 37-57 s:
+`parity-judge.py` verdict parity 0.97; black share 74.31 / 74.22 %, luma pops 0 / 0, solid blocks 0.09 / 0.08,
+transient pixels 255 / 221 per frame (fewer with the keys on); a matched frame pair at 47 s shows the same scene.
+
+Checks: `console.txt` has no exception in any run of the final build (the boot-time ConcurrentModificationException in
+`TileDepthTextureAssignmentManager.initSprites`, a race of earlyTilePacks with the world loader seen in about a third of
+the loads, is fixed; the main-menu update check no longer runs, and no longer logs GitHub's 403, in harness runs);
+`devActionEvalCheck` over 1,109,911 and 947,004 worker evaluations: 0 mismatches; `impure=0` and `failures=0` in every
+run. More workers do not help (`frameThreads=12` = 8); spinning workers between batches did not either (`frameSpinUs`
+default 0).
+
+Findings worth keeping:
+
+- **Measure the task time, not only the share.** Parallel code that "works" can be serialised by one shared monitor in
+  the game (the model lock) or by shared CAS counters; the per-task time with 1 vs 8 workers found it in one run.
+- **`headOnWorker` stays off.** Moving the head of `postUpdateAnimating` to the evaluation task was exact (0 mismatches)
+  but every run with it tipped the preset into its see_all re-bake flood (3 of 3, 0 of 3 off, same build), and a flooded
+  run shows an artificially low `postupdate` share. The same clustering showed up on the old base right after
+  `guardedCallbacks`; on 874d3ec none of the 14 clean runs flooded. The flood is the native NaN race (see
+  `louisville-see-all-nan-flood`), so this looks like a timing sensitivity of that race; not understood.
+
 ## Zombie game-thread pass (2026-09-22 afternoon, runs `zt*`)
 
 Goal: the `zombies` sub-phase of the game-thread profile (`IsoZombie.update` + `IsoZombie.postupdate`, as

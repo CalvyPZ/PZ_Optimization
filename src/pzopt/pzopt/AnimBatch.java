@@ -39,17 +39,32 @@ public final class AnimBatch {
 
    public static long batched, inline, frames, maxBatch, waitNanos, workNanos; // counters for the log
 
+   private static final boolean ASYNC = Config.ANIM_BATCH_ASYNC;
+   private static int pendingCount; // animBatchAsync: players[0..pendingCount) belong to the batch in flight
+
    /** Game thread: from here on the eligible zombies' bone math is queued instead of run. */
    public static void begin() {
+      join();
+      gameThread = Thread.currentThread();
       if (!ENABLED || failed) {
          return;
       }
       count = 0;
+      slot.set(0);
+      // the slots are claimed without a lock (animatorParallel submits from every frame worker), so the arrays are
+      // sized up front for every moving object of the cell; a submit past the end runs its bone math inline
+      int need = zombie.iso.IsoWorld.instance.getCell().getObjectList().size() + 64;
+      if (players.length < need) {
+         players = new AnimationPlayer[need * 2];
+         deltas = new float[need * 2];
+      }
       active = true;
    }
 
+   private static final java.util.concurrent.atomic.AtomicInteger slot = new java.util.concurrent.atomic.AtomicInteger();
+
    /** Called by AnimationPlayer.updateInternal in place of the standard-animation math; true = queued, run it later. */
-   public static boolean submit(AnimationPlayer player, float deltaT) {
+   public static boolean submit(AnimationPlayer player, float deltaT) { // lock-free: animatorParallel submits from the frame workers
       if (!active) {
          return false;
       }
@@ -63,13 +78,16 @@ public final class AnimBatch {
          inline++;
          return false;
       }
-      if (count == players.length) {
-         players = java.util.Arrays.copyOf(players, count * 2);
-         deltas = java.util.Arrays.copyOf(deltas, count * 2);
+      int i = slot.getAndIncrement();
+      if (i >= players.length) {
+         inline++;
+         return false; // more submitters than moving objects at begin(): cannot happen, but never write past the end
       }
-      players[count] = player;
-      deltas[count] = deltaT;
-      count++;
+      players[i] = player;
+      deltas[i] = deltaT;
+      if (ASYNC) {
+         player.pzoptInFlight = true;
+      }
       batched++;
       return true;
    }
@@ -80,12 +98,22 @@ public final class AnimBatch {
          return;
       }
       active = false;
+      count = Math.min(slot.get(), players.length); // every submitter has returned: the batches that submit were joined before this
       if (count == 0) {
          return;
       }
       frames++;
       if (count > maxBatch) {
          maxBatch = count;
+      }
+      if (ASYNC) {
+         // animBatchAsync: the workers compute the bones while the game thread goes on with the rest of the frame's
+         // logic; IsoWorld.FinishAnimation (the game's own join point of its threadAnimation debug option, right before
+         // the render phase) or the next frame batch joins it.
+         pendingCount = count;
+         count = 0;
+         FrameBatch.runAsync(pendingCount, i -> players[i].pzoptRunDeferred(deltas[i]), AnimBatch::asyncDone);
+         return;
       }
       long w0 = FrameBatch.workNanos;
       long q0 = FrameBatch.waitNanos;
@@ -100,10 +128,45 @@ public final class AnimBatch {
       count = 0;
    }
 
+   private static void asyncDone(Throwable t) {
+      if (t != null && !failed) {
+         failed = true;
+         Log.warn("animBonesParallel: deferred bone update failed, batching off: " + t);
+      }
+      for (int i = 0; i < pendingCount; i++) {
+         players[i].pzoptInFlight = false;
+      }
+      java.util.Arrays.fill(players, 0, pendingCount, null);
+      pendingCount = 0;
+   }
+
+   private static Thread gameThread;
+   public static long guardJoins; // animBatchAsync: game-thread touches of an in-flight player before the planned join
+
+   /** AnimationPlayer accessors of a player whose bones are in flight: the game thread waits for the batch first; a worker (the batch itself) goes on. */
+   public static void guard() {
+      if (pendingCount == 0 || Thread.currentThread() != gameThread || !FrameBatch.hasPending()) {
+         return;
+      }
+      guardJoins++;
+      if (Config.DEV_ANIM_ASYNC_TRACE && guardJoins <= 20) {
+         Log.info("animBatchAsync: early join from " + java.util.Arrays.toString(java.util.Arrays.copyOfRange(Thread.currentThread().getStackTrace(), 2, 9)));
+      }
+      join();
+   }
+
+   /** Game thread: wait for the bone batch in flight (animBatchAsync); every reader of a zombie's bones after the postupdate loop is behind this. */
+   public static void join() {
+      if (pendingCount > 0) {
+         FrameBatch.join();
+      }
+   }
+
    /** One line for the periodic FBORenderCell log. */
    public static String describe() {
       return "anim batch: frames=" + frames + " batched=" + batched + " inline=" + inline + " max=" + maxBatch
             + " work ms=" + (workNanos / 1_000_000L) + " wait ms=" + (waitNanos / 1_000_000L) + (failed ? " FAILED" : "")
+            + (ASYNC ? " async guardJoins=" + guardJoins : "")
             + " shadow computed=" + ShadowPrep.computed + " served=" + ShadowPrep.served + " fallback=" + ShadowPrep.fallback;
    }
 }

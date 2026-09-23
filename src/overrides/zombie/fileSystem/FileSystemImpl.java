@@ -204,6 +204,7 @@ public final class FileSystemImpl extends FileSystem {
    }
 
    private void pzoptUpdateAsyncTransactions() {
+      pzopt.SpriteWindow.drain(); // pzopt: depth-map loads that finished during the world loader's sprite refill
       int n = Math.min(this.inProgress.size(), this.maxInFlight); // pzopt: was 16
 
       for (int i = 0; i < n; i++) {
