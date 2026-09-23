@@ -1892,7 +1892,20 @@ local function layout(self, comboWidth)
              lineW = controlsW + gap / 2, margin = margin, controlW = controlW }
 end
 
+-- The page is added with the others (so the tab sits after Display) but its controls are built the first
+-- time it is shown: the in-game menu builds the whole options screen while the world is entered, and this
+-- tab was 101 of that screen's 124 ms on the flip (flip-opttime), on every Continue.
 function MainOptions:pzoptAddOptimizationsPanel()
+    self:addPage(TAB)
+    self.pzoptPanel = self.mainPanel
+    self.pzoptBuilt = false
+end
+
+function MainOptions:pzoptBuildOptimizationsPanel()
+    local pzoptT0 = getTimestampMs()
+    local savedPanel, savedAddY = self.mainPanel, self.addY
+    local firstOption = #self.gameOptions.options + 1
+    local wasChanged = self.gameOptions.changed
     local style = MainOptions.style
     local BUTTON_HGT = style.buttonHeight
     local y = style.initialY
@@ -1901,7 +1914,7 @@ function MainOptions:pzoptAddOptimizationsPanel()
     local L = layout(self, comboWidth)
     local splitpoint = L.splitpoint
 
-    self:addPage(TAB)
+    self.mainPanel = self.pzoptPanel
     local panel = self.mainPanel
     local p = perf()
     local added, pinned = 0, 0
@@ -1995,8 +2008,17 @@ function MainOptions:pzoptAddOptimizationsPanel()
     panel:addChild(preview)
     if rows[1] then preview:select(rows[1]) end
     self.pzoptPreview = preview
+    -- the screen's toUI ran before this tab existed: show the saved values and remember them as the current ones
+    for i = firstOption, #self.gameOptions.options do
+        local option = self.gameOptions.options[i]
+        option:toUI()
+        option:storeCurrentValue()
+    end
+    self.gameOptions.changed = wasChanged
+    self.mainPanel, self.addY = savedPanel, savedAddY
     print("[pzopt] options tab: " .. added .. " controls, " .. pinned .. " pinned by pzopt.properties or -D, "
-        .. #rows .. " preview rows, preview " .. L.previewW .. " px at x=" .. L.previewX)
+        .. #rows .. " preview rows, preview " .. L.previewW .. " px at x=" .. L.previewX
+        .. ", built in " .. (getTimestampMs() - pzoptT0) .. " ms")
 end
 
 local function install()
@@ -2008,6 +2030,31 @@ local function install()
     end
     MainOptions.pzoptOptimizationsTab = true
     -- The tab goes right after Display: create() adds the pages in order, so hook the Display page.
+    -- the whole options screen's build time, for the load trace (the in-game menu builds it while the world is entered)
+    local stockCreate = MainOptions.create
+    function MainOptions:create(...)
+        local t0 = getTimestampMs()
+        local r = stockCreate(self, ...)
+        print("[pzopt] options screen: MainOptions:create took " .. (getTimestampMs() - t0) .. " ms")
+        -- build the Optimizations tab when it is first shown (pzoptAddOptimizationsPanel added it empty)
+        local tabs = self.tabs
+        if tabs and self.pzoptPanel then
+            local stockOnActivate = tabs.onActivateView
+            tabs.onActivateView = function(target, tabPanel)
+                if target and target.pzoptPanel and not target.pzoptBuilt and tabPanel:getActiveView() == target.pzoptPanel then
+                    target.pzoptBuilt = true
+                    local ok, err = pcall(MainOptions.pzoptBuildOptimizationsPanel, target)
+                    if not ok then
+                        print("[pzopt] options tab: build failed: " .. tostring(err))
+                    end
+                end
+                if stockOnActivate then
+                    return stockOnActivate(target, tabPanel)
+                end
+            end
+        end
+        return r
+    end
     local stockAddDisplayPanel = MainOptions.addDisplayPanel
     function MainOptions:addDisplayPanel()
         stockAddDisplayPanel(self)

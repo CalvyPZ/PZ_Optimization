@@ -2886,3 +2886,24 @@ the loader's sprite window waits for the next file-system pump; a walk that stil
 
 The main-menu update check is skipped whenever the harness flag file asks for a run (`Harness.REQUESTED`); it used to
 test `Harness.active()`, which is still false at the menu, so every run polled GitHub and logged the 403 of its rate limit.
+
+### Map zones on Continue (`zoneEdgePrefilter`, 2026-09-23)
+
+The map-zones step of a Continue (0.72 s on the flip) was mostly Java called from the Lua `doMapZones`: registering each
+zone into every chunk its bounds touch (`IsoMetaCell.addZone`, 42 % of the step's loader-thread samples) and, for
+polygon and polyline zones, testing each chunk's four sides against every edge (24 %; JFR run `flip-zonesjfr`).
+`zombie.iso.zones.Zone` (new override): the edge loops of `lineSegmentIntersects` and `polylineOutlineSegmentIntersects`
+go to `pzopt.ZoneGeom`, which skips an edge whose bounding box is more than a tile from the side's before the stock
+per-edge arithmetic; the float error of that arithmetic at map coordinates is far below a tile, so the answers are the
+stock ones (`ZoneGeomTest`: 960,000 side tests identical). OnLoadMapZones 297 -> 270 ms on the flip (flip-zones-*).
+
+### Options screen built without the Optimizations tab (Lua, 2026-09-23)
+
+The in-game menu builds the whole options screen while the world is entered (and at boot and exit); the Optimizations
+tab was 101 of its 124 ms on the flip (`options screen: MainOptions:create took` / `options tab: ... built in` log
+lines). `pzopt_optimizations_options.lua` now adds the tab's page empty and builds its controls the first time the tab is
+activated (the tab panel's `onActivateView`, which mouse, joypad and `activateView` all reach), then loads the saved
+values into them and keeps the screen's changed flag as it was. World entry: the screen builds in 28 ms. Harness rig:
+`--flag options_check=S` activates the tab S seconds into the world and logs the build (flip-lazytab: 152 controls,
+changed=false, no second build).
+

@@ -134,9 +134,39 @@ local function lureTick()
     end
 end
 
+-- options_check=S (2026-09-23): S seconds into the world, activate the Optimizations tab of the in-game options
+-- screen (built lazily on first activation since the lazy-tab change) through the stock tab path, without
+-- showing the screen, and log whether it built, its control count and whether building left the screen
+-- "changed" (it must not: Accept would then save untouched values).
+local optionsCheck = nil
+local function optionsCheckTick()
+    if optionsCheck == false then return end
+    if not getPlayer() then return end
+    if optionsCheck == nil then
+        local flags = readFlags()
+        if not flags or not flags.options_check or flags.options_check == "" then optionsCheck = false; return end
+        optionsCheck = { atMs = getTimestampMs() + (tonumber(flags.options_check) or 10) * 1000 }
+    end
+    if getTimestampMs() < optionsCheck.atMs then return end
+    optionsCheck = false
+    local mo = MainScreen.instance and MainScreen.instance.mainOptions
+    if not mo or not mo.tabs then print("[pzopt-harness] options check: no in-game MainOptions"); return end
+    local before = mo.pzoptBuilt
+    local nBefore = #mo.gameOptions.options
+    local t0 = getTimestampMs()
+    mo.tabs:activateView("Optimizations")
+    print(string.format("[pzopt-harness] options check: built before=%s after=%s in %d ms, controls=%d, game options %d -> %d, changed=%s, active=%s",
+        tostring(before), tostring(mo.pzoptBuilt), getTimestampMs() - t0, mo.pzoptOptions and #mo.pzoptOptions or -1,
+        nBefore, #mo.gameOptions.options, tostring(mo.gameOptions.changed), tostring(mo.tabs:getActiveView() == mo.pzoptPanel)))
+    mo.tabs:activateView("Optimizations") -- a second activation must not build again
+    print("[pzopt-harness] options check: second activation, game options " .. #mo.gameOptions.options)
+end
+
 local function onTickEvenPaused()
     local ok, err = pcall(lureTick)
     if not ok then print("[pzopt-harness] lure: rig error " .. tostring(err)); lure = false end
+    local ok2, err2 = pcall(optionsCheckTick)
+    if not ok2 then print("[pzopt-harness] options check: rig error " .. tostring(err2)); optionsCheck = false end
     if quitAtMs and getTimestampMs() >= quitAtMs then
         quitAtMs = nil
         print("[pzopt-harness] quit_after reached, quitting")

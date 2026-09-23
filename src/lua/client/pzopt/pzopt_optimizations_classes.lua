@@ -208,6 +208,7 @@ PzoptOptionClasses = {
     zombieSimLodSteps = { "MovingObjectUpdateScheduler" },
     zombieSimLodTiles = { "MovingObjectUpdateScheduler" },
     zombieSpotFast = { "IsoZombie" },
+    zoneEdgePrefilter = { "Zone" },
     zoomEase = { "MultiTextureFBO2" },
     zoomEaseMs = { "MultiTextureFBO2", "pzopt.ZoomEase" },
     zoomFrameMs = { "FBORenderCell" },

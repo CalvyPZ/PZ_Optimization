@@ -157,6 +157,9 @@ import java.util.Properties;
  *   depthMapFast    true/false   tile depth maps: each tile's pixels read with one bulk get per row instead of two
  *                            bounds-checked gets per pixel (TileDepthTexture override, pzopt.PngFilters.depthTile), the
  *                            same values (default true)
+ *   zoneEdgePrefilter true/false map zones on Continue: a geometry zone's chunk tests skip the polygon edges whose bounding
+ *                            box is more than a tile from the chunk side before the stock arithmetic (pzopt.ZoneGeom, Zone
+ *                            override), the same answers; they were 20 % of the map-zones step (default true)
  *   fileThreadsWait int          file pool width while the loader thread only waits for the file tasks (assetLock2, the
  *                            main thread idle too); back to fileThreads afterwards (default: cores)
  *   textureBufferMb int          decoded-texture bytes that may wait for the render thread before the decoders pause
@@ -448,6 +451,7 @@ public final class Config {
    public static final int FILE_INFLIGHT = Math.max(1, integer("fileInflight", 4 * FILE_THREADS));
    public static final boolean PNG_PAETH_FAST = bool("pngPaethFast", true);
    public static final boolean DEPTH_MAP_FAST = bool("depthMapFast", true);
+   public static final boolean ZONE_EDGE_PREFILTER = bool("zoneEdgePrefilter", true);
    public static final int FILE_INFLIGHT_LOAD = Math.max(FILE_INFLIGHT, integer("fileInflightLoad", 128));
    public static final int FILE_THREADS_WAIT = Math.max(1, integer("fileThreadsWait", Runtime.getRuntime().availableProcessors()));
    public static final int TEXTURE_BUFFER_MB = Math.max(1, integer("textureBufferMb", 50));
