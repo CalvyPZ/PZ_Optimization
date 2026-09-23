@@ -567,8 +567,11 @@ replayed).
 Replayed with GLFW 3.4 under Wine (a C copy of the call sequence, stock / 4bb5acb
 / new): stock ends as a 1920x1080 `WS_POPUP` at 0,0 after two transitions.
 Now `create()` sets `GLFW_DECORATED` 0 and `isBorderlessWindow` for a
-borderless window, so it is created undecorated at the monitor origin, which is
-stock's final state; Core's switch finds it done. `setDisplayModeAndFullscreenInternal`
+borderless window on Win32, so it is created undecorated at the monitor origin,
+which is stock's final state; Core's switch finds it done. Linux keeps the
+decorated creation: nobody reported the offset there, and with the window mapped
+undecorated at the screen size (desktop, KWin) the Workshop uploader's native
+confirm dialog was not on top and the upload of 1718aa0 did not go through. `setDisplayModeAndFullscreenInternal`
 also re-places a borderless window that is not where `calcWindowPos` puts it
 (`pzoptBorderlessMisplaced`, not on Wayland: no window position there), which
 covers switching windowed -> borderless at the desktop size in the options

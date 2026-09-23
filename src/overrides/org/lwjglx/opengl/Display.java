@@ -159,13 +159,18 @@ public class Display {
          if (!pzoptFullscreen && pzoptCore.getOptionBorderlessWindow()) {
             w = monitorWidth;
             h = monitorHeight;
-            // pzopt: borderless is created undecorated, i.e. already in the state Core's switch would put it in. A
-            // decorated desktop-sized window on Windows is either clamped to the screen's max track size (1920x1058
-            // under Wine) or, when it fits the max track size (multi-monitor desktops), left at the caption's offset
-            // (client at 8,31) by the decoration removal, which keeps the client rect, while the switch then finds the
-            // size unchanged and never moves it to 0,0: the menu showed off centre and clicks landed above the cursor.
-            GLFW.glfwWindowHint(GLFW.GLFW_DECORATED, 0); // pzopt: see above
-            isBorderlessWindow = true; // pzopt: calcWindowPos places it at the monitor origin, Core's check sees it done
+            // pzopt: on Windows borderless is created undecorated, i.e. already in the state Core's switch would put
+            // it in. A decorated desktop-sized window there is either clamped to the screen's max track size
+            // (1920x1058 under Wine) or, when it fits the max track size (multi-monitor desktops), left at the
+            // caption's offset (client at 8,31) by the decoration removal, which keeps the client rect, while the
+            // switch then finds the size unchanged and never moves it to 0,0: the menu showed off centre and clicks
+            // landed above the cursor. X11 window managers resize and place the window themselves and nobody reported
+            // it there; with the window mapped undecorated at the screen size the Workshop uploader's native confirm
+            // dialog was not on top (desktop, KWin, 2026-09-23), so Linux keeps the stock decorated creation.
+            if (GLFW.glfwGetPlatform() == GLFW.GLFW_PLATFORM_WIN32) {
+               GLFW.glfwWindowHint(GLFW.GLFW_DECORATED, 0); // pzopt: see above
+               isBorderlessWindow = true; // pzopt: calcWindowPos places it at the monitor origin, Core's check sees it done
+            }
          }
          if (pzoptFullscreen) {
             GLFW.glfwWindowHint(GLFW.GLFW_REFRESH_RATE, monitorRefreshRate); // the desktop's rate: no video mode switch

@@ -126,6 +126,14 @@ def run_step(step, opts, screen=None):
     """Screenshot -> focus -> OCR -> Jev -> click. Returns (ok, detail)."""
     name, expected, target = step["name"], step["expect"], step.get("click")
     t0 = time.time()
+    dialog = None
+    if step.get("native_dialog") and not screen and not opts["dry_run"]:
+        # a dialog of another process may open behind a desktop-sized game window (and its size and place vary):
+        # find it by title and raise it before the screenshot, so the OCR reads its buttons
+        dialog = find_window(step["native_dialog"], step.get("dialog_timeout", 8.0))
+        if dialog:
+            subprocess.run(["xdotool", "windowactivate", "--sync", dialog], check=False, capture_output=True)
+            time.sleep(0.5)
     png = Path(screen) if screen else screenshot()
     if not screen and not opts["no_focus"] and not step.get("focus_any"):
         title = active_window()
@@ -151,6 +159,11 @@ def run_step(step, opts, screen=None):
         return True, detail
     if pick and tgt["confidence"] >= opts["target_threshold"]:
         x, y = pick["x"], pick["y"]
+    elif dialog and step.get("dialog_key"):
+        if opts["dry_run"]:
+            return True, detail + f"\n  dry run: would send {step['dialog_key']} to window {dialog}"
+        subprocess.run(["xdotool", "key", "--window", dialog, step["dialog_key"]], check=False)
+        return True, detail + f"\n  no readable control; sent {step['dialog_key']} to the dialog window {dialog} (its default button)"
     elif step.get("fallback") and (step.get("fallback_when") is None or step["fallback_when"]()):
         x, y = step["fallback"]
         detail += f"\n  no readable control, using the skill's coordinates ({x},{y})" + (" (condition met)" if step.get("fallback_when") else "")
@@ -160,6 +173,19 @@ def run_step(step, opts, screen=None):
         return True, detail + f"\n  dry run: would press at screen ({x},{y}) = pointer ({int(x / opts['scale'])},{int(y / opts['scale'])})"
     press(x, y, opts["scale"])
     return True, detail
+
+
+def find_window(title, timeout):
+    """The id of a visible window whose title contains `title`, waiting up to `timeout` s; None when none shows."""
+    end = time.time() + timeout
+    while True:
+        r = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", re.escape(title)], capture_output=True, text=True)
+        ids = r.stdout.split()
+        if ids:
+            return ids[-1]
+        if time.time() >= end:
+            return None
+        time.sleep(0.5)
 
 
 def type_text(text, opts):
@@ -185,7 +211,8 @@ def workshop_steps(notes, log_start=0):
         {"name": "change notes box", "expect": "title 'Edit Change Notes' with CANCEL and ACCEPT at the bottom (the empty text box itself has no OCR text)", "click": None, "then_type": notes, "type_at": (2000, 750)},
         {"name": "accept notes", "expect": "title 'Edit Change Notes' with the typed change-notes text and CANCEL / ACCEPT at the bottom", "click": "ACCEPT", "fallback": (2624, 2012)},
         {"name": "upload", "expect": "title 'Prepare to publish item' with 'Edit Change Notes' and 'Upload to Steam Workshop now!'", "click": "Upload to Steam Workshop now!", "fallback": (2560, 1272)},
-        {"name": "confirm", "expect": "a native dialog with 'Steam Workshop upload requested' / a WARNING line about a popup box, and Ok / Cancel buttons, over the 'Prepare to publish item' screen", "click": "Ok", "fallback": (2984, 1204), "wait_before": 1.0, "focus_any": True},  # a native dialog, not the game window
+        {"name": "confirm", "expect": "a native dialog with 'Steam Workshop upload requested' / a WARNING line about a popup box, and Ok / Cancel buttons, over the 'Prepare to publish item' screen", "click": "Ok", "fallback": (2984, 1204), "wait_before": 1.0, "focus_any": True,
+         "native_dialog": "Steam Workshop upload requested", "dialog_key": "Return"},  # a native dialog, not the game window; Ok is its default button
         # CLOSE appears only when the upload has finished (~6 s); the step polls for it, the log lines OCR as noise
         # CLOSE has never been OCR'd (no deploy screenshot caught it), so its coordinates are allowed once Steam's
         # own log says the upload finished: a blind CLOSE mid-upload is the one click that must never happen
