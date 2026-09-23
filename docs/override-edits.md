@@ -2959,7 +2959,10 @@ now replaces `MainOptions.create`: while the screen is hidden it runs only the p
 the key bindings (`MainOptions.loadKeys`, which registers them with the core, and the `keysB42.ini` rewrite stock does
 after a key-file version change), and builds the rest the first time the screen is used: `toUI` (MainScreen calls it
 before showing the screen) or `setVisible(true)`. A resolution change before that is skipped (the build uses the size in
-force then). The deferral only happens while our wrapper is still the installed `MainOptions.create`; a mod that wrapped
+force then), and so is `doLayout`: `ISUIElement.setVisible(true)` lays out every child, so Esc in game (MainScreen
+shown) reached stock `centerKeybindings` on the unbuilt screen, which failed on `keyButtonWidth` (nil until the build)
+and aborted the pause menu's layout, leaving it without its buttons (shipped in 8cb8ccf..be1f28a, fixed in 3e0324c;
+the `options_check` rig opens through `toUI` and never took that path). The deferral only happens while our wrapper is still the installed `MainOptions.create`; a mod that wrapped
 it later gets the stock build. Flip (flip-lazymenu-*): main menu build 654 -> 410 ms, in-game menu 28.5 -> 2.3 ms, the
 same key bindings with the screen deferred, and opening it builds the 119 stock options (28 ms) then the Optimizations
 tab on activation. `--prop lazyOptionsScreen=false` restores the eager build.
