@@ -553,6 +553,30 @@ and every launch stayed at 1061. `create()` now reads the window size back for
 windowed windows too and stores it in `gameWindowMode`, so the stock switch
 issues that resize whenever the window came out smaller than asked.
 
+Follow-up (2026-09-23, issue #14 and Workshop reports "borderless windowed: the
+menu is a little off centre and clicks land above the cursor", Windows 11, build
+4bb5acb): the borderless window was created *decorated* at the desktop size and
+only lost its decoration in Core's switch. `glfwSetWindowAttrib(DECORATED, 0)`
+keeps the client rect, so the result depended on Windows: clamped to the max
+track size (1920x1058 under Wine, the 1061 report) the switch resized it to
+0,0; not clamped (a max track size larger than the monitor, e.g. more than one
+monitor) the client stays at the caption offset (8,31) with its bottom rows
+off screen, and `setDisplayMode` finds the size unchanged and never moves it
+(read from the call sequence; Wine always clamps, so only the clamped branch was
+replayed).
+Replayed with GLFW 3.4 under Wine (a C copy of the call sequence, stock / 4bb5acb
+/ new): stock ends as a 1920x1080 `WS_POPUP` at 0,0 after two transitions.
+Now `create()` sets `GLFW_DECORATED` 0 and `isBorderlessWindow` for a
+borderless window, so it is created undecorated at the monitor origin, which is
+stock's final state; Core's switch finds it done. `setDisplayModeAndFullscreenInternal`
+also re-places a borderless window that is not where `calcWindowPos` puts it
+(`pzoptBorderlessMisplaced`, not on Wayland: no window position there), which
+covers switching windowed -> borderless at the desktop size in the options
+screen (a stock bug as well). The HiDPI cursor scale (framebuffer / window size)
+is applied only on Cocoa and Wayland, the platforms where the two sizes differ;
+on Win32 and X11 both are the client area, so a ratio other than 1 could only be
+two sizes recorded at different moments.
+
 ## zombie.scripting.ScriptParser (added 2026-09-19, evening, boot)
 
 `stripComments` first tries `pzopt.ScriptText.stripComments` (one forward pass

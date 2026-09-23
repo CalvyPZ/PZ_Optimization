@@ -5,11 +5,14 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.util.Properties;
+import se.krka.kahlua.vm.KahluaTable;
 import zombie.GameWindow;
+import zombie.Lua.LuaManager;
 import zombie.SystemDisabler;
 import zombie.ZomboidFileSystem;
 import zombie.core.PerformanceSettings;
 import zombie.gameStates.GameLoadingState;
+import zombie.ui.UIElement;
 
 /**
  * Frame limiter: makes the game's own "Uncapped" option usable and adds a separate cap for
@@ -21,7 +24,7 @@ import zombie.gameStates.GameLoadingState;
  * loadOptions; it enables the combo entry and re-applies the saved frameRate / uncappedFPS
  * pair snapshotted by {@link #beforeLoadOptions()} (Core re-saves the file before we run). The limiter itself is the stock accumulator in
  * GameWindow.mainThreadStep, which now asks {@link #uncappedNow()} / {@link #lockNow()}: the
- * in-game values while a world is up or loading, the menu values otherwise.
+ * in-game values while a world is up or loading, the menu values otherwise and while the pause menu is up.
  *
  * The menu cap is one combo index ("Menu framerate" in Display options, added by
  * media/lua/client/pzopt/pzopt_framecap_options.lua): 1 = same as in-game, 2 = uncapped,
@@ -65,9 +68,36 @@ public final class FrameCap {
       return GameWindow.isIngameState() || GameWindow.states.current instanceof GameLoadingState;
    }
 
+   /**
+    * Main thread: the pause menu (Esc in a game: the in-game MainScreen shown over the world, options screens
+    * included) is up. It is a menu like the main menu, so it runs at the menu cap; stock only knows the in-game one
+    * and an uncapped game drew its pause menu at several hundred fps.
+    */
+   static boolean pauseMenuUp() {
+      if (!GameWindow.isIngameState()) {
+         return false;
+      }
+      try {
+         KahluaTable env = LuaManager.env;
+         Object screen = env == null ? null : env.rawget("MainScreen");
+         Object inst = screen instanceof KahluaTable t ? t.rawget("instance") : null;
+         if (!(inst instanceof KahluaTable ms) || ms.rawget("inGame") != Boolean.TRUE) {
+            return false;
+         }
+         return ms.rawget("javaObject") instanceof UIElement el && el.isVisible();
+      } catch (Throwable t) {
+         return false;
+      }
+   }
+
+   /** Main thread: the menu cap applies now (not in a world or its loading screen, or the pause menu is up). */
+   static boolean menuNow() {
+      return !inGame() || pauseMenuUp();
+   }
+
    /** Main thread only: is the current state's cap "uncapped"? */
    public static boolean uncappedNow() {
-      if (!Overrides.enabled() || menuIndex == MENU_SAME || inGame()) {
+      if (!Overrides.enabled() || menuIndex == MENU_SAME || !menuNow()) {
          return PerformanceSettings.instance.isFramerateUncapped();
       }
       return menuIndex == MENU_UNCAPPED;
@@ -75,7 +105,7 @@ public final class FrameCap {
 
    /** Main thread only: the fps lock for the current state; only meaningful when not uncapped. */
    public static int lockNow() {
-      if (!Overrides.enabled() || menuIndex == MENU_SAME || inGame()) {
+      if (!Overrides.enabled() || menuIndex == MENU_SAME || !menuNow()) {
          return Math.max(1, PerformanceSettings.getLockFPS());
       }
       return menuIndex == MENU_UNCAPPED ? Math.max(1, PerformanceSettings.getLockFPS()) : FPS_TABLE[menuIndex - 3];
@@ -89,7 +119,7 @@ public final class FrameCap {
 
    /** Main thread, after every frameStep: logs "menu 3.2 s, 144 frames, 45.0 fps" when the phase flips. */
    public static void onFrame(long nowNs) {
-      boolean game = inGame();
+      boolean game = !menuNow();
       if (phaseStartNs == 0L) {
          phaseInGame = game;
          phaseStartNs = nowNs;

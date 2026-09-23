@@ -181,7 +181,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
 - Remaining tail with the PZDashboard mod is its 2 s collectors; measure with `--no-dashboard`.
 - Uncapped: NVIDIA GL is GPU-bound (98 %) at 570 fps; Zink blocks ~1.8 ms/frame in swap.
   The in-game limiter is stock again; "Uncapped" is a real Display-options entry and a
-  second "Menu framerate" combo caps the menus separately (`pzopt.FrameCap`, Lua under
+  second "Menu framerate" combo caps the menus separately, the in-game pause menu included since 2026-09-23 (`pzopt.FrameCap`, Lua under
   `src/lua/`, setting in `~/Zomboid/pzopt/framecap.ini`). Uncapped runs: `--prop uncappedFps=true`.
   `uiRenderOffscreen=true` in options.ini removes the per-frame Lua UI draw. Both combos also
   offer 500/430/400/330/300 fps; the in-game choice is snapshotted before `Core.loadOptions`

@@ -192,7 +192,54 @@ local function optionsCheckTick()
     print("[pzopt-harness] options check: second activation, game options " .. #mo.gameOptions.options)
 end
 
+-- pause_menu=S (2026-09-23): S seconds into the world, open the pause menu the way Esc does (ToggleEscapeMenu),
+-- close it pause_menu_secs (5) later. pause_menu_cap=<fps> sets the "Menu framerate" combo to that entry for the
+-- rig and puts the player's choice back when the menu closes. The frame cap's own console line ("frame cap: menu
+-- phase 5.0 s, 300 frames, 60.0 fps (cap 60 fps)") is the measurement: the pause menu runs at the menu cap.
+local pauseMenu = nil
+local function escapeKey()
+    local k = getCore():getKey("Main Menu")
+    return k ~= 0 and k or Keyboard.KEY_ESCAPE
+end
+local function pauseMenuTick()
+    if pauseMenu == false then return end
+    if not getPlayer() then return end
+    if pauseMenu == nil then
+        local flags = readFlags()
+        if not flags or not flags.pause_menu or flags.pause_menu == "" then pauseMenu = false; return end
+        pauseMenu = { openMs = getTimestampMs() + (tonumber(flags.pause_menu) or 10) * 1000,
+            secs = tonumber(flags.pause_menu_secs) or 5, cap = tonumber(flags.pause_menu_cap) }
+    end
+    local now = getTimestampMs()
+    if not pauseMenu.closeMs and now >= pauseMenu.openMs then
+        local perf = getPerformance()
+        if pauseMenu.cap then
+            pauseMenu.oldIndex = perf:getMenuFramerateIndex()
+            local fpsTable = { 500, 430, 400, 330, 300, 244, 240, 165, 144, 120, 95, 90, 75, 60, 55, 45, 30, 24 } -- FrameCap.FPS_TABLE
+            for i, fps in ipairs(fpsTable) do
+                if fps == pauseMenu.cap then perf:setMenuFramerateIndex(i + 2) end
+            end
+        end
+        ToggleEscapeMenu(escapeKey())
+        pauseMenu.closeMs = now + pauseMenu.secs * 1000
+        print("[pzopt-harness] pause menu: open=" .. tostring(MainScreen.instance and MainScreen.instance:isVisible())
+            .. " menu cap index=" .. tostring(perf:getMenuFramerateIndex()))
+    elseif pauseMenu.closeMs and not pauseMenu.closed and now >= pauseMenu.closeMs then
+        if MainScreen.instance and MainScreen.instance:isVisible() then
+            ToggleEscapeMenu(escapeKey())
+        end
+        pauseMenu.closed = true
+        print("[pzopt-harness] pause menu: closed, open=" .. tostring(MainScreen.instance and MainScreen.instance:isVisible()))
+    elseif pauseMenu.closed and now >= pauseMenu.closeMs + 1000 then
+        -- a second later, so the frame cap's phase line still names the rig's cap
+        if pauseMenu.oldIndex then getPerformance():setMenuFramerateIndex(pauseMenu.oldIndex) end
+        pauseMenu = false
+    end
+end
+
 local function onTickEvenPaused()
+    local ok3, err3 = pcall(pauseMenuTick)
+    if not ok3 then print("[pzopt-harness] pause menu: rig error " .. tostring(err3)); pauseMenu = false end
     local ok, err = pcall(lureTick)
     if not ok then print("[pzopt-harness] lure: rig error " .. tostring(err)); lure = false end
     local ok2, err2 = pcall(optionsCheckTick)

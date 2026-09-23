@@ -159,6 +159,13 @@ public class Display {
          if (!pzoptFullscreen && pzoptCore.getOptionBorderlessWindow()) {
             w = monitorWidth;
             h = monitorHeight;
+            // pzopt: borderless is created undecorated, i.e. already in the state Core's switch would put it in. A
+            // decorated desktop-sized window on Windows is either clamped to the screen's max track size (1920x1058
+            // under Wine) or, when it fits the max track size (multi-monitor desktops), left at the caption's offset
+            // (client at 8,31) by the decoration removal, which keeps the client rect, while the switch then finds the
+            // size unchanged and never moves it to 0,0: the menu showed off centre and clicks landed above the cursor.
+            GLFW.glfwWindowHint(GLFW.GLFW_DECORATED, 0); // pzopt: see above
+            isBorderlessWindow = true; // pzopt: calcWindowPos places it at the monitor origin, Core's check sees it done
          }
          if (pzoptFullscreen) {
             GLFW.glfwWindowHint(GLFW.GLFW_REFRESH_RATE, monitorRefreshRate); // the desktop's rate: no video mode switch
@@ -470,7 +477,7 @@ public class Display {
       DisplayMode oldMode = gameWindowMode;
       gameWindowMode = mode;
       Core.setFullScreen(fullscreen);
-      if (isCreated() && (wasFullscreen != fullscreen || !gameWindowMode.equals(oldMode))) {
+      if (isCreated() && (wasFullscreen != fullscreen || !gameWindowMode.equals(oldMode) || !fullscreen && pzoptBorderlessMisplaced())) { // pzopt: also re-place a borderless window the decoration removal left off the monitor origin
          GLFW.glfwHideWindow(Display.Window.handle);
          calcWindowPos(fullscreen || isBorderlessWindow());
          GLFW.glfwSetWindowMonitor(
@@ -497,6 +504,23 @@ public class Display {
          GLFW.glfwSwapBuffers(Display.Window.handle);
          setVSyncEnabled(vsyncEnabled);
       }
+   }
+
+   /**
+    * pzopt: a borderless window whose client area is not where calcWindowPos puts it (the monitor origin for a
+    * desktop-sized one). Switching windowed -> borderless at the same size only removes the decoration, which keeps
+    * the client rect, so the window stayed at the old caption offset with its bottom rows off screen.
+    */
+   private static boolean pzoptBorderlessMisplaced() {
+      if (!isBorderlessWindow() || GLFW.glfwGetWindowMonitor(Display.Window.handle) != 0L || GLFW.glfwGetPlatform() == GLFW.GLFW_PLATFORM_WAYLAND) { // Wayland has no window position
+         return false;
+      }
+      int[] x = new int[1];
+      int[] y = new int[1];
+      GLFW.glfwGetWindowPos(Display.Window.handle, x, y);
+      int wantX = Math.max(0, (desktopDisplayMode.getWidth() - gameWindowMode.getWidth()) / 2);
+      int wantY = Math.max(0, (desktopDisplayMode.getHeight() - gameWindowMode.getHeight()) / 2);
+      return x[0] != wantX || y[0] != wantY;
    }
 
    /**
@@ -651,12 +675,21 @@ public class Display {
 
    /** pzopt: framebuffer pixels per screen coordinate along X (1.0 when GLFW does not scale). */
    public static double getFramebufferScaleX() {
-      return displayFramebufferWidth > 0 && latestWidth > 0 ? (double)displayFramebufferWidth / latestWidth : 1.0;
+      return pzoptScalesFramebuffer() && displayFramebufferWidth > 0 && latestWidth > 0 ? (double)displayFramebufferWidth / latestWidth : 1.0;
    }
 
    /** pzopt: framebuffer pixels per screen coordinate along Y (1.0 when GLFW does not scale). */
    public static double getFramebufferScaleY() {
-      return displayFramebufferHeight > 0 && latestHeight > 0 ? (double)displayFramebufferHeight / latestHeight : 1.0;
+      return pzoptScalesFramebuffer() && displayFramebufferHeight > 0 && latestHeight > 0 ? (double)displayFramebufferHeight / latestHeight : 1.0;
+   }
+
+   /**
+    * pzopt: only Cocoa and Wayland give the framebuffer another size than the window; on Win32 and X11 both are the
+    * client area, so a ratio other than 1 there is two sizes recorded at different moments, never a real scale.
+    */
+   private static boolean pzoptScalesFramebuffer() {
+      int platform = GLFW.glfwGetPlatform();
+      return platform == GLFW.GLFW_PLATFORM_COCOA || platform == GLFW.GLFW_PLATFORM_WAYLAND;
    }
 
    public static int getFramebufferWidth() {
