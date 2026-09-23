@@ -108,7 +108,11 @@ chunk grid vs 15x15 on the Rosewood spin and the 120 km/h drive, everything on, 
 the "New! Performance overlay in the menus" card (`docs/media/overlay-item-card.png` from `harness/overlay-item-card.py`:
 the main menu with the pad focus on the SHOW / HIDE PERFORMANCE OVERLAY item and the pause menu, captures of
 `harness/pad-overlay-check.sh`; 2026-09-23, release 4ab3fe8): the render distance card lost its "New!", the showcase
-caption and two upscaler sentences were shortened (page 7,899 substituted characters).
+caption and two upscaler sentences were shortened (page 7,899 substituted characters). `20` the "New! Zombie hordes on
+all cores" card (`docs/media/zombie-cores-comparison.png` from `harness/zombie-cores-table.py`: the Louisville horde,
+four alternating pairs of the same build with the zombie postupdate pass's keys off vs on, runs `zt4-r-*`; 2026-09-23,
+release 5db6a37): the overlay, render distance and upscaler cards lost their `[h1]` headings (their images carry the
+titles; page 7,892 substituted characters).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes

@@ -8,13 +8,13 @@ https://github.com/xD3I/PZ_Optimization
 [url=https://github.com/xD3I/PZ_Optimization#readme][img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/00-showcase-thumbnail.gif[/img][/url]
 [i]Uncapped at 5120x2160, the in-game overlay (F9) live at the bottom; the video is on the repository page.[/i]
 
-[h1]New! Performance overlay in the menus[/h1]
+[h1]New! Zombie hordes on all cores[/h1]
+[img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/20-zombie-cores.jpg[/img]
+
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/19-overlay-item.jpg[/img]
 
-[h1]Render distance[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/18-render-distance.jpg[/img]
 
-[h1]Upscaler: FSR 1.0 and DLSS[/h1]
 [img]https://raw.githubusercontent.com/xD3I/PZ_Optimization/master/docs/workshop/images/17-upscaler.jpg[/img]
 With an upscaler on, the world is rendered at a fraction of the screen (Quality 67 %, Performance 50 % per axis) and scaled back up before the UI, text, cursor and screen shader, which stay at full resolution. FSR 1.0 (any GPU) rebuilds edges and re-sharpens in ~0.1 ms; DLSS (RTX; build the shim, see the README) also accumulates detail across frames.
 Turn it on: Options > Optimizations > Upscaling > Upscaler = fsr1, pick the quality, restart (console.txt: "[pzopt] upscaler: fsr1 at 50 %").
