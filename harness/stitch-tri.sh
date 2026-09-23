@@ -37,6 +37,13 @@ BEFORE_REV="${BEFORE_REV:-$(git -C /tmp/pzopt-before rev-parse --short HEAD 2>/d
 LABEL_STOCK="${LABEL_STOCK:-STOCK GAME  (every optimization off, overlay + profiler on)}"
 LABEL_BEFORE="${LABEL_BEFORE:-OPTIMIZED, BEFORE THE UNCOMMITTED CHANGES OF 2026-09-22  (commit $BEFORE_REV)}"
 LABEL_AFTER="${LABEL_AFTER:-OPTIMIZED, WITH THE CHANGES OF 2026-09-22  (working tree)}"
+# the results panel's three headings and three footnote lines (defaults: the 2026-09-22 comparison)
+HEAD_STOCK="${HEAD_STOCK:-STOCK GAME}"
+HEAD_BEFORE="${HEAD_BEFORE:-OPTIMIZED, BEFORE THE UNCOMMITTED CHANGES OF 2026-09-22}"
+HEAD_AFTER="${HEAD_AFTER:-OPTIMIZED, WITH THE CHANGES OF 2026-09-22}"
+NOTE1="${NOTE1:-Same save, route, settings and hardware. Every run shows the in-game overlay with the game-thread tree}"
+NOTE2="${NOTE2:-and flame graph and records a 1 ms JFR profile. Stock = every optimization key off (the overlay needs the overrides loaded).}"
+NOTE3="${NOTE3:-Before = the last commit. After = the working tree of 2026-09-22. Overlay numbers = the last 5 s; result lines = the whole route.}"
 FONT=/usr/share/fonts/noto/NotoSans-Bold.ttf
 [ -f "$FONT" ] || FONT=$(fc-match -f '%{file}' 'DejaVu Sans:bold')
 
@@ -119,18 +126,18 @@ $(label "$LABEL_BEFORE" "${CW}+(${CW}-tw)/2" "${Y1L}+8"),
 $(label "$LABEL_AFTER" "(${CW}-tw)/2" "${Y2L}+8"),
 $(label "RESULTS  -  the route window${zomb}, no frame cap" "${CW}+(${CW}-tw)/2" "${Y2L}+8"),
 $(ptext "$route" 40 36 $TXT),
-$(ptext 'STOCK GAME' 130 50 $RED),
+$(ptext "$HEAD_STOCK" 130 50 $RED),
 $(ptext "$RES_STOCK" 192 40 $TXT),
 $(ptext "$PROF_STOCK" 240 34 $DIM),
-$(ptext 'OPTIMIZED, BEFORE THE UNCOMMITTED CHANGES OF 2026-09-22' 330 50 $AMB),
+$(ptext "$HEAD_BEFORE" 330 50 $AMB),
 $(ptext "$RES_BEFORE" 392 40 $TXT),
 $(ptext "$PROF_BEFORE" 440 34 $DIM),
-$(ptext 'OPTIMIZED, WITH THE CHANGES OF 2026-09-22' 530 50 $GRN),
+$(ptext "$HEAD_AFTER" 530 50 $GRN),
 $(ptext "$RES_AFTER" 592 40 $TXT),
 $(ptext "$PROF_AFTER" 640 34 $DIM),
-$(ptext 'Same save, route, settings and hardware. Every run shows the in-game overlay with the game-thread tree' 760 34 $DIM),
-$(ptext 'and flame graph and records a 1 ms JFR profile. Stock = every optimization key off (the overlay needs the overrides loaded).' 806 34 $DIM),
-$(ptext 'Before = the last commit. After = the working tree of 2026-09-22. Overlay numbers = the last 5 s; result lines = the whole route.' 852 34 $DIM),
+$(ptext "$NOTE1" 760 34 $DIM),
+$(ptext "$NOTE2" 806 34 $DIM),
+$(ptext "$NOTE3" 852 34 $DIM),
 drawtext=fontfile=$FONT:text='Ryzen 7 9800X3D, 32 GB DDR5 8000 MT/s, RTX 4090, 5120x2160, NVIDIA GL, uncapped  -  each panel is the screen at half size':fontsize=36:fontcolor=$DIM:x=(w-tw)/2:y=h-th-26,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=tv[v]
 "
 

@@ -204,7 +204,7 @@ update) re-run `scripts/decompile.sh` and `scripts/regen-overrides.sh`.
   Windows/Linux without MangoHud or RivaTuner. The stock "Display FPS" graph (K) is debug-only bars.
   Since 2026-09-21 night the overlay also says *what* the game thread does (`pzopt.GameThreadProfile`; every overlay element is a
   tab dropdown, off + its options: `overlayStats`, `overlayTree`, `overlayVerdict`, `overlayGraph`, `overlayFlame`, plus
-  `gameThreadProfileHz`): its stack sampled at 100 Hz off-thread and folded into phases,
+  `gameThreadProfileHz`, 25 Hz since 2026-09-23): its stack sampled off-thread and folded into phases,
   sub-phases, hot methods and waits (a colour-coded tree in the overlay, biggest first, bars per row; the "game thread bound" verdict names the two biggest);
   `pzopt-gamethread.out` per run, `analyze.py` prints it as `game thread:`; the folded stacks go to `pzopt-stacks.out` and
   `harness/flamegraph.py <run>` renders the route as an SVG flame graph (the overlay draws the last 5 s live, `overlayFlame=right` by default;

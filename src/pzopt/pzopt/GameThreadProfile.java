@@ -47,7 +47,7 @@ import zombie.ZomboidFileSystem;
  * Seconds are published as immutable snapshots into a small ring; the overlay merges the last
  * {@link #WINDOW_SECONDS}. Samples are only taken while someone reads them (the overlay is shown or
  * the frame log is on), like the utilization sampler, and only when an element shows the result
- * (overlayTree, overlayFlame, overlayVerdict=detailed) or the frame log is on; {@code gameThreadProfileHz} sets the rate (100 by default: 1 % resolution over the 5 s window; a
+ * (overlayTree, overlayFlame, overlayVerdict=detailed) or the frame log is on; {@code gameThreadProfileHz} sets the rate (25 by default, 125 samples over the 5 s window: at 100 Hz the captures took 1.3-1.6 % of the Mac's wall time, 2026-09-23; a
  * sample is ~80 us on the sampler thread, of which the game thread's own stall is a fraction, so
  * well under 1 % of it).
  */
@@ -254,6 +254,8 @@ public final class GameThreadProfile {
       HashMap<String, int[]> counts = new HashMap<>();
       HashMap<String, int[]> stacks = new HashMap<>();
       int samples = 0;
+      long sampleNs = 0L, sampleMaxNs = 0L, stallSince = System.nanoTime(); // time inside the stack capture: an upper bound on the game thread's pause
+      int stallSamples = 0;
       while (true) {
          next += periodNs;
          long wait = next - System.nanoTime();
@@ -269,6 +271,7 @@ public final class GameThreadProfile {
          // devProfileLogOff: a harness run samples only while the overlay is shown (the baseline of the overlay's own cost)
          boolean wanted = Overlay.isVisible() || Overlay.logging() && !Config.DEV_PROFILE_LOG_OFF;
          if (wanted) {
+            long t0 = System.nanoTime();
             try {
                Thread g = gameThread;
                if (g != null && Config.PROFILE_HANDSHAKE) {
@@ -303,11 +306,25 @@ public final class GameThreadProfile {
                Log.warn("game-thread profile: sampling stopped: " + t);
                return;
             }
+            long dt = System.nanoTime() - t0;
+            sampleNs += dt;
+            sampleMaxNs = Math.max(sampleMaxNs, dt);
+            stallSamples++;
          }
          if (Config.LUA_PROFILE) {
             LuaProfile.tick(System.currentTimeMillis());
          }
          long now = System.nanoTime();
+         if (now - stallSince >= 10_000_000_000L) {
+            if (stallSamples > 0) {
+               Log.info(String.format(java.util.Locale.ROOT, "game-thread profile: %d samples in %.0f s, capture mean %.0f us, max %.0f us, %.2f %% of wall",
+                     stallSamples, (now - stallSince) / 1e9, sampleNs / 1e3 / stallSamples, sampleMaxNs / 1e3, 100.0 * sampleNs / (now - stallSince)));
+            }
+            stallSince = now;
+            sampleNs = 0L;
+            sampleMaxNs = 0L;
+            stallSamples = 0;
+         }
          if (now >= secondEndNs) {
             secondEndNs = now + 1_000_000_000L;
             if (samples > 0) {

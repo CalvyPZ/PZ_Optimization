@@ -545,7 +545,7 @@ public final class Config {
    public static final int OVERLAY_REFRESH_MS = integer("overlayRefreshMs", 250); // how often the overlay's numbers, tree and texture are refreshed
    public static final int OVERLAY_GRAPH_HZ = integer("overlayGraphHz", 0); // frame-graph redraws per second into the overlay texture; 0 = drawn live every frame (default: 30 Hz measured no cheaper on the Mac)
    public static final int OVERLAY_FLAME_DEPTH = integer("overlayFlameDepth", 24); // rows of the flame graph (frames from GameWindow.frameStep up)
-   public static final int GAME_THREAD_PROFILE_HZ = integer("gameThreadProfileHz", 100); // game-thread stack samples per second (10..1000); sampling runs when the tree, the flame graph, the detailed verdict or the frame log wants it
+   public static final int GAME_THREAD_PROFILE_HZ = integer("gameThreadProfileHz", 25); // game-thread stack samples per second (10..1000); sampling runs when the tree, the flame graph, the detailed verdict or the frame log wants it 25 since 2026-09-23: each capture pauses the game thread ~150 us on the Mac, 1.5 % of wall at 100 Hz
    public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent
    public static final String OVERLAY_FONT = string("overlayFont", "auto"); // auto = CodeSmall / CodeMedium / CodeLarge by screen height (Overlay.font), or a UIFont name
    public static final String OVERLAY_CORNER = string("overlayCorner", "tl");
