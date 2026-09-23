@@ -2032,7 +2032,10 @@ local function install()
     -- The tab goes right after Display: create() adds the pages in order, so hook the Display page.
     -- the whole options screen's build time, for the load trace (the in-game menu builds it while the world is entered)
     local stockCreate = MainOptions.create
-    function MainOptions:create(...)
+    -- The full build: stock create (timed for the load trace), then the Optimizations tab's lazy hook.
+    local function fullCreate(self, ...)
+        self.pzoptCreatePending = false
+        self.pzoptCreated = true
         local t0 = getTimestampMs()
         local r = stockCreate(self, ...)
         print("[pzopt] options screen: MainOptions:create took " .. (getTimestampMs() - t0) .. " ms")
@@ -2055,6 +2058,52 @@ local function install()
         end
         return r
     end
+    -- lazyOptionsScreen: the main menu and the in-game menu build the whole options screen while they are built
+    -- (boot, every world entry, exit to menu), ~130 ms of vanilla panels on the flip on top of our tab. The hidden
+    -- screen now only does the one part of create() the game needs without it, the key bindings (loadKeys, and the
+    -- keysB42.ini rewrite stock does after a key-file version change), and builds the rest the first time it is
+    -- used: toUI (called before the screen is shown) or setVisible(true). Only while our wrapper is still the
+    -- installed MainOptions.create: a mod that wrapped create after us runs the stock build as before.
+    local lazy = true
+    pcall(function() lazy = getPerformance():getPzoptOption("lazyOptionsScreen") ~= "false" end)
+    local ourCreate
+    ourCreate = function(self, ...)
+        if lazy and MainOptions.create == ourCreate and not self.pzoptCreated and not self:getIsVisible() then
+            local reload = MainOptions.loadKeys()
+            if reload then
+                local fileOutput = getFileWriter("keysB42.ini", true, false)
+                fileOutput:write("VERSION=" .. tostring(MainOptions.KEYS_VERSION) .. "\r\n")
+                for _, v in ipairs(MainOptions.keyText) do
+                    if not v.isModBind then
+                        MainOptions.writeKey(v, fileOutput)
+                    end
+                end
+                fileOutput:close()
+            end
+            self.pzoptCreatePending = true
+            print("[pzopt] options screen: build deferred until it is opened (key bindings loaded)")
+            return
+        end
+        return fullCreate(self, ...)
+    end
+    MainOptions.create = ourCreate
+    local function ensureCreated(self)
+        if self.pzoptCreatePending then
+            fullCreate(self)
+        end
+    end
+    local stockToUI = MainOptions.toUI
+    function MainOptions:toUI(...)
+        ensureCreated(self)
+        return stockToUI(self, ...)
+    end
+    local stockOnResolutionChange = MainOptions.onResolutionChange
+    function MainOptions:onResolutionChange(...)
+        if self.pzoptCreatePending then
+            return -- nothing built yet; the build later uses the size in force then
+        end
+        return stockOnResolutionChange(self, ...)
+    end
     local stockAddDisplayPanel = MainOptions.addDisplayPanel
     function MainOptions:addDisplayPanel()
         stockAddDisplayPanel(self)
@@ -2067,6 +2116,13 @@ local function install()
     -- visit decodes them again.
     local stockSetVisible = MainOptions.setVisible
     function MainOptions:setVisible(bVisible, ...)
+        if bVisible then
+            local wasPending = self.pzoptCreatePending
+            ensureCreated(self)
+            if wasPending then
+                stockToUI(self) -- the values the screen shows, as toUI would have set them
+            end
+        end
         stockSetVisible(self, bVisible, ...)
         if not bVisible then
             pcall(function() getPerformance():releasePzoptGifs() end)

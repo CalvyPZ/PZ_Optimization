@@ -68,9 +68,14 @@ public final class CenterFirstLoad {
       return true;
    }
 
-   /** IsoChunkMap.processAllLoadGridSquare at world entry: this chunk is within RADIUS of the load's center. */
+   /**
+    * IsoChunkMap.processAllLoadGridSquare at world entry: this chunk is within the entry radius (centerFirstEntryRadius,
+    * at most RADIUS) of the load's center, so it is handed to the chunk map before the first world frame; the others
+    * follow a few per frame through IsoChunkMap.update.
+    */
    public static boolean nearCenter(int wx, int wy) {
-      return Math.abs(wx - cx) <= RADIUS && Math.abs(wy - cy) <= RADIUS;
+      int r = Math.max(0, Math.min(RADIUS, Config.CENTER_FIRST_ENTRY_RADIUS));
+      return Math.abs(wx - cx) <= r && Math.abs(wy - cy) <= r;
    }
 
    /** GameLoadingState.update: the loader entered early, so the streamer's remaining work does not hold the world back. */

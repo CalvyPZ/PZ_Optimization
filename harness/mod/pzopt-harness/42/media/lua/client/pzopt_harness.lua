@@ -150,7 +150,17 @@ local function optionsCheckTick()
     if getTimestampMs() < optionsCheck.atMs then return end
     optionsCheck = false
     local mo = MainScreen.instance and MainScreen.instance.mainOptions
-    if not mo or not mo.tabs then print("[pzopt-harness] options check: no in-game MainOptions"); return end
+    if not mo then print("[pzopt-harness] options check: no in-game MainOptions"); return end
+    local keys = {}
+    for _, k in ipairs({"Forward", "Backward", "Left", "Right", "Run", "Interact", "Toggle Inventory", "Aim"}) do
+        table.insert(keys, k .. "=" .. tostring(getCore():getKey(k)))
+    end
+    print("[pzopt-harness] options check: screen pending=" .. tostring(mo.pzoptCreatePending) .. " created=" .. tostring(mo.pzoptCreated)
+        .. ", keys " .. table.concat(keys, " "))
+    local tui = getTimestampMs()
+    mo:toUI() -- opening the screen calls toUI first (MainScreen)
+    print("[pzopt-harness] options check: toUI (builds a deferred screen) " .. (getTimestampMs() - tui) .. " ms, tabs=" .. tostring(mo.tabs ~= nil)
+        .. " pending=" .. tostring(mo.pzoptCreatePending))
     local before = mo.pzoptBuilt
     local nBefore = #mo.gameOptions.options
     local t0 = getTimestampMs()
@@ -173,6 +183,37 @@ local function onTickEvenPaused()
         getCore():quit()
     end
 end
+
+-- lua_wrap=<table>[,<table>] (2026-09-23): wrap every function of those global tables with a millisecond timer and
+-- log each call over 2 ms (nested calls are logged too, innermost first). The Lua event profile (luaEventProfile) names
+-- the slow handler; this splits a handler's own plain Lua calls. Installed at boot, so load-time calls are covered.
+local function installLuaWrap()
+    local flags = readFlags()
+    if not flags or not flags.lua_wrap or flags.lua_wrap == "" then return end
+    for name in string.gmatch(flags.lua_wrap, "[^,]+") do
+        local t = _G[name]
+        if type(t) ~= "table" then
+            print("[pzopt-harness] lua_wrap: no global table " .. name)
+        else
+            local n = 0
+            for k, v in pairs(t) do
+                if type(v) == "function" then
+                    local fname = name .. "." .. tostring(k)
+                    t[k] = function(...)
+                        local t0 = getTimestampMs()
+                        local r1, r2, r3, r4 = v(...)
+                        local ms = getTimestampMs() - t0
+                        if ms >= 2 then print("[pzopt-harness] lua_wrap: " .. fname .. " " .. ms .. " ms") end
+                        return r1, r2, r3, r4
+                    end
+                    n = n + 1
+                end
+            end
+            print("[pzopt-harness] lua_wrap: " .. n .. " functions of " .. name .. " wrapped")
+        end
+    end
+end
+Events.OnGameBoot.Add(installLuaWrap)
 
 Events.OnMainMenuEnter.Add(onMainMenuEnter)
 Events.OnFETick.Add(onFETick)

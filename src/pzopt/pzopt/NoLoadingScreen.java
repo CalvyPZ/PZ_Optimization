@@ -102,6 +102,7 @@ public final class NoLoadingScreen {
          if (c != null && !c.lightingNeverDone[0]) {
             visibleState = 1;
             LoadTrace.step("world visible (" + (System.currentTimeMillis() - enteredMs) + " ms after entering the world)");
+            LuaEventProfile.dump("world visible");
          }
          return;
       }
@@ -111,6 +112,7 @@ public final class NoLoadingScreen {
          restoreLighting();
          ResumeShot.setWorldCoverage(1.0F);
          LoadTrace.step("world complete: " + loaded + " chunks lit (" + (System.currentTimeMillis() - enteredMs) + " ms after entering the world)");
+         LuaEventProfile.dump("world complete");
       }
    }
 }

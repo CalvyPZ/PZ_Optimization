@@ -160,6 +160,10 @@ import java.util.Properties;
  *   zoneEdgePrefilter true/false map zones on Continue: a geometry zone's chunk tests skip the polygon edges whose bounding
  *                            box is more than a tile from the chunk side before the stock arithmetic (pzopt.ZoneGeom, Zone
  *                            override), the same answers; they were 20 % of the map-zones step (default true)
+ *   lazyOptionsScreen true/false the options screen (main menu, in-game menu) is built when first opened; while hidden only
+ *                            its key bindings are loaded (pzopt_optimizations_options.lua) (default true)
+ *   electricityLevelRange true/false AmbientStreamManager.checkHaveElectricity (world entry, power changes) walks only the
+ *                            levels some loaded chunk has instead of all 64, same squares in the same order (default true)
  *   fileThreadsWait int          file pool width while the loader thread only waits for the file tasks (assetLock2, the
  *                            main thread idle too); back to fileThreads afterwards (default: cores)
  *   textureBufferMb int          decoded-texture bytes that may wait for the render thread before the decoders pause
@@ -222,6 +226,8 @@ import java.util.Properties;
  *   noLoadingScreen true/false   single player: no fade from black into the world (the fader loop skipped), and with a cached
  *                            view (resumeShot) no loading screen either; the world then appears from the player outwards
  *                            (pzopt.NoLoadingScreen; errors, conversions and multiplayer keep the stock screen) (default true)
+ *   centerFirstEntryRadius int   A/B: chunks around the player handed to the chunk map before the first world frame
+ *                            (0..3, default 3; 1 was inside the noise on the flip)
  *   centerFirstLoad true/false   single player: the initial chunk map loads nearest-first and the loader enters the world
  *                            once the 7 x 7 chunks around the player are loaded; the rest streams in during play like
  *                            chunks do while walking (pzopt.CenterFirstLoad) (default true)
@@ -453,6 +459,10 @@ public final class Config {
    public static final boolean PNG_PAETH_FAST = bool("pngPaethFast", true);
    public static final boolean DEPTH_MAP_FAST = bool("depthMapFast", true);
    public static final boolean ZONE_EDGE_PREFILTER = bool("zoneEdgePrefilter", true);
+   public static final boolean ELECTRICITY_LEVEL_RANGE = bool("electricityLevelRange", true);
+   public static final boolean LAZY_OPTIONS_SCREEN = bool("lazyOptionsScreen", true); // the options screen built when first opened, key bindings at once (Lua)
+   public static final boolean LUA_EVENT_PROFILE = bool("luaEventProfile", false); // measurement: time every Lua event handler (pzopt.LuaEventProfile)
+   public static final boolean DEV_ELECTRICITY_CHECK = bool("devElectricityCheck", false); // dev: count the stock 64-level walk in the same call (instrumented runs)
    public static final int FILE_INFLIGHT_LOAD = Math.max(FILE_INFLIGHT, integer("fileInflightLoad", 128));
    public static final int FILE_THREADS_WAIT = Math.max(1, integer("fileThreadsWait", Runtime.getRuntime().availableProcessors()));
    public static final int TEXTURE_BUFFER_MB = Math.max(1, integer("textureBufferMb", 50));
@@ -469,6 +479,7 @@ public final class Config {
    public static final boolean NO_LOADING_SCREEN = bool("noLoadingScreen", true);
    /** single player: the initial chunks load nearest-first and the world is entered once the 7 x 7 around the player are in. */
    public static final boolean CENTER_FIRST_LOAD = bool("centerFirstLoad", true);
+   public static final int CENTER_FIRST_ENTRY_RADIUS = integer("centerFirstEntryRadius", 3); // chunks around the player handed over before the first world frame (0..3)
    /** exit saves keep the ground around the player; Continue shows it with tiles popping in (else the stock loading screen). */
    public static final boolean RESUME_SHOT = bool("resumeShot", true);
    public static final boolean BOOT_PUMP = bool("bootPump", true);

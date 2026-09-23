@@ -2907,3 +2907,30 @@ values into them and keeps the screen's changed flag as it was. World entry: the
 `--flag options_check=S` activates the tab S seconds into the world and logs the build (flip-lazytab: 152 controls,
 changed=false, no second build).
 
+### zombie.AmbientStreamManager.checkHaveElectricity (`electricityLevelRange`, 2026-09-23)
+
+Called on world entry and when the power state changes, it asked the cell for every tile of the chunk map at all 64
+levels (-32..31), about 1.5 million lookups, almost all of them empty (JFR `flip-zonesjfr`: ~9 % of the world-entry
+window). A square outside a chunk's minLevel..maxLevel is always null, so the level loop now runs only between the
+lowest and highest level of any chunk in any player's chunk map (the cell's lookup reads them all), in the stock order.
+Instrumented runs log `checkHaveElectricity: levels a..b, N objects, T ms`; with `devElectricityCheck=true` the same call
+also counts what the stock 64-level walk visits (flip-elec-check: 8,274 objects both ways, 9 ms vs 23 ms stock).
+
+A/B key `centerFirstEntryRadius` (default 3, `pzopt.CenterFirstLoad.nearCenter`): the chunks handed to the chunk map
+before the first world frame. Radius 1 on the flip: world ready -> first frame 634 vs 672 ms, world visible 4.68 vs
+4.80 s (flip-entryr1 / flip-entryr3), inside the run-to-run noise, so the default stays.
+
+### Options screen built when first opened (Lua, `lazyOptionsScreen`, 2026-09-23)
+
+The main menu (boot), the in-game menu (every world entry) and the menu after an exit each build the whole options
+screen through `MainOptions:create()` while it stays hidden. The Lua event profile (`luaEventProfile`) put the main menu
+build (`LoadMainScreenPanel`) at 654 ms on the flip, the options screen being most of it. `pzopt_optimizations_options.lua`
+now replaces `MainOptions.create`: while the screen is hidden it runs only the part the game needs without the screen,
+the key bindings (`MainOptions.loadKeys`, which registers them with the core, and the `keysB42.ini` rewrite stock does
+after a key-file version change), and builds the rest the first time the screen is used: `toUI` (MainScreen calls it
+before showing the screen) or `setVisible(true)`. A resolution change before that is skipped (the build uses the size in
+force then). The deferral only happens while our wrapper is still the installed `MainOptions.create`; a mod that wrapped
+it later gets the stock build. Flip (flip-lazymenu-*): main menu build 654 -> 410 ms, in-game menu 28.5 -> 2.3 ms, the
+same key bindings with the screen deferred, and opening it builds the 119 stock options (28 ms) then the Optimizations
+tab on activation. `--prop lazyOptionsScreen=false` restores the eager build.
+

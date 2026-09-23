@@ -177,6 +177,7 @@ public final class GameLoadingState extends GameState {
 
    public void enter() {
       pzopt.ResumeShot.startLoad(); // pzopt: resumeShot, decode the save's last view for the loading screen
+      pzopt.LuaEventProfile.dump("the load's start (boot and main menu)"); // pzopt: luaEventProfile
       if (GameWindow.fileSystem instanceof zombie.fileSystem.FileSystemImpl) {
          pzopt.BootPump.onLoadStart(((zombie.fileSystem.FileSystemImpl)GameWindow.fileSystem).pzoptExecutor()); // pzopt: file pool back to its play width
          if (pzopt.Overrides.enabled()) {
