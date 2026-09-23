@@ -26,10 +26,11 @@
 #                                 scene runs at and the second half of the route was black) and population=max (sandbox
 #                                 PopulationMultiplier / Start / Peak = 4, pushed to the native popman before the
 #                                 chunks load, so the never-visited Louisville cells spawn at that density);
-#                                 settle=20 so the far-teleport reload burst is over before the route; see_all=true
-#                                 (LightingJNI override: every square seen and visible, else the tall blocks leave
-#                                 most of the screen never-seen black). Check start= / population= / zombies_loaded=
-#                                 / see_all= in pzopt-bench.out; compare only with other louisville runs
+#                                 settle=20 so the far-teleport reload burst is over before the route. No see_all
+#                                 since 2026-09-23 (maintainer): the spectator view made the native lighting spread NaN
+#                                 into a re-bake flood in ~1 run in 3; the never-seen blocks stay black as in play.
+#                                 --flag see_all=true brings it back. Check start= / population= / zombies_loaded=
+#                                 / see_all= in pzopt-bench.out; compare only with other louisville runs of the same kind
 #                  Preset flags go first, so any --flag / --mode / --route-seconds given on the command line wins
 #                  (e.g. --preset storm --flag fog=0.5 is a storm with half fog).
 #
@@ -133,7 +134,7 @@ if [[ -n "$preset" ]]; then
     storm)       preset_flags=(weather=storm) ;;
     fog)         preset_flags=(fog=heavy) ;;
     storm-fog)   preset_flags=(weather=storm fog=heavy) ;;
-    louisville)  preset_flags=(start=12450,1280 population=max settle=20 route=S:150 speed=6 see_all=true) ;;
+    louisville)  preset_flags=(start=12450,1280 population=max settle=20 route=S:150 speed=6) ;;
     helicopter)  preset_flags=(helicopter=true) ;;   # the stock chopper event hovering over the route, its 500-radius world sound every ~10 s (2026-09-22)
     *) echo "unknown preset: $preset (night-torch|night-dark|storm|fog|storm-fog|louisville|helicopter)" >&2; exit 2 ;;
   esac

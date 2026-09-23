@@ -21,6 +21,11 @@ FONT=/usr/share/fonts/noto/NotoSans-Bold.ttf
 [ -f "$FONT" ] || FONT=$(fc-match -f '%{file}' 'DejaVu Sans:bold')
 
 run() { ls -d harness/runs/$1-* | tail -1; }
+# The results strip mentions the JFR profile only when both runs recorded one (run.opts jfr=1).
+JFR_NOTE=""
+if grep -q '^jfr=1' "$(run "$RUN_STOCK")/run.opts" && grep -q '^jfr=1' "$(run "$RUN_OPT")/run.opts"; then
+  JFR_NOTE="; both runs record a 1 ms JFR profile"
+fi
 info() {
   python3 - "$1" "$PRE" <<'PY'
 import importlib.util, os, re, subprocess, sys
@@ -97,7 +102,7 @@ $(ctext "$PROF_STOCK" 222 34 $DIM),
 $(ctext "$TITLE_OPT" 300 50 $GRN),
 $(ctext "$RES_OPT" 362 40 $TXT),
 $(ctext "$PROF_OPT" 412 34 $DIM),
-$(ctext "Same save, route, settings and hardware; both runs record a 1 ms JFR profile. Stock = every optimization key off (the overlay needs the overrides loaded). $NOTE" 490 30 $DIM),
+$(ctext "Same save, route, settings and hardware${JFR_NOTE}. Stock = every optimization key off (the overlay needs the overrides loaded). $NOTE" 490 30 $DIM),
 drawtext=fontfile=$FONT:text='RTX 4090, 5120x2160, NVIDIA GL, uncapped  -  each panel is the screen at half size  -  overlay numbers = the last 5 s, result lines = the whole route':fontsize=34:fontcolor=$DIM:x=(w-tw)/2:y=h-th-26,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=tv[v]
 "
 

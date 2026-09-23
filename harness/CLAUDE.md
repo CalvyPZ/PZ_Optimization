@@ -57,8 +57,9 @@ Modes:
   square), `population=max` (sandbox PopulationMultiplier / Start / Peak = 4 pushed to the native popman before
   the chunks load: ~2,000 zombies at the route start, ~2,500 by the end), `settle=20`, `route=S:150 speed=6`
   (same 25 s and turn; at 18 tiles/s the walk outran chunk handoff at the ~30 fps this scene runs at) and
-  `see_all=true` (`LightingJNI` override marks every square seen and visible; without it the tall blocks leave
-  most of the screen never-seen black). Runs `show-louisville-*`; stock 23.7 fps / p99 94 ms, optimized
+  no `see_all` since 2026-09-23 (maintainer's call: the spectator view, `--flag see_all=true`, made the native
+  lighting spread NaN into a re-bake flood in ~1 run in 3; without it the never-seen blocks stay black as in play,
+  so runs before and after that date are not comparable). Runs `show-louisville-*`; stock 23.7 fps / p99 94 ms, optimized
   31.7 / 57, both game-thread bound at 98 %. The soft optimized side of that video was not a render change
   (2026-09-22, runs `lvroof-*` / `lvpin-*`): a zombie bump on the ghost player still rolls `helmetFall` (god mode
   only cancels the health loss), the short-sighted bench character lost their glasses and `screen.frag`'s
