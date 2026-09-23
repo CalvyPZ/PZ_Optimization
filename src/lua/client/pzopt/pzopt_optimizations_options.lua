@@ -2104,6 +2104,16 @@ local function install()
         end
         return stockOnResolutionChange(self, ...)
     end
+    -- The parent's doLayout reaches the hidden screen too (ISUIElement.setVisible(true) lays out every child, e.g.
+    -- MainScreen on Esc in game): stock centerKeybindings reads keyButtonWidth, which only the build sets, and its
+    -- error aborted the pause menu's layout (pause menu without its buttons). The build lays itself out.
+    local stockDoLayout = MainOptions.doLayout
+    function MainOptions:doLayout(...)
+        if self.pzoptCreatePending then
+            return
+        end
+        return stockDoLayout(self, ...)
+    end
     local stockAddDisplayPanel = MainOptions.addDisplayPanel
     function MainOptions:addDisplayPanel()
         stockAddDisplayPanel(self)
