@@ -1,0 +1,34 @@
+# scripts/bytecode-audit.py allow list: unedited override methods whose fingerprint differs from the jar's for a
+# reason checked by hand. One `Class#method(params)` per line, the reason after two spaces and `#`.
+# Add an entry only after reading the override method next to decompiled/ (CFR) and the jar's `javap -c`; a
+# difference in what the method computes is a decompiler bug to fix in src/overrides, never an entry here.
+# Triage of 2026-09-23 (the audit's first run; real bugs found and fixed that day: IsoChunk.AddVehicles_OnZone,
+# FishSchoolManager.procedureRandomFloat).
+
+# `x op= y` on a field / array element compiled with a dup by the game's compiler, re-read by javac (same value, no side effects in between)
+zombie.characters.IsoGameCharacter#calculateHitDirection(zombie.inventory.types.HandWeapon, zombie.characters.IsoGameCharacter)  # this.hitDir re-read for the compound assignment
+zombie.characters.IsoGameCharacter#facePosition(int, int)  # this.tempo scratch vector re-read instead of a local alias
+zombie.characters.IsoGameCharacter#faceThisObjectAlt(zombie.iso.IsoObject)  # this.tempo scratch vector re-read instead of a local alias
+zombie.characters.IsoZombie#spottedOld(zombie.iso.IsoMovingObject, boolean)  # this.vectorToTarget re-read instead of a local alias
+zombie.characters.IsoZombie#DoZombieSpeeds(float)  # this.def re-read instead of a local alias
+zombie.characters.IsoZombie#doSprinter()  # this.def re-read instead of a local alias
+zombie.characters.IsoZombie#doFastShambler()  # this.def re-read instead of a local alias
+zombie.characters.IsoZombie#doFakeShambler()  # this.def re-read instead of a local alias
+zombie.characters.IsoZombie#doFakeShambler(int)  # this.def re-read instead of a local alias
+zombie.characters.IsoZombie#doShambler()  # this.def re-read instead of a local alias
+zombie.iso.IsoChunkMap#renderBloodForChunks(int)  # field re-read for a compound assignment
+zombie.iso.IsoPuddles$RenderData#addSquare(int, zombie.iso.IsoPuddlesGeometry, zombie.tileDepth.TileSeamManager$Tiles)  # data[n-k] -= x written as data[n-k] = data[n-k] - x: index recomputed, same values
+zombie.iso.IsoWorld#LoadPlayerForInfo()  # SWorldX[0] += 32*offset as SWorldX[0] = SWorldX[0] + ...: array re-read
+zombie.iso.fboRenderChunk.FBORenderCutaways$ChunkLevelData#calculateOccludingSquares(int, int, int, int, int, int[])  # field re-read for a compound assignment
+zombie.fileSystem.FileSystemImpl#runAsync(zombie.fileSystem.FileSystemImpl$AsyncItem)  # item.id = lastId++ under the same spin lock; the jar re-reads lastId, javac dups it
+zombie.iso.IsoChunk#assignLoadID()  # loadId = nextLoadID++ (short) then the wrap test; the jar reads the field once more, same value
+
+# compiler shapes
+zombie.characters.IsoPlayer#OnAnimEvent_GrapplerPlayRandomGrunt(zombie.characters.IsoGameCharacter, java.lang.String)  # baseChance / chanceIncrement are private final int = 15 / 5: javac inlines the constants, the jar reads them
+zombie.characters.IsoGameCharacter$XP#load(java.nio.ByteBuffer, int)  # Objects.requireNonNull javac emits for an inner-class creation on an explicit outer instance
+zombie.characters.action.conditions.CharacterVariableCondition#load(org.w3c.dom.Element)  # switch on strings: javac's internal case index (default slot 8 vs 0), same branches
+zombie.core.opengl.RenderThread#init()  # the jar returns early inside synchronized (one more monitorexit on that path); same locking
+
+# debug-only drawing (F-key debug overlays), not on any gameplay path
+zombie.characters.IsoGameCharacter#debugRenderLast()  # Vineflower repeats a branch's draw call; debug direction lines only
+zombie.characters.IsoGameCharacter#debugAim()  # Vineflower repeats a branch's draw call; debug aim arcs only

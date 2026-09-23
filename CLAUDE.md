@@ -4,6 +4,24 @@ Class overrides for Project Zomboid Build 42 (Java, LWJGL/OpenGL) that improve c
 streaming and driving frame time, plus a hands-off benchmark harness that measures them.
 Public repo (xD3I/PZ_Optimization). Maintainer: the repository owner (they/them).
 
+## Requirement: overrides behave like the jar except where we edited them (2026-09-23)
+
+Every method of `src/overrides/` that carries no `// pzopt:` edit must compile to the same behaviour as the
+game jar. `scripts/bytecode-audit.py` checks it (compiler-neutral fingerprint of each unedited method against
+`build/stock/`) and **`scripts/build.sh` fails when it does not pass**. Vineflower mis-renders compile fine
+and shipped to players: the parking-lot loop that spawned one row of cars per chunk plus `case 5 -> 2` for
+the High car-spawn rate (Workshop "cars barely spawn", 2026-09-23), a float divide for the jar's double one
+(`FishSchoolManager`), a dropped cast that made `CanSee` call itself (2026-09-22). Therefore:
+
+- A mismatch is a decompiler bug: fix `src/overrides` to match the jar's `javap -c` (CFR in `decompiled/`
+  helps), mark the fixed lines `// pzopt: decompiler fix ...`, note it in `docs/override-edits.md`.
+- An intended edit needs its `// pzopt:` marker on every changed line (the audit skips a method that has one);
+  an unmarked edit fails the build.
+- `scripts/bytecode-audit.allow` is only for differences read by hand and proven not to change what the
+  method computes (compound-assignment re-reads, constant inlining), each with its reason.
+- After `scripts/regen-overrides.sh` / a game update, the audit is the check that the new decompile is sound.
+- When a player reports gameplay that differs from vanilla, audit the classes involved first.
+
 ## Objective (stated 2026-09-18)
 
 "Consistent frame time if the CPU and GPU utilization allows it; the CPU and GPU should

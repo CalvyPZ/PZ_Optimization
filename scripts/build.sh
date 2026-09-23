@@ -139,6 +139,13 @@ for c in "${OVERRIDES[@]}"; do
   fi
 done
 
+# Bytecode parity (2026-09-23): every override method without a pzopt edit must compile to what the jar has.
+# Vineflower mis-renders compile fine (the parking-lot loop that spawned one row of cars, a float divide for a
+# double one); scripts/bytecode-audit.py catches them. A mismatch is a decompiler bug to fix in src/overrides,
+# or an unmarked edit that needs its `// pzopt:` marker.
+python3 "$REPO/scripts/bytecode-audit.py" --classes "$OUT" --stock "$BUILD/stock" --src "$SRC/overrides" \
+  || { echo "BYTECODE AUDIT FAILED: see the MISMATCH lines above (scripts/CLAUDE.md, bytecode-audit.py)" >&2; exit 1; }
+
 # Record what we built against. The overrides read this at runtime and
 # disable themselves if the loaded game's revision differs.
 revision=$(javap -constants -cp "$JAR" zombie.GitVersion | sed -n 's/.*REVISION = "\([^"]*\)".*/\1/p')

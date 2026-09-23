@@ -33,6 +33,16 @@ the `switch` expression on `carSpawnRate` in `IsoChunk.addVehicles` lacks a
    test in the level-change path, and immediately before the
    `MapCollisionData.instance.addChunkToWorld(this)` block in
    `doLoadGridsquare()`.
+5. **Decompiler fixes in `AddVehicles_OnZone` (2026-09-23, Workshop reports "cars barely
+   spawn").** Two Vineflower mis-renders, present since the override was first committed,
+   restored to the jar's bytecode (not optimizations): the stall-row loop was a `while`
+   ending in an unconditional `break`, so only the first row of stalls of each parking /
+   driveway zone in a chunk ever spawned (the "type not found" path advanced a row and broke
+   out too); it is a labelled `for (y = yOffset; …; y += stallLen)` again, and the not-found
+   path is `continue rows`. The `carSpawnRate` switch rendered stock's `chance *= 2` (High)
+   as `case 5 -> 2`, a flat 2 % per stall; it is `chance * 2` again. Checked by compiling the
+   override and comparing the method's `javap -c` with the jar's (same `imul` / `Rand.Next`
+   counts, outer back-edge restored).
 
 Imports added: `pzopt.Guard`, `pzopt.RecalcPool`.
 
@@ -1867,6 +1877,12 @@ handles a missing `Fishing.NoFishZones` table as stock does (every square a no-f
 values: `tests/pzopt/FishNoiseWalkTest.java` compares it with the stock loop over 420 walks. The
 helicopter's moving 500-radius sound goes 0.27 → 0.08 ms per call.
 
+Decompiler fix (2026-09-23, found by `scripts/bytecode-audit.py` on its first run): `procedureRandomFloat`, the
+per-point fish abundance hash, divides `t % 2^30` by `5.36870912E8` in double in the jar; Vineflower rendered
+it as a float divide (`/ 5.368709E8F`), so the fish count of some points differed slightly from the game's
+(and between a client with the mod and a server without it). Restored to the jar's
+`(float)(((double)(t % 1073741824L) / 5.36870912E8 + 2.0) / 4.0)`, marked on the line.
+
 ## zombie.core.skinnedmodel.animation.AnimationPlayer (added 2026-09-22 night, zombie bone math on the other cores)
 
 Louisville horde profile (`lou-budget`, game thread 98 % busy): the zombies' postupdate is 17 % of the
@@ -2805,7 +2821,10 @@ buffer gets.
   on that map, byte-identical (`PngFiltersTest`).
 - `zombie.tileDepth.TileDepthTexture.load` (new override, `depthMapFast`): the tile's rows are read with one bulk get
   each and converted in a plain array loop (`pzopt.PngFilters.depthTile`), the same values and the same empty test;
-  11.6 -> 6.1 ms for that map's 240 tiles.
+  11.6 -> 6.1 ms for that map's 240 tiles. Decompiler fix in the same class (2026-09-23, `scripts/bytecode-audit.py`):
+  in `recalculateShadowDepth` the floor-polygon rasterize callback read `floorPolygon`, which in Vineflower's source
+  resolves to the method's local of that name (captured, typed `Geometry`); the jar reads the static field. Same
+  object today, so no visible change; the callback now reads `TileDepthTexture.floorPolygon` like the jar.
 
 Mac (one run each, same build): depth-map task time 8.9 -> 7.7 s, image decode 4.1 -> 2.8 s, Continue -> world ready
 6.37 -> 5.96 s (mac-depth-off / mac-depth-on).

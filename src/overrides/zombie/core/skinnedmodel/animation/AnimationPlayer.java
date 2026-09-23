@@ -1194,11 +1194,11 @@ public final class AnimationPlayer extends PooledObject {
 
                float headTwistAngle = shoulderTwistAngle;
                SkinningBone headBone = this.twistBones.get(headBoneIdx).getBone();
-               Quaternion twistTurnAdjustRot = this.calculateDesiredTwist(headBone, headTwistAngle, AnimationPlayer.L_applyTwistBone.TL.get().twistTurnAdjustRot);
-               Quaternion twistTurnIdentity = AnimationPlayer.L_applyTwistBone.TL.get().twistTurnIdentity;
+               Quaternion twistTurnAdjustRot = this.calculateDesiredTwist(headBone, headTwistAngle, AnimationPlayer.L_applyTwistBone.TL.get().twistTurnAdjustRot); // pzopt: per-thread scratch (animBonesParallel)
+               Quaternion twistTurnIdentity = AnimationPlayer.L_applyTwistBone.TL.get().twistTurnIdentity; // pzopt: per-thread scratch (animBonesParallel)
                twistTurnIdentity.setIdentity();
                float twistWeightDelta = this.shoulderTwistWeight / (count - 1);
-               Quaternion twistTurnStep = AnimationPlayer.L_applyTwistBone.TL.get().twistTurnStep;
+               Quaternion twistTurnStep = AnimationPlayer.L_applyTwistBone.TL.get().twistTurnStep; // pzopt: per-thread scratch (animBonesParallel)
                PZMath.slerp(twistTurnStep, twistTurnIdentity, twistTurnAdjustRot, twistWeightDelta);
 
                for (int i = 0; i < headBoneIdx; i++) {
@@ -1226,15 +1226,15 @@ public final class AnimationPlayer extends PooledObject {
       if (twistBone != null) {
          int boneIndex = twistBone.index;
          int parentBoneIndex = twistBone.parent.index;
-         Matrix4f twistParentBoneTrans = this.getBoneModelTransform(parentBoneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTrans);
-         Matrix4f twistParentBoneTransInv = Matrix4f.invert(twistParentBoneTrans, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTransInv);
+         Matrix4f twistParentBoneTrans = this.getBoneModelTransform(parentBoneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTrans); // pzopt: per-thread scratch (animBonesParallel)
+         Matrix4f twistParentBoneTransInv = Matrix4f.invert(twistParentBoneTrans, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTransInv); // pzopt: per-thread scratch (animBonesParallel)
          if (twistParentBoneTransInv != null) {
-            Matrix4f twistBoneModelTrans = this.getBoneModelTransform(boneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistBoneTrans);
-            org.lwjgl.util.vector.Vector3f twistBonePos = HelperFunctions.getPosition(twistBoneModelTrans, AnimationPlayer.L_applyTwistBone.TL.get().twistBonePos);
-            Matrix4f twistBoneNewTrans = AnimationPlayer.L_applyTwistBone.TL.get().twistBoneNewTrans;
+            Matrix4f twistBoneModelTrans = this.getBoneModelTransform(boneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistBoneTrans); // pzopt: per-thread scratch (animBonesParallel)
+            org.lwjgl.util.vector.Vector3f twistBonePos = HelperFunctions.getPosition(twistBoneModelTrans, AnimationPlayer.L_applyTwistBone.TL.get().twistBonePos); // pzopt: per-thread scratch (animBonesParallel)
+            Matrix4f twistBoneNewTrans = AnimationPlayer.L_applyTwistBone.TL.get().twistBoneNewTrans; // pzopt: per-thread scratch (animBonesParallel)
             twistBoneNewTrans.load(twistBoneModelTrans);
             HelperFunctions.setPosition(twistBoneNewTrans, 0.0F, 0.0F, 0.0F);
-            Matrix4f twistBoneAdjustTrans = AnimationPlayer.L_applyTwistBone.TL.get().twistBoneAdjustTrans;
+            Matrix4f twistBoneAdjustTrans = AnimationPlayer.L_applyTwistBone.TL.get().twistBoneAdjustTrans; // pzopt: per-thread scratch (animBonesParallel)
             twistBoneAdjustTrans.setIdentity();
             HelperFunctions.CreateFromQuaternion(twistRot, twistBoneAdjustTrans);
             Matrix4f.mul(twistBoneNewTrans, twistBoneAdjustTrans, twistBoneNewTrans);
@@ -1254,26 +1254,26 @@ public final class AnimationPlayer extends PooledObject {
 
       int boneIndex = twistBone.index;
       int parentBoneIndex = twistBone.parent.index;
-      Matrix4f twistParentBoneTrans = this.getBoneModelTransform(parentBoneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTrans);
-      Matrix4f twistParentBoneTransInv = Matrix4f.invert(twistParentBoneTrans, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTransInv);
+      Matrix4f twistParentBoneTrans = this.getBoneModelTransform(parentBoneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTrans); // pzopt: per-thread scratch (animBonesParallel)
+      Matrix4f twistParentBoneTransInv = Matrix4f.invert(twistParentBoneTrans, AnimationPlayer.L_applyTwistBone.TL.get().twistParentBoneTransInv); // pzopt: per-thread scratch (animBonesParallel)
       if (twistParentBoneTransInv == null) {
          return twistRot.setIdentity();
       }
 
-      Matrix4f twistBoneModelTrans = this.getBoneModelTransform(boneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistBoneTrans);
-      Matrix4f twistBoneNewTrans = AnimationPlayer.L_applyTwistBone.TL.get().twistBoneNewTrans;
+      Matrix4f twistBoneModelTrans = this.getBoneModelTransform(boneIndex, AnimationPlayer.L_applyTwistBone.TL.get().twistBoneTrans); // pzopt: per-thread scratch (animBonesParallel)
+      Matrix4f twistBoneNewTrans = AnimationPlayer.L_applyTwistBone.TL.get().twistBoneNewTrans; // pzopt: per-thread scratch (animBonesParallel)
       twistBoneNewTrans.load(twistBoneModelTrans);
-      org.lwjgl.util.vector.Vector3f desiredForward = AnimationPlayer.L_applyTwistBone.TL.get().desiredForward;
+      org.lwjgl.util.vector.Vector3f desiredForward = AnimationPlayer.L_applyTwistBone.TL.get().desiredForward; // pzopt: per-thread scratch (animBonesParallel)
       desiredForward.set(0.0F, 0.0F, 1.0F);
       HelperFunctions.transform(
-         HelperFunctions.setFromAxisAngle(0.0F, 1.0F, 0.0F, twistAngle, AnimationPlayer.L_applyTwistBone.TL.get().twistTurnRot), desiredForward, desiredForward
+         HelperFunctions.setFromAxisAngle(0.0F, 1.0F, 0.0F, twistAngle, AnimationPlayer.L_applyTwistBone.TL.get().twistTurnRot), desiredForward, desiredForward // pzopt: per-thread scratch (animBonesParallel)
       );
-      org.lwjgl.util.vector.Vector3f currentForward = AnimationPlayer.L_applyTwistBone.TL.get().forward;
+      org.lwjgl.util.vector.Vector3f currentForward = AnimationPlayer.L_applyTwistBone.TL.get().forward; // pzopt: per-thread scratch (animBonesParallel)
       currentForward.set(0.0F, 0.0F, -1.0F);
       HelperFunctions.transformVector(twistBoneNewTrans, currentForward, currentForward);
       currentForward.y = 0.0F;
       currentForward.normalise();
-      org.lwjgl.util.vector.Vector3f twistRotateAxis = AnimationPlayer.L_applyTwistBone.TL.get().twistRotateAxis;
+      org.lwjgl.util.vector.Vector3f twistRotateAxis = AnimationPlayer.L_applyTwistBone.TL.get().twistRotateAxis; // pzopt: per-thread scratch (animBonesParallel)
       org.lwjgl.util.vector.Vector3f.cross(desiredForward, currentForward, twistRotateAxis);
       if (PZMath.equal(twistRotateAxis.lengthSquared(), 0.0F)) {
          return twistRot.setIdentity();
@@ -1414,7 +1414,7 @@ public final class AnimationPlayer extends PooledObject {
                   remainingWeight = org.joml.Math.max(0.0F, remainingWeight);
                   if (!track.isRagdoll()) {
                      if (track.getUseDeferredMovement()) {
-                        Vector2.addScaled(deferredMovementAccum, track.getDeferredMovementDiff(tempo.get()), animWeight, deferredMovementAccum);
+                        Vector2.addScaled(deferredMovementAccum, track.getDeferredMovementDiff(tempo.get()), animWeight, deferredMovementAccum); // pzopt: per-thread scratch (animBonesParallel)
                      }
 
                      if (track.getUseDeferredRotation()) {
@@ -1549,10 +1549,10 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    private void updateBoneAnimationTransform_Internal(int boneIdx, AnimationBoneBindingPair reparentPair) {
-      org.lwjgl.util.vector.Vector3f pos = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().pos;
-      Quaternion rot = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rot;
-      org.lwjgl.util.vector.Vector3f scale = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().scale;
-      Keyframe key = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().key;
+      org.lwjgl.util.vector.Vector3f pos = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().pos; // pzopt: per-thread scratch (animBonesParallel)
+      Quaternion rot = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rot; // pzopt: per-thread scratch (animBonesParallel)
+      org.lwjgl.util.vector.Vector3f scale = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().scale; // pzopt: per-thread scratch (animBonesParallel)
+      Keyframe key = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().key; // pzopt: per-thread scratch (animBonesParallel)
       int totalAnimBlendCount = this.liveAnimationTrackEntries.count();
       AnimationBoneBinding crBone = this.counterRotationBone;
       boolean isCounterRotationBone = crBone != null && crBone.getBone() != null && crBone.getBone().index == boneIdx;
@@ -1574,8 +1574,8 @@ public final class AnimationPlayer extends PooledObject {
                this.getTrackTransform(boneIdx, track, reparentPair, pos, rot, scale);
                if (isCounterRotationBone && !track.isRagdoll() && track.getUseDeferredRotation()) {
                   if (DebugOptions.instance.character.debug.animate.zeroCounterRotationBone.getValue()) {
-                     org.lwjgl.util.vector.Vector3f rotAxis = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rotAxis;
-                     Matrix4f rotMat = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rotMat;
+                     org.lwjgl.util.vector.Vector3f rotAxis = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rotAxis; // pzopt: per-thread scratch (animBonesParallel)
+                     Matrix4f rotMat = AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rotMat; // pzopt: per-thread scratch (animBonesParallel)
                      rotMat.setIdentity();
                      rotAxis.set(0.0F, 1.0F, 0.0F);
                      rotMat.rotate((float) (-Math.PI / 2), rotAxis);
@@ -1583,7 +1583,7 @@ public final class AnimationPlayer extends PooledObject {
                      rotMat.rotate((float) (-Math.PI / 2), rotAxis);
                      HelperFunctions.getRotation(rotMat, rot);
                   } else {
-                     org.lwjgl.util.vector.Vector3f rotEulers = HelperFunctions.ToEulerAngles(rot, AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rotEulers);
+                     org.lwjgl.util.vector.Vector3f rotEulers = HelperFunctions.ToEulerAngles(rot, AnimationPlayer.L_updateBoneAnimationTransform.TL.get().rotEulers); // pzopt: per-thread scratch (animBonesParallel)
                      HelperFunctions.ToQuaternion(rotEulers.x, rotEulers.y, (float) (Math.PI / 2), rot);
                   }
                }
@@ -1591,7 +1591,7 @@ public final class AnimationPlayer extends PooledObject {
                boolean isDeferredMovementBone = !track.isRagdoll() && track.getDeferredMovementBoneIdx() == boneIdx;
                if (isDeferredMovementBone) {
                   org.lwjgl.util.vector.Vector3f deferredCounterPosition = track.getCurrentDeferredCounterPosition(
-                     AnimationPlayer.L_updateBoneAnimationTransform.TL.get().deferredPos
+                     AnimationPlayer.L_updateBoneAnimationTransform.TL.get().deferredPos // pzopt: per-thread scratch (animBonesParallel)
                   );
                   pos.x = pos.x + deferredCounterPosition.x;
                   pos.y = pos.y + deferredCounterPosition.y;
@@ -1653,17 +1653,17 @@ public final class AnimationPlayer extends PooledObject {
       } else if (reparentPair == null) {
          track.get(boneIdx, pos, rot, scale);
       } else {
-         Matrix4f result = AnimationPlayer.L_getTrackTransform.TL.get().result;
+         Matrix4f result = AnimationPlayer.L_getTrackTransform.TL.get().result; // pzopt: per-thread scratch (animBonesParallel)
          SkinningBone bone = reparentPair.getBoneA();
-         Matrix4f pa = getUnweightedBoneTransform(track, bone.index, AnimationPlayer.L_getTrackTransform.TL.get().Pa);
+         Matrix4f pa = getUnweightedBoneTransform(track, bone.index, AnimationPlayer.L_getTrackTransform.TL.get().Pa); // pzopt: per-thread scratch (animBonesParallel)
          SkinningBone boneA = bone.parent;
          SkinningBone boneB = reparentPair.getBoneB();
-         Matrix4f mA = this.getBoneModelTransform(boneA.index, AnimationPlayer.L_getTrackTransform.TL.get().mA);
-         Matrix4f mAinv = Matrix4f.invert(mA, AnimationPlayer.L_getTrackTransform.TL.get().mAinv);
-         Matrix4f mB = this.getBoneModelTransform(boneB.index, AnimationPlayer.L_getTrackTransform.TL.get().mB);
-         Matrix4f umA = this.getUnweightedModelTransform(track, boneA.index, AnimationPlayer.L_getTrackTransform.TL.get().umA);
-         Matrix4f umB = this.getUnweightedModelTransform(track, boneB.index, AnimationPlayer.L_getTrackTransform.TL.get().umB);
-         Matrix4f umBinv = Matrix4f.invert(umB, AnimationPlayer.L_getTrackTransform.TL.get().umBinv);
+         Matrix4f mA = this.getBoneModelTransform(boneA.index, AnimationPlayer.L_getTrackTransform.TL.get().mA); // pzopt: per-thread scratch (animBonesParallel)
+         Matrix4f mAinv = Matrix4f.invert(mA, AnimationPlayer.L_getTrackTransform.TL.get().mAinv); // pzopt: per-thread scratch (animBonesParallel)
+         Matrix4f mB = this.getBoneModelTransform(boneB.index, AnimationPlayer.L_getTrackTransform.TL.get().mB); // pzopt: per-thread scratch (animBonesParallel)
+         Matrix4f umA = this.getUnweightedModelTransform(track, boneA.index, AnimationPlayer.L_getTrackTransform.TL.get().umA); // pzopt: per-thread scratch (animBonesParallel)
+         Matrix4f umB = this.getUnweightedModelTransform(track, boneB.index, AnimationPlayer.L_getTrackTransform.TL.get().umB); // pzopt: per-thread scratch (animBonesParallel)
+         Matrix4f umBinv = Matrix4f.invert(umB, AnimationPlayer.L_getTrackTransform.TL.get().umBinv); // pzopt: per-thread scratch (animBonesParallel)
          Matrix4f.mul(pa, umA, result);
          Matrix4f.mul(result, umBinv, result);
          Matrix4f.mul(result, mB, result);
@@ -1774,7 +1774,7 @@ public final class AnimationPlayer extends PooledObject {
       if (this.parentPlayer == null) {
          this.updateLayerBlendWeightings();
          if (this.liveAnimationTrackEntries.count() != 0) {
-            int[] boneIndices = AnimationPlayer.updateMultiTrackBoneTransforms_DeferredMovementOnly.TL.get().boneIndices;
+            int[] boneIndices = AnimationPlayer.updateMultiTrackBoneTransforms_DeferredMovementOnly.TL.get().boneIndices; // pzopt: per-thread scratch (animBonesParallel)
             int boneCount = 0;
             List<AnimationTrack> tracks = this.multiTrack.getTracks();
             int tracksCount = tracks.size();
@@ -1861,7 +1861,7 @@ public final class AnimationPlayer extends PooledObject {
 
    public Matrix4f getBoneModelTransform(int boneIdx, Matrix4f modelTransform) {
       if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
-      Matrix4f boneTransform = AnimationPlayer.L_getBoneModelTransform.TL.get().boneTransform;
+      Matrix4f boneTransform = AnimationPlayer.L_getBoneModelTransform.TL.get().boneTransform; // pzopt: per-thread scratch (animBonesParallel)
       modelTransform.setIdentity();
       SkinningBone bone = this.skinningData.getBoneAt(boneIdx);
 
@@ -1887,7 +1887,7 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public Matrix4f getBindPoseBoneModelTransform(int boneIdx, Matrix4f modelTransform) {
-      Matrix4f boneTransform = AnimationPlayer.L_getBoneModelTransform.TL.get().boneTransform;
+      Matrix4f boneTransform = AnimationPlayer.L_getBoneModelTransform.TL.get().boneTransform; // pzopt: per-thread scratch (animBonesParallel)
       modelTransform.setIdentity();
       SkinningBone bone = this.skinningData.getBoneAt(boneIdx);
 
@@ -1912,7 +1912,7 @@ public final class AnimationPlayer extends PooledObject {
 
    public Matrix4f getUnweightedModelTransform(AnimationTrack track, int boneIdx, Matrix4f modelTransform) {
       if (this.pzoptInFlight) { pzopt.AnimBatch.guard(); } // pzopt: animBatchAsync, join the bone batch before a game-thread touch
-      Matrix4f boneTransform = AnimationPlayer.L_getUnweightedModelTransform.TL.get().boneTransform;
+      Matrix4f boneTransform = AnimationPlayer.L_getUnweightedModelTransform.TL.get().boneTransform; // pzopt: per-thread scratch (animBonesParallel)
       boneTransform.setIdentity();
       modelTransform.setIdentity();
       SkinningBone bone = this.skinningData.getBoneAt(boneIdx);
@@ -1926,9 +1926,9 @@ public final class AnimationPlayer extends PooledObject {
    }
 
    public static Matrix4f getUnweightedBoneTransform(AnimationTrack track, int boneIdx, Matrix4f boneTransform) {
-      org.lwjgl.util.vector.Vector3f pos = AnimationPlayer.L_getUnweightedBoneTransform.TL.get().pos;
-      Quaternion rot = AnimationPlayer.L_getUnweightedBoneTransform.TL.get().rot;
-      org.lwjgl.util.vector.Vector3f scale = AnimationPlayer.L_getUnweightedBoneTransform.TL.get().scale;
+      org.lwjgl.util.vector.Vector3f pos = AnimationPlayer.L_getUnweightedBoneTransform.TL.get().pos; // pzopt: per-thread scratch (animBonesParallel)
+      Quaternion rot = AnimationPlayer.L_getUnweightedBoneTransform.TL.get().rot; // pzopt: per-thread scratch (animBonesParallel)
+      org.lwjgl.util.vector.Vector3f scale = AnimationPlayer.L_getUnweightedBoneTransform.TL.get().scale; // pzopt: per-thread scratch (animBonesParallel)
       track.get(boneIdx, pos, rot, scale);
       HelperFunctions.CreateFromQuaternionPositionScale(pos, rot, scale, boneTransform);
       return boneTransform;

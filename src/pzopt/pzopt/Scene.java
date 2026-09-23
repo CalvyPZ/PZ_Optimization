@@ -33,6 +33,10 @@ import zombie.iso.weather.ClimateManager;
  *       their zombies generated with the new multiplier when their chunks first load, so with a far
  *       {@code start=} teleport (Louisville preset) the whole route is populated at that density; already
  *       visited cells keep their saved population;</li>
+ *   <li>{@code car_spawn=1..5} — sandbox CarSpawnRate (1 none, 2 very low, 3 low, 4 normal, 5 high) forced at
+ *       world-ready, before the {@code start=} teleport: chunks the bench save never visited spawn their parked
+ *       cars with it when they first load ({@code IsoChunk.AddVehicles}); the summary counts {@code vehicles_loaded}
+ *       (vehicle-spawn rig, 2026-09-23);</li>
  *   <li>{@code zombies=off} — no zombies at all: the population multipliers go to 0 (as {@code population=0})
  *       and every zombie loaded with the save or streamed in later is removed from the world on each tick
  *       (the game's own removeFromWorld + removeFromSquare pair), so a manual walk on a copy of a real save
@@ -70,6 +74,7 @@ public final class Scene {
    private static boolean visible;
    private static float thunderSecs = 6f;
    private static float population = -1f;
+   private static int carSpawn = -1;
    private static boolean zombiesOff;
    private static int zombiesRemoved;
    private static volatile boolean seeAll;
@@ -102,6 +107,7 @@ public final class Scene {
       thunderSecs = Float.parseFloat(HarnessFlags.get("thunder_secs", "6"));
       visible = Boolean.parseBoolean(HarnessFlags.get("visible", "false"));
       population = parsePopulation(HarnessFlags.get("population", ""));
+      carSpawn = Integer.parseInt(HarnessFlags.get("car_spawn", "-1").trim());
       zombiesOff = "off".equalsIgnoreCase(HarnessFlags.get("zombies", "").trim());
       if (zombiesOff && population < 0f) {
          population = 0f;
@@ -131,6 +137,10 @@ public final class Scene {
          cfg.populationPeakMultiplier.setValue(population);
          zombie.popman.ZombiePopulationManager.instance.onConfigReloaded();
          Log.info("harness: zombie population multipliers forced to " + population + " (start/peak too); zombies loaded now: " + zombiesLoaded());
+      }
+      if (carSpawn > 0) {
+         zombie.SandboxOptions.instance.carSpawnRate.setValue(carSpawn); // read per chunk in IsoChunk.AddVehicles
+         Log.info("harness: car spawn rate forced to " + carSpawn + " (1 none .. 5 high)");
       }
       if (zombiesOff) {
          removeZombies();
@@ -430,7 +440,7 @@ public final class Scene {
    }
 
    static boolean requested() {
-      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible || population >= 0f || seeAll || zombiesOff || soundRadius > 0 || helicopter;
+      return timeOfDay >= 0f || !weather.isEmpty() || fog >= 0f || !torch.isEmpty() || visible || population >= 0f || carSpawn > 0 || seeAll || zombiesOff || soundRadius > 0 || helicopter;
    }
 
    /** Flag see_all=true: read by the LightingJNI override on every player update (false until apply() ran). */
@@ -574,6 +584,7 @@ public final class Scene {
             + "\nfog_quality=" + zombie.core.PerformanceSettings.fogQuality + "\nlightning_strikes=" + thunderCount
             + "\npopulation=" + (population >= 0f ? Float.toString(population) : "save") + "\nzombies_loaded=" + zombiesLoaded() + "\nzombies_removed=" + zombiesRemoved
             + "\nsee_all=" + seeAll
+            + (carSpawn > 0 ? "\ncar_spawn=" + carSpawn + "\nvehicles_loaded=" + zombie.iso.IsoWorld.instance.currentCell.getVehicles().size() : "")
             + (soundRadius > 0 ? "\nsound_radius=" + soundRadius + "\nsound_every=" + soundEvery + "\nsound_stats=" + soundStats() : "")
             + (helicopter ? "\nhelicopter=" + helicopterState() : "") + ThumpRig.summary();
    }

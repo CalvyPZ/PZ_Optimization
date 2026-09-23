@@ -14,6 +14,7 @@ compatdata prefix). Override with `PZ_DIR` / `ZOMBOID`.
 | `option-classes.py [-v]` | which Java classes read each `pzopt.Config` key (`Config.FIELD`, or a small Config helper such as `effectiveWorkers()`) → `src/lua/client/pzopt/pzopt_optimizations_classes.lua`, the Optimizations tab's search index; build.sh runs it; `-v` lists keys nothing outside Config reads. |
 | `test.sh` | compiles `tests/` against `build/classes` + jar, runs each `*Test` main (no game needed). |
 | `decompile.sh` | CFR, all game packages in parallel into `decompiled/`. Re-run after a game update only. |
+| `bytecode-audit.py [-v] [class ...]` | bytecode parity of the overrides (2026-09-23, the top requirement in the root CLAUDE.md): every method with no `pzopt` line compared with the jar's copy in `build/stock/` on a compiler-neutral fingerprint (calls, field access, constants, arithmetic, loops; not local slots, branch polarity, returns). build.sh runs it and fails on a mismatch; `bytecode-audit.allow` holds the hand-checked benign differences with reasons. Found `AddVehicles_OnZone` (cars) and `procedureRandomFloat` (fish) on its first run. |
 | `regen-overrides.sh` | Vineflower decompile of the OVERRIDES list into `build/vineflower/` to diff against `src/overrides/` after an update. Vineflower because its output recompiles with one fix; CFR's needs several. |
 
 Rules:

@@ -642,11 +642,11 @@ public class Display {
    // than the framebuffer (GLFW_SCALE_FRAMEBUFFER is on by default in GLFW 3.4), so the stock code drew a
    // 4096x1728 viewport into a 5120x2160 buffer. Report the framebuffer size; on X11 the two are identical.
    public static int getWidth() {
-      return displayFramebufferWidth > 0 ? displayFramebufferWidth : latestWidth;
+      return displayFramebufferWidth > 0 ? displayFramebufferWidth : latestWidth; // pzopt: framebuffer size (HiDPI scale)
    }
 
    public static int getHeight() {
-      return displayFramebufferHeight > 0 ? displayFramebufferHeight : latestHeight;
+      return displayFramebufferHeight > 0 ? displayFramebufferHeight : latestHeight; // pzopt: framebuffer size (HiDPI scale)
    }
 
    /** pzopt: framebuffer pixels per screen coordinate along X (1.0 when GLFW does not scale). */
@@ -795,7 +795,7 @@ public class Display {
       static void initCallbacks() {
          // pzopt: cursor positions arrive in screen coordinates; the game works in framebuffer pixels (see getWidth)
          cursorPosCallback = GLFWCursorPosCallback.create(
-            (windowHnd, xpos, ypos) -> Mouse.addMoveEvent(xpos * Display.getFramebufferScaleX(), ypos * Display.getFramebufferScaleY())
+            (windowHnd, xpos, ypos) -> Mouse.addMoveEvent(xpos * Display.getFramebufferScaleX(), ypos * Display.getFramebufferScaleY()) // pzopt: cursor in framebuffer pixels (HiDPI scale)
          );
          GLFW.glfwSetCursorPosCallback(Display.getWindow(), cursorPosCallback);
          mouseButtonCallback = GLFWMouseButtonCallback.create((windowHnd, button, action, mods) -> Mouse.addButtonEvent(button, action == 1));

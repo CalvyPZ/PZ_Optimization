@@ -454,7 +454,7 @@ public final class TileDepthTexture {
             if (tileX >= 0 && tileX < 128 && tileY >= 0 && tileY < 256) {
                float pixelx = pixels[this.index(tileX, tileY)];
                if (pixelx == 2222.0F) {
-                  float newPixelx = floorPolygon.getNormalizedDepthAt(tileX + 0.5F, tileY + 0.5F);
+                  float newPixelx = TileDepthTexture.floorPolygon.getNormalizedDepthAt(tileX + 0.5F, tileY + 0.5F); // pzopt: decompiler fix, the jar reads the static field (Vineflower shadowed it with the local)
                   if (newPixelx >= 0.0F) {
                      pixels[this.index(tileX, tileY)] = newPixelx;
                   } else {

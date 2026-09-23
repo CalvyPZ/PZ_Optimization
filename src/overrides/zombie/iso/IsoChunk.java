@@ -1005,17 +1005,17 @@ public final class IsoChunk {
          xOffset += stallWid;
       }
 
-      float y = yOffset;
-
-      while (y < 8.0F && this.wy * 8 + y < zone.y + zone.h) {
+      // pzopt: Vineflower rendered the row loop as a while ending in an unconditional break (only the first
+      // pzopt: row of stalls per chunk ever spawned); the bytecode loops every row, y += stallLen
+      rows:
+      for (float y = yOffset; y < 8.0F && this.wy * 8 + y < zone.y + zone.h; y += var23) { // pzopt: restored row loop
          for (float x = xOffset; x < 8.0F && this.wx * 8 + x < zone.x + zone.w; x += stallWid) {
             IsoGridSquare sq = this.getGridSquare(PZMath.fastfloor(x), PZMath.fastfloor(y), 0);
             if (sq != null) {
                VehicleType type = VehicleType.getRandomVehicleType(zoneName);
                if (type == null) {
                   System.out.println("Can't find car: " + zoneName);
-                  y += var23;
-                  break;
+                  continue rows; // pzopt: stock `continue block16` (next row)
                }
 
                int chance = type.spawnRate;
@@ -1023,7 +1023,7 @@ public final class IsoChunk {
                chance = switch (SandboxOptions.instance.carSpawnRate.getValue()) {
                   case 2 -> (int)Math.ceil(chance / 10.0F);
                   case 3 -> (int)Math.ceil(chance / 1.5F);
-                  case 5 -> 2;
+                  case 5 -> chance * 2; // pzopt: Vineflower dropped the operand (was `2`, a flat 2 % on High)
                   default -> chance;
                };
                if (SystemDisabler.doVehiclesEverywhere || DebugOptions.instance.vehicleSpawnEverywhere.getValue() || type.forceSpawn) {
@@ -1150,7 +1150,6 @@ public final class IsoChunk {
                }
             }
          }
-         break;
       }
    }
 
@@ -2435,8 +2434,8 @@ public final class IsoChunk {
    }
 
    public void loadInWorldStreamerThread() {
-      this.recalcLoop1();
-      this.recalcPooled();
+      this.recalcLoop1(); // pzopt: split for the recalc pool (override-edits IsoChunk 2)
+      this.recalcPooled(); // pzopt
    }
 
    // pzopt: the stock method split in two. Loop 1 (RecalcProperties for every

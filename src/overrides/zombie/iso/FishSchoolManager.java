@@ -337,7 +337,7 @@ public final class FishSchoolManager {
          + x * seed * 208501L
          + x * y * seed * 15749L
          + 1376312588L;
-      return (float)((t % 1073741824L / 5.368709E8F + 2.0) / 4.0);
+      return (float)(((double)(t % 1073741824L) / 5.36870912E8 + 2.0) / 4.0); // pzopt: decompiler fix, the jar divides in double (Vineflower rendered a float divide)
    }
 
    private int getNumberOfFishInPoint(int x, int y) {
