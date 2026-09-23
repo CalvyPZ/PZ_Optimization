@@ -2964,3 +2964,10 @@ it later gets the stock build. Flip (flip-lazymenu-*): main menu build 654 -> 41
 same key bindings with the screen deferred, and opening it builds the 119 stock options (28 ms) then the Optimizations
 tab on activation. `--prop lazyOptionsScreen=false` restores the eager build.
 
+Dropped (2026-09-23): building the main menu's other screens (server settings, sandbox options, character creation,
+multiplayer, credits, spawn select) on first use. A `lua_wrap` profile had put them at ~600 ms, but that rig's per-call
+overhead inflated them; without it the whole main menu builds in 378 ms eager vs 348 ms lazy on the flip
+(flip-lazyscr-*), character creation still built during the menu (a trigger method is called there), and the screens
+share first-time UI costs, so deferring one moves them to the next. Not worth depending on six vanilla screens' call
+patterns. The `menu_check` harness rig from that test stays.
+

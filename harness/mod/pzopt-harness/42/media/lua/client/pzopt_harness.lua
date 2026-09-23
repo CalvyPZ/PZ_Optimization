@@ -59,6 +59,26 @@ local function onMainMenuEnter()
     end
     if flags.consumed then return end -- Continue already triggered by this process (Lua was reset)
     print("[pzopt-harness] mode=" .. tostring(flags.mode) .. " quit_after=" .. tostring(flags.quit_after))
+    if flags.menu_check and flags.menu_check ~= "" and MainScreen.instance then
+        -- menu_check=1 (2026-09-23): show and hide the main menu's server settings, sandbox, character creation,
+        -- multiplayer, credits and spawn screens before the harness presses Continue; logs build time and any error
+        -- per screen (the rig of the dropped lazyMenuScreens experiment, kept for menu changes)
+        for _, k in ipairs({ "serverSettingsScreen", "sandOptions", "charCreationMain", "multiplayer", "creditsScreen", "mapSpawnSelect" }) do
+            local o = MainScreen.instance[k]
+            if not o then
+                print("[pzopt-harness] menu check: " .. k .. " missing")
+            else
+                local wasPending = o.pzoptCreatePending
+                local t0 = getTimestampMs()
+                local ok, err = pcall(function() o:setVisible(true); o:setVisible(false) end)
+                print("[pzopt-harness] menu check: " .. k .. " pending=" .. tostring(wasPending) .. " -> built="
+                    .. tostring(o.pzoptCreated) .. " in " .. (getTimestampMs() - t0) .. " ms, ok=" .. tostring(ok)
+                    .. (ok and "" or (" error " .. tostring(err))))
+            end
+        end
+        local ok2, err2 = pcall(function() return MainScreen.instance.sandOptions:getSandboxPreset() end)
+        print("[pzopt-harness] menu check: sandOptions:getSandboxPreset ok=" .. tostring(ok2) .. " " .. tostring(err2))
+    end
     pending = flags
 end
 
@@ -192,7 +212,10 @@ local function installLuaWrap()
     if not flags or not flags.lua_wrap or flags.lua_wrap == "" then return end
     for name in string.gmatch(flags.lua_wrap, "[^,]+") do
         local t = _G[name]
-        if type(t) ~= "table" then
+        if name == "ISUIElement" or name == "ISPanel" or name == "ISBaseObject" or name == "ISPanelJoypad" then
+            -- every screen inherits these: wrapping them broke the main menu build (2026-09-23, flip-menuwrap2)
+            print("[pzopt-harness] lua_wrap: refusing base UI class " .. name)
+        elseif type(t) ~= "table" then
             print("[pzopt-harness] lua_wrap: no global table " .. name)
         else
             local n = 0
@@ -201,10 +224,10 @@ local function installLuaWrap()
                     local fname = name .. "." .. tostring(k)
                     t[k] = function(...)
                         local t0 = getTimestampMs()
-                        local r1, r2, r3, r4 = v(...)
+                        local r = { v(...) }
                         local ms = getTimestampMs() - t0
                         if ms >= 2 then print("[pzopt-harness] lua_wrap: " .. fname .. " " .. ms .. " ms") end
-                        return r1, r2, r3, r4
+                        return unpack(r)
                     end
                     n = n + 1
                 end
