@@ -104,7 +104,11 @@ those features), the tab close-up `08` left the frame-by-frame section, and seve
 "New! Render distance" card (`docs/media/render-distance-card.png` from `harness/render-distance-card.py`: vanilla 19x19
 chunk grid vs 15x15 on the Rosewood spin and the 120 km/h drive, everything on, runs `prev-gridspin3-*` /
 `card-grid-drive-*`; 2026-09-22 night, release da3cdea): the upscaler card lost its "New!" and took the place of the
-"Upscaling: how it works" heading, and two upscaling sentences were shortened (page 7,878 substituted characters).
+"Upscaling: how it works" heading, and two upscaling sentences were shortened (page 7,878 substituted characters). `19`
+the "New! Performance overlay in the menus" card (`docs/media/overlay-item-card.png` from `harness/overlay-item-card.py`:
+the main menu with the pad focus on the SHOW / HIDE PERFORMANCE OVERLAY item and the pause menu, captures of
+`harness/pad-overlay-check.sh`; 2026-09-23, release 4ab3fe8): the render distance card lost its "New!", the showcase
+caption and two upscaler sentences were shortened (page 7,899 substituted characters).
 `description.txt` embeds them with `[img]` from the raw GitHub URL of `master`,
 so they render only after the folder is pushed. The same files go in the item's own carousel:
 on the Workshop page, "Add/edit images & videos" takes the JPGs (upload `00` first, it becomes
