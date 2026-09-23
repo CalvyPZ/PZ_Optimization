@@ -7,6 +7,9 @@ from /proc/<pid>/task/<tid>/{schedstat,stat}, cumulative counters (analysed by h
 run_ns = time on the CPU, wait_ns = time runnable but waiting for a CPU (run-queue delay), majflt = major
 page faults (swap / file page-ins). Plus one line per sample with the machine's PSI and vmstat:
   epoch_ms  -  PSI  cpu_some_us  mem_some_us  mem_full_us  io_some_us  pswpin  pswpout  pgmajfault  ctxt
+Every 10 s also one memory line from /proc/<pid>/smaps, resident kB by mapping kind:
+  epoch_ms  -  MEM  anon=  nvidia=  shmem=  so=  file=  total=  swap=
+(anon = Java heap + native malloc, nvidia = /dev/nvidia* mappings, shmem = memfd / SysV / dri, so = libraries).
 Usage: schedmon.py OUT [PERIOD=0.05]
 """
 import os, sys, time
@@ -56,6 +59,37 @@ if pid is None:
 out.write(f"# pid={pid} period={period} clk_tck={os.sysconf('SC_CLK_TCK')}\n")
 task_dir = f"/proc/{pid}/task"
 names = {}
+next_mem = 0.0
+
+
+def mem_line(now):
+    kinds = {"anon": 0, "nvidia": 0, "shmem": 0, "so": 0, "file": 0}
+    swap = 0
+    kind = "anon"
+    try:
+        with open(f"/proc/{pid}/smaps") as f:
+            for line in f:
+                c = line[0]
+                if c.isdigit() or c in "abcdef":  # a mapping header: range perms offset dev inode [path]
+                    parts = line.split(None, 5)
+                    path = parts[5].strip() if len(parts) > 5 else ""
+                    if not path or path.startswith("[heap]") or path.startswith("[stack") or path.startswith("[anon"):
+                        kind = "anon"
+                    elif "nvidia" in path:
+                        kind = "nvidia"
+                    elif path.startswith("/memfd:") or path.startswith("/SYSV") or path.startswith("/dev/dri") or "(deleted)" in path:
+                        kind = "shmem"
+                    elif ".so" in path:
+                        kind = "so"
+                    else:
+                        kind = "file"
+                elif line.startswith("Rss:"):
+                    kinds[kind] += int(line.split()[1])
+                elif line.startswith("Swap:"):
+                    swap += int(line.split()[1])
+    except OSError:
+        return ""
+    return f"{now} - MEM " + " ".join(f"{k}={v}" for k, v in kinds.items()) + f" total={sum(kinds.values())} swap={swap}\n"
 next_t = time.time()
 while os.path.exists(task_dir):
     now = int(time.time() * 1000)
@@ -94,6 +128,11 @@ while os.path.exists(task_dir):
                 break
     except OSError:
         pass
+    if time.time() >= next_mem:
+        next_mem = time.time() + 10.0
+        ml = mem_line(now)
+        if ml:
+            lines.append(ml)
     lines.append(f"{now} - PSI {cs} {ms} {mf} {ios} {vm.get('pswpin',0)} {vm.get('pswpout',0)} {vm.get('pgmajfault',0)} {ctxt}\n")
     out.write("".join(lines))
     next_t += period

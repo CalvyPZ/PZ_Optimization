@@ -114,6 +114,28 @@ public final class GameLoadingState extends GameState {
     * pzopt: run r on the main thread and wait for it when the world was entered early (centerFirstLoad: the main thread
     * loads chunks meanwhile), else here as stock does.
     */
+   private static void pzoptInitChatIcons() { // pzopt: the icon scan iterates the unsynchronised shared texture table; retry it on a concurrent write
+      for (int attempt = 0; ; attempt++) {
+         try {
+            ChatUtility.InitAllowedChatIcons();
+            if (attempt > 0) {
+               pzopt.Log.info("chat icons: scan retried " + attempt + " time(s) after a concurrent texture registration");
+            }
+            return;
+         } catch (java.util.ConcurrentModificationException e) {
+            if (attempt >= 50) {
+               throw e;
+            }
+            try {
+               Thread.sleep(5L);
+            } catch (InterruptedException ie) {
+               Thread.currentThread().interrupt();
+               throw e;
+            }
+         }
+      }
+   }
+
    private void pzoptOnMain(Runnable r) {
       if (!pzopt.Overrides.enabled() || !pzopt.CenterFirstLoad.enteredEarly()) {
          r.run();
@@ -384,7 +406,7 @@ public final class GameLoadingState extends GameState {
                   // shared texture table (an unsynchronised HashMap), while this thread finishes; the steps that read or
                   // write that table run on the main thread (pzoptOnMain; a ConcurrentModificationException stopped 2 of 3
                   // Dell loads on the error screen)
-                  GameLoadingState.this.pzoptOnMain(ChatUtility::InitAllowedChatIcons);
+                  GameLoadingState.this.pzoptOnMain(GameLoadingState::pzoptInitChatIcons); // pzopt: on the main thread and retried: other threads still register textures (2026-09-23, a Dell load stopped on the error with the hand-off alone)
                   ChatManager.getInstance().init(true, IsoPlayer.getInstance());
                   Bullet.startLoadingPhysicsMeshes();
                   GameLoadingState.this.pzoptOnMain(() -> { // pzopt: the shared texture table, see above

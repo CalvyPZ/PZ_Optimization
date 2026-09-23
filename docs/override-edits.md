@@ -2774,6 +2774,13 @@ Mac Continue -> world ready: 8.16 s (mac-dwait) -> 6.25-6.64 s with the first tw
 with the filter (mac-paeth-on; 6.46 s with `pngPaethFast=false`). The assetLock2 wait is the boot backlog, so it is
 this long only when Continue is pressed as soon as the menu shows, as the harness does.
 
+The hand-off alone did not end it: a Dell load on 2c0ca9d stopped on the same exception on the main thread. The other
+writer is the World Streamer thread, which after the early entry is still loading the rest of the grid and registers
+item and object textures (`getSharedTexture`) while it deserializes their objects; any full iteration of the table races
+it. The chat-icon scan therefore runs on the main thread and is retried (up to 50 x 5 ms) on a
+`ConcurrentModificationException`, logging `chat icons: scan retried N time(s)` when it had to. Item icons first
+registered by chunks loaded after the scan are missing from the chat-icon list (cosmetic).
+
 ### Depth maps and palette images (`pngPaethFast`, `depthMapFast`, 2026-09-23)
 
 The 218 tile depth maps (mostly 8-bit palette PNGs, 5.8 MB on disk, 685 megapixels decoded) were 8.9 s of file-pool
