@@ -100,6 +100,7 @@ PzoptOptionClasses = {
     loadWorkers = { "pzopt.RecalcPool" },
     luaChecksumExempt = { "NetChecksum" },
     luaPrecompile = { "pzopt.LuaPrecompiler" },
+    luaProfile = { "pzopt.GameThreadProfile" },
     mipmapArrays = { "pzopt.MipMaps" },
     modelLockPerInstance = { "ModelInstance" },
     noClickToStart = { "GameLoadingState" },

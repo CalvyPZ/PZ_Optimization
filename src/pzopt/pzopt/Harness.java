@@ -723,6 +723,26 @@ public final class Harness {
       } catch (IOException e) {
          Log.warn("harness: could not write summary: " + e);
       }
+      writeNativeMemory(f.getParentFile()); // pzopt: -XX:NativeMemoryTracking runs: the JVM's native memory split at route end
+   }
+
+   /** With -XX:NativeMemoryTracking=summary, the VM.native_memory summary at route end in pzopt-nmt.out (the exit-time
+    *  -XX:+PrintNMTStatistics never prints: the game does not take the JVM's normal exit path). */
+   private static void writeNativeMemory(File dir) {
+      try {
+         Object out = java.lang.management.ManagementFactory.getPlatformMBeanServer().invoke(
+               new javax.management.ObjectName("com.sun.management:type=DiagnosticCommand"), "vmNativeMemory",
+               new Object[] {new String[] {"summary", "scale=MB"}}, new String[] {String[].class.getName()});
+         String text = String.valueOf(out);
+         if (text.contains("not enabled")) {
+            return;
+         }
+         try (FileWriter w = new FileWriter(new File(dir, "pzopt-nmt.out"))) {
+            w.write(text);
+         }
+      } catch (Throwable t) {
+         Log.warn("harness: native memory summary: " + t);
+      }
    }
 
    /**

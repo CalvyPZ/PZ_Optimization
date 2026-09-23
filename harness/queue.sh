@@ -585,7 +585,17 @@ cancel() {
     running)
       local pid; pid=$(cat "$d/pid" 2>/dev/null || true)
       [[ -n "$pid" ]] || die "job $(job_id "$d") is running but has no pid yet (blocked in preflight?); try again"
-      touch "$d/cancel"; kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      touch "$d/cancel"
+      local m; m=$(jget "$d" machine)
+      if [[ -n "$m" ]] && ! is_local "$m"; then
+        # killing only the local ssh left the laptop's run.sh and its game running (2026-09-22: the next six jobs failed
+        # with "game is running"). Stop them first, while the worker still counts this job as running (once the local
+        # side dies the worker starts the next job at once, and a later pkill would hit that job's game). run.sh's
+        # EXIT trap restores latestSave.ini / options.ini / the launcher JSON.
+        mssh "$m" "bash -c 'pkill -TERM -f \"[P]rojectZomboid\"; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f \"[P]rojectZomboid64\" >/dev/null || break; sleep 1; done; pkill -KILL -f \"[P]rojectZomboid64\"; pkill -TERM -f \"[h]arness/run\\.sh\"; sleep 2; pgrep -f \"[P]rojectZomboid|[h]arness/run\\.sh\" >/dev/null && echo still-running || echo remote-stopped'" 2>&1 \
+          | sed "s/^/job $(job_id "$d") on $m: /" || echo "job $(job_id "$d"): could not reach $m to stop its run"
+      fi
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
       echo "job $(job_id "$d"): SIGTERM sent to process group $pid" ;;
     *) echo "job $(job_id "$d") is $(status_of "$d"); nothing to cancel" ;;
   esac

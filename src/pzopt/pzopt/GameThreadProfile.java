@@ -281,6 +281,14 @@ public final class GameThreadProfile {
                      classify(st, state, counts);
                      add(stacks, fold(st));
                      samples++;
+                     if (Config.LUA_PROFILE) { // pzopt: which Lua functions, when the sample is inside Kahlua (LuaProfile)
+                        for (StackTraceElement e : st) {
+                           if (e.getClassName().startsWith("se.krka.kahlua.vm.KahluaThread")) {
+                              LuaProfile.sample();
+                              break;
+                           }
+                        }
+                     }
                   }
                } else {
                   ThreadInfo ti = threads.getThreadInfo(gameThreadId, MAX_DEPTH);
@@ -295,6 +303,9 @@ public final class GameThreadProfile {
                Log.warn("game-thread profile: sampling stopped: " + t);
                return;
             }
+         }
+         if (Config.LUA_PROFILE) {
+            LuaProfile.tick(System.currentTimeMillis());
          }
          long now = System.nanoTime();
          if (now >= secondEndNs) {
