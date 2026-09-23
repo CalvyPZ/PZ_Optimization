@@ -33,7 +33,7 @@ public final class ThreadNice {
 
    private record Rule(String prefix, String value) {}
 
-   private static final List<Rule> RULES = new ArrayList<>();
+   private static final List<Rule> RULES = new java.util.concurrent.CopyOnWriteArrayList<>(); // read by the scanner, added to by addRule
    private static final Set<Integer> DONE = new HashSet<>();
    private static MethodHandle setpriority;
    private static MethodHandle schedSetscheduler;
@@ -48,7 +48,7 @@ public final class ThreadNice {
       }
       started = true;
       String spec = Config.THREAD_NICE;
-      if (spec == null || spec.isBlank() || !new File("/proc/self/task").isDirectory() || !Overrides.enabled()) {
+      if (spec == null || spec.isBlank()) {
          return;
       }
       for (String part : spec.split(",")) {
@@ -57,8 +57,34 @@ public final class ThreadNice {
             RULES.add(new Rule(part.substring(0, eq).trim().replace('_', ' '), part.substring(eq + 1).trim()));
          }
       }
-      if (RULES.isEmpty()) {
-         return;
+      if (!RULES.isEmpty()) {
+         run();
+      }
+   }
+
+   /**
+    * A rule from code (JitGovernor: the C2 compiler threads at SCHED_IDLE on machines with more than jitC1Cores cores).
+    * Goes before the user's rules unless one of those already names threads with this prefix, and starts the scanner.
+    * Returns false where it cannot apply (not Linux, no native calls).
+    */
+   public static synchronized boolean addRule(String prefix, String value) {
+      for (Rule r : RULES) {
+         if (!r.prefix.equals("*") && (r.prefix.startsWith(prefix) || prefix.startsWith(r.prefix))) {
+            return true; // the user's rule for these threads wins
+         }
+      }
+      RULES.add(0, new Rule(prefix, value));
+      return run();
+   }
+
+   private static boolean scanning;
+
+   private static boolean run() {
+      if (scanning) {
+         return true;
+      }
+      if (!new File("/proc/self/task").isDirectory() || !Overrides.enabled()) {
+         return false;
       }
       try {
          Linker l = Linker.nativeLinker();
@@ -70,11 +96,13 @@ public final class ThreadNice {
                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
       } catch (Throwable t) {
          Log.warn("threadNice: no native setpriority (" + t + "); off");
-         return;
+         return false;
       }
+      scanning = true;
       Thread th = new Thread(ThreadNice::loop, "pzopt-thread-nice");
       th.setDaemon(true);
       th.start();
+      return true;
    }
 
    private static void loop() {
@@ -83,7 +111,7 @@ public final class ThreadNice {
          try {
             int n = scan();
             if (n > 0 || rounds == 0) {
-               Log.info("threadNice: " + n + " thread(s) adjusted this pass, " + DONE.size() + " in total (" + Config.THREAD_NICE + ")");
+               Log.info("threadNice: " + n + " thread(s) adjusted this pass, " + DONE.size() + " in total (" + RULES + ")");
             }
             rounds++;
             Thread.sleep(500);

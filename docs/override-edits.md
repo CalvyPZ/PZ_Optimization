@@ -2624,8 +2624,10 @@ because HotSpot marks a method it declined for C2 under an exclude directive as 
 reached during play keeps C1 code after warm-up; the gain in the worst hitches stays too. Running the C2 threads at
 SCHED_IDLE instead (tiered code, compile only on idle CPU) behaved like tiered (68.3 fps, 1.5 per minute): the Dell is
 ~85 % busy, not saturated, so the idle thread still finds time. On a 12-core laptop pinned to 6 / 8 cores excluding C2
-also removed the frames over 100 ms (6.0 -> 0, 3.0 -> 0 per minute) but cost 39 % of mean fps at 6 cores in one run,
-so the threshold stays at 4 cores (`jitC1Cores`).
+also removed the frames over 100 ms (4.5-6 -> 0 per minute at 6 cores, 3 -> 0 at 8) but cost 20-35 % of mean fps at 6
+cores (118-120 vs 149-195 fps tiered, two runs each), so the threshold stays at 4 cores (`jitC1Cores`). `jitMode=c2idle`
+(C2 threads at SCHED_IDLE, via `ThreadNice.addRule`) is kept as an option: one 6-core run looked like a big win (215 fps,
+nothing over 100 ms) but its repeat with identical settings measured 152 fps, and on 12 / 16 cores it equalled tiered.
 
 ### zombie.iso.WorldStreamer (`threadNice`)
 
