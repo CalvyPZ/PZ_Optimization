@@ -36,16 +36,16 @@ local SECTIONS = {
     {
         title = "Chunk textures: what bakes", clip = "drive",
         entries = {
-            { key = "treesInChunkTexture", label = "Bake trees into chunk textures",
+            { key = "treesInChunkTexture", label = "Trees: bake into chunk textures",
               tip = "Static trees are drawn once into the chunk textures instead of every frame; only fading trees stay per-frame. Off = stock (every tree every frame)." },
-            { key = "treeBakeMaxChunksPerSec", label = "Bake trees only below this chunk rate (chunks/s)",
+            { key = "treeBakeMaxChunksPerSec", label = "Trees: bake only below this chunk rate (chunks/s)",
               choices = { "0", "12", "24", "48" }, note = { ["0"] = "always bake" },
               tip = "While chunks stream in faster than this (walking loads about 9 a second, driving at 60 km/h about 32, at 120 km/h about 72) new chunk textures are baked without their trees and the trees are drawn per frame instead: a texture that lives a second or two while driving costs more to bake its trees into than to draw them. Textures already baked keep their trees until they re-bake anyway." },
-            { key = "treeBakeDirect", label = "Bake trees one by one",
+            { key = "treeBakeDirect", label = "Trees: bake through the plain sprite path",
               tip = "Baked trees go through the plain sprite path. The batched path drops the largest (jumbo) trees near buildings." },
-            { key = "treeBakePass", label = "Tree pass: whole crowns, depth by height",
+            { key = "treeBakePass", label = "Trees: crowns across textures, depth by height",
               tip = "Baked trees are drawn by their own pass: into every chunk texture the crown reaches (a jumbo tree is up to 7 tiles wide) and with a depth that rises with the crown like walls do. Off = trees are clipped at their chunk texture's border and cut by upper-floor walls behind them (issue #5)." },
-            { key = "treeAppend", label = "Draw new trees into neighbour textures",
+            { key = "treeAppend", label = "Trees: draw new ones into neighbour textures",
               tip = "A newly loaded chunk's trees that reach into an already baked neighbour texture are drawn on top of it instead of re-baking the whole texture; same picture, most of the re-bakes while driving." },
             { key = "windowsInChunkTexture", label = "Bake windows into chunk textures",
               tip = "Windows and glass doors bake like walls instead of being drawn every frame." },
@@ -65,53 +65,53 @@ local SECTIONS = {
             { key = "rebakeBudget", label = "Chunk texture re-bakes per frame",
               choices = { "0", "2", "4", "8", "16" }, note = { ["0"] = "unlimited, stock" },
               tip = "Textures dirtied only by lighting drift, a redraw or a cutaway change keep their previous image for a few frames past this many re-bakes." },
-            { key = "rebakeMaxFrames", label = "Longest re-bake hold (frames)",
+            { key = "rebakeMaxFrames", label = "Chunk texture re-bakes: longest hold (frames)",
               choices = { "1", "2", "3", "4", "6" },
               tip = "A held re-bake lands after at most this many frames." },
             { key = "lightingRebakeBudget", label = "Lighting-only re-bakes per frame",
               choices = { "2", "4", "8", "16", "32" },
               tip = "Textures dirtied only by a lighting change (daylight drift, a lightning flash) re-bake at most this many per frame." },
-            { key = "lightingRebakeMaxFrames", label = "Longest lighting-only re-bake hold (frames)",
+            { key = "lightingRebakeMaxFrames", label = "Lighting-only re-bakes: longest hold (frames)",
               choices = { "3", "10", "30", "60" },
               tip = "A lighting-only re-bake lands after at most this many frames; a lightning strike spreads over this window instead of one long frame." },
-            { key = "zoomRetain", label = "Keep chunk textures across zoom changes",
+            { key = "lightingRebakeMs", label = "Lighting-only re-bakes: minimum ms between two",
+              choices = { "0", "50", "100", "250", "500" }, note = { ["0"] = "stock" },
+              tip = "A chunk texture dirtied only by a lighting change is not re-baked more often than this." },
+            { key = "zoomRetain", label = "Zoom: keep chunk textures across changes",
               tip = "Chunk-level textures that leave the screen when the camera zooms in are kept (while the chunk would still be on screen at the widest zoom) instead of being freed, so zooming back out reuses them; the ones that return, and new ones a zoom-out reveals, are baked a few per frame nearest the player first, with the kept image shown meanwhile. Stock bakes every level a zoom-out reveals in the frame it appears: a fast wheel spin from 0.25 to 2.5 is a 80-375 ms frame." },
-            { key = "zoomRebakeBudget", label = "Chunk textures a zoom change bakes per frame",
+            { key = "zoomRebakeBudget", label = "Zoom: kept and new textures baked per frame",
               choices = { "4", "8", "12", "16", "24" },
               tip = "The most chunk-level textures a zoom change (kept ones coming back, new ones it reveals) may start per frame; the count drops after a long frame and grows back after short ones." },
-            { key = "zoomPlaceholder", label = "Show the kept texture while the new zoom bakes",
+            { key = "zoomPlaceholder", label = "Zoom: kept texture shown while the new one bakes",
               tip = "A chunk level whose texture at the new zoom scale is still queued draws its complete texture from the other scale meanwhile, so a zoom change never shows a hole; off, the level is blank until its own bake lands." },
-            { key = "zoomEaseMs", label = "Zoom motion time (ms)",
+            { key = "zoomEaseMs", label = "Zoom: motion time (ms)",
               choices = { "0", "150", "200", "300", "400", "600" }, note = { ["0"] = "stock step" },
               tip = "A mouse-wheel zoom change takes this long, moving along a smooth curve (quick start, gentle stop) whatever the frame rate. Stock moves a fixed amount per frame and stops abruptly: 8 frames, 16 ms at 500 fps, 130 ms at 60." },
-            { key = "zoomEase", label = "Zoom motion curve",
+            { key = "zoomEase", label = "Zoom: motion timing curve",
               choices = { "0.25,0.1,0.25,1.0", "0.42,0,0.58,1", "0,0,0.58,1", "0.42,0,1,1", "0.333,0.333,0.667,0.667" },
               note = { ["0.25,0.1,0.25,1.0"] = "ease", ["0.42,0,0.58,1"] = "ease-in-out", ["0,0,0.58,1"] = "ease-out", ["0.42,0,1,1"] = "ease-in", ["0.333,0.333,0.667,0.667"] = "linear" },
               bezier = true,
               tip = "The cubic Bezier control points (x1,y1,x2,y2) of the zoom motion, as in CSS transitions: pick a preset or drag the four sliders under it (the plot beside them shows the zoom's progress over the motion time). x is the share of the time, y the share of the zoom change; y stays within 0-1 so the zoom never overshoots its target." },
-            { key = "zoomFrameMs", label = "Zoom bake frame limit (ms)",
+            { key = "zoomFrameMs", label = "Zoom: slow-frame limit for the bakes (ms)",
               choices = { "6", "8", "10", "14", "20" },
               tip = "A frame longer than this halves the zoom bakes per frame; frames under three quarters of it grow the count back." },
-            { key = "lightingRebakeMs", label = "Minimum ms between lighting-only rebakes",
-              choices = { "0", "50", "100", "250", "500" }, note = { ["0"] = "stock" },
-              tip = "A chunk texture dirtied only by a lighting change is not re-baked more often than this." },
-            { key = "lightingStrongDelta", label = "Light change that re-bakes at once (0-255)",
+            { key = "lightingStrongDelta", label = "Strong light changes: amount that re-bakes at once (0-255)",
               choices = { "2", "4", "6", "12", "24", "255" }, note = { ["255"] = "hold everything" },
-              tip = "A square whose light moved by this much since its texture was last baked (a torch or headlight beam sweeping in) re-bakes now, like stock; smaller drift keeps the holds above." },
-            { key = "lightingStrongBudget", label = "Strong light changes re-baked at once per frame",
+              tip = "A square whose light moved by this much since its texture was last baked (a torch or headlight beam sweeping in) re-bakes now, like stock; smaller drift keeps the lighting-only re-bake hold (\"Lighting-only re-bakes: minimum ms between two\")." },
+            { key = "lightingStrongBudget", label = "Strong light changes: budget per frame",
               choices = { "0", "4", "8", "16", "32" }, note = { ["0"] = "no cap" },
-              tip = "How many chunk textures with a strong light change re-bake in the same frame; the rest keep the holds above. A torch or headlight beam touches a few per frame; turning moves the out-of-sight fade over every exterior tile (downtown Louisville: 10.8 fps with no cap)." },
-            { key = "lightingStrongFrameMs", label = "Ease strong light re-bakes on slow frames",
+              tip = "How many chunk textures with a strong light change re-bake in the same frame; the rest keep the lighting-only re-bake hold. A torch or headlight beam touches a few per frame; turning moves the out-of-sight fade over every exterior tile (downtown Louisville: 10.8 fps with no cap)." },
+            { key = "lightingStrongFrameMs", label = "Strong light changes: ease on slow frames",
               choices = { "0", "12", "20", "33" }, note = { ["0"] = "fixed budget" },
               tip = "A game-thread frame longer than this many milliseconds halves the number of strong-light chunk re-bakes allowed next frame (it grows back on fast frames). Stops the slow-frame -> more re-bakes -> slower-frame loop of a big downtown horde." },
             { key = "lightingGlobalDeltaPct", label = "Global light move that keeps the spread (%)",
               choices = { "1", "2", "5", "10", "100" }, note = { ["100"] = "never" },
               tip = "A lightning flash or a fast dusk moves the whole scene's light at once; past this per-frame move the lighting re-bakes stay spread over frames instead of landing at once." },
-            { key = "lightingFlush", label = "Flush queued lighting refreshes before a lighting pass",
-              tip = "Chunks the per-frame lighting refresh budget still holds are refreshed just before the next lighting pass rewrites their dirty bits; off, they keep stale light until it changes again." },
-            { key = "lightingBudget", label = "Chunk lighting refreshes per frame",
+            { key = "lightingBudget", label = "Lighting refreshes per frame (chunks)",
               choices = { "0", "2", "4", "8", "16", "32" }, note = { ["0"] = "unlimited, stock" },
               tip = "Chunks whose square light info is refreshed in one frame; the rest continue next frame." },
+            { key = "lightingFlush", label = "Lighting refreshes: flush the queue before a lighting pass",
+              tip = "Chunks the per-frame lighting refresh budget still holds are refreshed just before the next lighting pass rewrites their dirty bits; off, they keep stale light until it changes again." },
         },
     },
     {
@@ -130,28 +130,28 @@ local SECTIONS = {
               tip = "Each light switch reuses its has-electricity answer for this many frames." },
             { key = "rainTiles", label = "Rain and snow as repeated tiles",
               tip = "The particle cell is packed once and drawn once per screen cell on the GPU instead of every copy being packed on both threads; same picture." },
-            { key = "puddleCache", label = "Cache packed puddle vertices per chunk",
-              tip = "Rain puddles keep their packed vertices per chunk level and only refresh lighting, camera offset and depth each frame; 4.5 ms of a thunderstorm frame at max zoom." },
             { key = "rainSplashesFast", label = "Rain splashes without the game RNG",
               tip = "Splash starts are drawn with a cheap local generator (one draw per splash instead of one game RNG call per idle square per frame); same chance, timing and sprites." },
-            { key = "puddleEarlyZ", label = "Puddle shader with early depth test",
-              tip = "The puddle shaders take their depth from the vertex instead of writing it per pixel, so wet ground hidden behind walls, roofs and objects is skipped before the expensive shader runs; same picture." },
-            { key = "puddleVbo", label = "Keep puddle batches on the GPU",
-              tip = "Each chunk level's cached puddle vertices stay in their own GPU buffer and are re-sent only when a light changed, the camera crossed a chunk edge or the batch was rebuilt; the camera offset is a matrix translation. Nothing is copied per frame." },
-            { key = "puddleCacheFrames", label = "Puddle cache rebuild interval (frames)",
+            { key = "puddleCache", label = "Puddles: cache packed vertices per chunk",
+              tip = "Rain puddles keep their packed vertices per chunk level and only refresh lighting, camera offset and depth each frame; 4.5 ms of a thunderstorm frame at max zoom." },
+            { key = "puddleCacheFrames", label = "Puddles: cache rebuild interval (frames)",
               choices = { "1", "30", "60", "120" }, note = { ["1"] = "rebuild every frame (cache off)" },
               tip = "A cached puddle batch is rebuilt with the stock code after this many frames at the latest; bakes and cutaway changes rebuild it at once." },
+            { key = "puddleEarlyZ", label = "Puddles: early depth test in the shader",
+              tip = "The puddle shaders take their depth from the vertex instead of writing it per pixel, so wet ground hidden behind walls, roofs and objects is skipped before the expensive shader runs; same picture." },
+            { key = "puddleVbo", label = "Puddles: keep batches on the GPU",
+              tip = "Each chunk level's cached puddle vertices stay in their own GPU buffer and are re-sent only when a light changed, the camera crossed a chunk edge or the batch was rebuilt; the camera offset is a matrix translation. Nothing is copied per frame." },
             { key = "weatherMaskIdleSkip", label = "Skip the weather mask while nothing is drawn",
               tip = "Outdoors with no clouds, fog or rain the per-frame weather-mask view scan and mask draw are skipped; indoors only the player's building is scanned." },
             { key = "weatherFxScalePct", label = "Weather effects buffer size (% of screen)",
               choices = { "100", "75", "50", "33", "25" }, note = { ["100"] = "stock" },
               tip = "Clouds, fog, rain and the interior mask they are cut by are drawn into screen-sized buffers every frame; smaller buffers cost far less GPU and CPU and the soft content looks the same." },
-            { key = "fogPass", label = "Fog in one pass (experimental)",
+            { key = "fogPass", label = "Fog drawn in one pass (experimental)",
               tip = "EXPERIMENTAL. Heavy fog is drawn in one batch into a smaller buffer that is depth-tested against the scene and blended over it once, instead of shading every pixel up to twelve times with one draw call per row: fog at 120 km/h went from 220 to ~340 fps (clear: 447) on the 5120x2160 desktop. Known issue: power lines can flicker slightly in fog while the camera moves; disabling this removes it (stock fog, stock cost)." },
-            { key = "fogScalePct", label = "Fog buffer size (% of screen)",
+            { key = "fogScalePct", label = "Fog pass: buffer size (% of screen)",
               choices = { "100", "75", "50", "33", "25" }, note = { ["100"] = "full resolution" },
               tip = "The fog buffer per axis as a percentage of the screen; 50 costs a quarter of the fog GPU work, 25 a sixteenth. Fog is soft, so the smaller buffers look the same, and edges where fog meets walls or wires are resolved against the real depth." },
-            { key = "fogMaskFrames", label = "Fog square masks refresh (frames)",
+            { key = "fogMaskFrames", label = "Fog pass: square masks refresh (frames)",
               choices = { "0", "10", "20", "60" }, note = { ["0"] = "read every square every frame" },
               tip = "The fog rows are built from per-chunk masks of the squares that take fog instead of reading every square each frame; a mask is refreshed this many frames after its last refresh, so a newly built room reaches the fog within that many frames." },
             { key = "roofHideDebounceFrames", label = "Carport roof hide/show settle time (frames)",
@@ -163,7 +163,7 @@ local SECTIONS = {
               tip = "A cutaway visit re-flags every cut-away wall square; stock re-bakes every chunk holding one on every visit. Only chunks where a square's cutaway flag actually changed are re-baked." },
             { key = "occlusionSkipLightingOnly", label = "Keep the occlusion grid when only lighting changed",
               tip = "The occluded-squares grid and the per-level rendered-square counts are rebuilt only when a visible chunk level changed for a reason other than lighting drift." },
-            { key = "lightInfoChunkGate", label = "Ask the lighting engine per chunk level first",
+            { key = "lightInfoChunkGate", label = "Ask the lighting engine about a chunk level first",
               tip = "Before refreshing the 64 squares of a chunk level about to be re-baked, one chunk-level question to the lighting engine says whether any of them changed." },
             { key = "lightInfoOncePerFrame", label = "Ask the lighting engine once per square per frame",
               tip = "The per-square light-info JNI call is skipped when the same square was already refreshed this frame." },
@@ -197,11 +197,11 @@ local SECTIONS = {
               tip = "Every state-machine, action-context and animation-variable access of a character went through a class walk, a map probe and a reflective cast; the answer is memoised and zombies keep their component in a field (5 % of the game thread in a horde). Same results." },
             { key = "actionConditionFast", label = "Typed decision-rule variables",
               tip = "A rule comparing a true/false or integer animation variable reads it directly; stock printed the value to text and parsed it back for every rule of every zombie every frame. Same outcomes." },
-            { key = "skinTransformsPrecompute", label = "Zombie skin matrices on the bone worker",
+            { key = "skinTransformsPrecompute", label = "Bone worker: skin matrices of zombies",
               tip = "The worker that blends a zombie's bones also multiplies them into the skin matrices of the body and clothing models it wore last frame, so the render pass finds them ready (3 % of the game thread in a horde)." },
-            { key = "skinPalettePrecompute", label = "Zombie shader palettes on the bone worker",
+            { key = "skinPalettePrecompute", label = "Bone worker: skin palettes for the shader",
               tip = "The same worker also stores those matrices in the shader palette layout, so the draw data copies one block instead of sixteen numbers per bone." },
-            { key = "shadowPrep", label = "Zombie shadow ellipses on the bone worker",
+            { key = "shadowPrep", label = "Bone worker: zombie shadow ellipses",
               tip = "The shadow blob under a zombie (head and feet projected to the ground) is computed right after its bones on the worker instead of in the render pass; same numbers." },
             { key = "boneIndexCache", label = "Remember bone lookups by name",
               tip = "The head and feet bone indices the shadow asks for by name every frame are cached per skeleton." },
@@ -217,7 +217,7 @@ local SECTIONS = {
               tip = "A zombie facing away from you or with you beyond its vision radius already has a zero chance to notice you; it skips the remaining modifiers, the car test and the dice roll (same outcome), instead of computing them all first." },
             { key = "charDrawPrep", label = "Zombie draw data built on other cores",
               tip = "The draw data of every zombie model on screen (its lights, one render record and matrix palette per body and clothing model, the depth and light setup) is built on worker threads before the game thread queues the draws in the stock order; stock built it one zombie at a time on the game thread (13 % of it in a Louisville horde). Same pixels." },
-            { key = "charDrawThreads", label = "Threads for that draw data",
+            { key = "charDrawThreads", label = "Zombie draw data threads",
               choices = { "4", "8", "12", "14" }, tip = "Threads of the zombie draw-data pool; the data has to be ready before the zombies are queued, so on a 16-core machine 14 keep the game thread from waiting. More than cores - 2 is clamped." },
             { key = "zombieAtlasFast", label = "Flat draw call for far zombies",
               tip = "A zombie too far for a 3D model is drawn as a small pre-rendered sprite; its draw goes through a flat copy of the game's render chain (the same tests, the same sprite call) instead of five nested virtual calls per zombie. ~1,100 such zombies per frame in a Louisville horde. Same pixels." },
@@ -225,9 +225,9 @@ local SECTIONS = {
               tip = "Before a zombie's transitions are evaluated on a worker, the game thread reads the variables whose engine callback has a side effect. It used to resolve every variable of every transition to find out which those are; the answer only depends on the variable's name, so it is now decided once per state. Same values." },
             { key = "emitterParamSkip", label = "Skip sound parameters for silent characters",
               tip = "A character's sound parameters (the floor material under its feet, the room it is in) are recomputed only while it actually has a sound playing or about to start; stock recomputed all of them for every zombie every frame and wrote them nowhere. Same sounds." },
-            { key = "separateFast", label = "Cheap push-apart for zombies",
+            { key = "separateFast", label = "Push-apart for zombies: cheap pass",
               tip = "The pass that pushes overlapping zombies apart skips the half of the engine's version that only ever applies to the player, and the grid answer 'is my square walled off from that neighbour' is computed once per square per frame instead of once per zombie. Same positions." },
-            { key = "separateParallel", label = "Push-apart computed on other cores",
+            { key = "separateParallel", label = "Push-apart for zombies: on other cores",
               tip = "That push-apart is computed for the whole horde on worker threads before the update loop; the game thread applies each zombie's result at the same point in its update as before, so the collide events and window climbs keep their order. The neighbours' positions are read at the top of the frame instead of as the loop advances." },
             { key = "sleepCheckMemo", label = "Check 'everyone asleep' once per frame",
               tip = "The game asks whether all players are asleep on the way into every character update, and a zombie asks several times per update; the answer cannot change inside a frame, so it is computed once." },
@@ -237,11 +237,11 @@ local SECTIONS = {
               tip = "Every zombie asked the engine for its action group by name twice a frame, which copied the name into a new lower-case string and probed a map for a group loaded once at startup. It is held instead." },
             { key = "profilerThreadMemo", label = "Cheap profiler thread check",
               tip = "Every performance probe in the game asks twice whether it is on a profiled thread, and the engine answers by scanning a list of thread names. The answer per thread is remembered. Costs nothing when the profiler is off, which is always in normal play." },
-            { key = "zombieSimLodTiles", label = "Simulate distant zombies less often (tiles)",
+            { key = "zombieSimLodTiles", label = "Distant zombies simulated less often (tiles)",
               choices = { "0", "8", "12", "15", "20", "25" },
               note = { ["0"] = "stock: the game's own 30 / 60 / 80 tile steps only" },
               tip = "The game already updates a zombie every 2nd, 4th or 8th frame once it is 30, 60 or 80 tiles from you. This adds one more step at a closer distance. It roughly halves what the horde costs the game thread, and distant zombies move in slightly coarser steps - it is a change to how the world is simulated, so it is off by default." },
-            { key = "zombieSimLodSteps", label = "How many of those extra steps",
+            { key = "zombieSimLodSteps", label = "Distant zombies simulated less often: extra steps",
               choices = { "1", "2", "3" },
               note = { ["3"] = "not recommended: three steps made the Louisville test scene unstable" },
               tip = "Each further step applies at twice the distance of the previous one, like the game's own ladder. Two steps is the measured sweet spot." },
@@ -257,24 +257,24 @@ local SECTIONS = {
             { key = "upscaler", label = "Upscaler",
               choices = { "off", "bicubic", "fsr1", "dlss", "xess" },
               note = { off = "stock: the world renders at the screen size", bicubic = "the stock screen filter, any GPU", fsr1 = "AMD FidelityFX Super Resolution 1.0, any GPU", dlss = "NVIDIA DLSS Super Resolution (RTX; needs the shim built from the repository under natives/, not in the release); else runs as fsr1", xess = "Intel XeSS: not available yet, runs as fsr1" },
-              tip = "The world is rendered at a fraction of the screen size (see the quality below) and scaled back up before the UI, text and the stock screen shader, which stay at full resolution. GPU-bound scenes (fog, storms, big towns, 4K, laptops) gain roughly the pixel ratio. fsr1 is a sharp spatial upscaler that works on every GPU; dlss accumulates detail over frames on an RTX card; bicubic is the plain stretch. Applies on the next launch." },
+              tip = "The world is rendered at a fraction of the screen size (see \"Upscaler quality\") and scaled back up before the UI, text and the stock screen shader, which stay at full resolution. GPU-bound scenes (fog, storms, big towns, 4K, laptops) gain roughly the pixel ratio. fsr1 is a sharp spatial upscaler that works on every GPU; dlss accumulates detail over frames on an RTX card; bicubic is the plain stretch. Applies on the next launch." },
             { key = "upscalerQuality", label = "Upscaler quality (render size)",
               choices = { "quality", "balanced", "performance", "ultra", "native" },
               note = { quality = "67 % per axis (44 % of the pixels)", balanced = "58 %", performance = "50 % (a quarter of the pixels)", ultra = "33 %", native = "100 % (dlss: DLAA anti-aliasing only)" },
               tip = "The render size per axis. Quality keeps most of the detail; performance halves the axes for a quarter of the world-pass GPU work." },
-            { key = "upscalerScalePct", label = "Explicit render scale (%)",
+            { key = "upscalerScalePct", label = "Upscaler render scale of your own (%)",
               choices = { "0", "40", "50", "60", "67", "75", "85" }, note = { ["0"] = "use the quality preset" },
               tip = "A render scale of your own in percent per axis instead of the quality preset (10-100)." },
-            { key = "fsrSharpnessPct", label = "FSR 1.0 sharpening (%)",
+            { key = "fsrSharpnessPct", label = "Upscaler, AMD FSR 1.0: sharpening (%)",
               choices = { "0", "40", "60", "80", "100" }, note = { ["0"] = "none", ["100"] = "the sharpest" },
               tip = "The contrast-adaptive sharpening (RCAS) after the FSR 1.0 upsample; 80 is AMD's usual default." },
-            { key = "dlssPreset", label = "DLSS model preset",
+            { key = "dlssPreset", label = "Upscaler, NVIDIA DLSS: model preset",
               choices = { "default", "f", "e", "k", "j", "m", "l" },
               note = { default = "NVIDIA's choice: the transformer models K / M / L", f = "older convolutional model: ~1.5 ms cheaper a frame at 4K, a little softer", e = "older convolutional model", k = "transformer, best quality", j = "transformer, less ghosting, more flicker", m = "transformer, the performance-mode default", l = "transformer, the ultra-performance default" },
               tip = "Which DLSS network runs. The transformer models (DLSS 4) reconstruct the most detail but cost ~2.5 ms a frame at 5120x2160 on an RTX 4090 (231 fps on the 120 km/h drive vs 377 with preset F and 619 with FSR 1.0); at 1440p and below the cost is a third or less." },
-            { key = "dlssSharpen", label = "DLSS sharpening",
+            { key = "dlssSharpen", label = "Upscaler, NVIDIA DLSS: sharpening",
               tip = "Asks DLSS for its mild extra sharpening pass on top of the super resolution; off is the plain reconstruction." },
-            { key = "upscalerObjectMv", label = "Motion vectors for characters and vehicles (dlss / xess)",
+            { key = "upscalerObjectMv", label = "Upscaler, temporal: character and vehicle motion vectors",
               tip = "The temporal upscalers get each character's and vehicle's own motion on top of the camera's, so moving zombies and cars do not ghost or smear. Off = camera motion only (an A/B)." },
         },
     },
@@ -329,11 +329,15 @@ local SECTIONS = {
               choices = { "off", "240", "480", "960" },
               note = { ["240"] = "last 240 frames (480 px)", ["480"] = "last 480 frames (960 px)", ["960"] = "last 960 frames (1920 px)" },
               tip = "A bar per presented frame (green under 1.1x the cap budget, amber under 2x, red above; GPU time in blue) with ms ticks and the budget line." },
+            { key = "overlayGraphHz", label = "Frame-time graph redraws per second",
+              choices = { "0", "15", "30", "60" },
+              note = { ["0"] = "every frame (one sprite per bar)", ["15"] = "15 times a second", ["30"] = "30 times a second", ["60"] = "60 times a second" },
+              tip = "With \"Draw the overlay as one texture\" on, the frame-time bars are redrawn into that texture this often instead of drawn as ~480 sprites every frame. 0 draws them every frame." },
             { key = "overlayFlame", label = "Game-thread flame graph",
               choices = { "off", "right", "right-wide", "below" },
               note = { right = "column beside the statistics, 900 px", ["right-wide"] = "column beside the statistics, 1400 px", below = "under the frame graph, panel width" },
               tip = "The last 5 s of stack samples as a flame graph: root (GameWindow.frameStep) at the bottom, callees above, width = share of the time, biggest first from the left; update green, render blue, lighting amber, pzopt frames magenta. Off by default: with \"Draw the overlay as one texture\" off it is the heaviest element (one sprite per box and label every frame). harness/flamegraph.py draws a whole run as an SVG." },
-            { key = "overlayFlameDepth", label = "Flame graph rows",
+            { key = "overlayFlameDepth", label = "Game-thread flame graph rows",
               choices = { "12", "16", "24", "32", "48" },
               tip = "How many call levels above GameWindow.frameStep the flame graph shows." },
             { key = "gameThreadProfileHz", label = "Game-thread stack samples per second",
@@ -344,10 +348,6 @@ local SECTIONS = {
             { key = "overlayRefreshMs", label = "Overlay refresh interval (ms)",
               choices = { "100", "250", "500", "1000" },
               tip = "How often the overlay's numbers, game-thread tree and verdict are recomputed and its texture redrawn. Longer is cheaper; the frame-time graph has its own rate." },
-            { key = "overlayGraphHz", label = "Frame-time graph redraws per second",
-              choices = { "0", "15", "30", "60" },
-              note = { ["0"] = "every frame (one sprite per bar)", ["15"] = "15 times a second", ["30"] = "30 times a second", ["60"] = "60 times a second" },
-              tip = "With \"Draw the overlay as one texture\" on, the frame-time bars are redrawn into that texture this often instead of drawn as ~480 sprites every frame. 0 draws them every frame." },
             { key = "overlayCorner", label = "Overlay corner",
               choices = { "tl", "tr", "bl", "br" },
               tip = "Where the overlay sits: top-left, top-right, bottom-left, bottom-right." },
@@ -361,36 +361,36 @@ local SECTIONS = {
         entries = {
             { key = "overlayFpsColor", label = "Colour the fps number",
               tip = "The fps number takes one of four colours by how close it is to the target; off = white like the rest of the line." },
-            { key = "overlayFpsFollowCap", label = "Follow the framerate cap",
+            { key = "overlayFpsFollowCap", label = "Colour thresholds follow the framerate cap",
               tip = "On: with a framerate cap the thresholds are percentages of it (the three \"% of the cap\" values). Off, or uncapped: the three fixed fps thresholds apply." },
-            { key = "overlayFpsCapBluePct", label = "Blue: at the cap (% of the cap)",
+            { key = "overlayFpsCapBluePct", label = "Threshold, capped: blue, at the cap (% of the cap)",
               choices = { "100", "99", "98", "95", "90" },
               tip = "At or above this share of the cap counts as at the cap. The limiter rarely lands exactly on it, so 100 is stricter than it looks." },
-            { key = "overlayFpsCapGreenPct", label = "Green: at or above (% of the cap)",
+            { key = "overlayFpsCapGreenPct", label = "Threshold, capped: green, at or above (% of the cap)",
               choices = { "95", "90", "85", "80", "75" },
               tip = "Green from this share of the cap up to the blue threshold." },
-            { key = "overlayFpsCapYellowPct", label = "Yellow: at or above (% of the cap)",
+            { key = "overlayFpsCapYellowPct", label = "Threshold, capped: yellow, at or above (% of the cap)",
               choices = { "75", "66", "50", "33", "25" },
               tip = "Yellow from this share of the cap up to the green threshold; red below it." },
-            { key = "overlayFpsBlueAbove", label = "Blue: above (fps, uncapped)",
+            { key = "overlayFpsBlueAbove", label = "Threshold, uncapped: blue, above (fps)",
               choices = { "500", "400", "300", "240", "200", "165", "144", "120", "60" },
               tip = "Uncapped, or with follow-cap off: blue above this many fps." },
-            { key = "overlayFpsGreenAbove", label = "Green: at or above (fps, uncapped)",
+            { key = "overlayFpsGreenAbove", label = "Threshold, uncapped: green, at or above (fps)",
               choices = { "300", "240", "200", "150", "120", "100", "60", "45" },
               tip = "Uncapped, or with follow-cap off: green from this many fps up to the blue threshold." },
-            { key = "overlayFpsYellowAbove", label = "Yellow: at or above (fps, uncapped)",
+            { key = "overlayFpsYellowAbove", label = "Threshold, uncapped: yellow, at or above (fps)",
               choices = { "200", "150", "120", "100", "75", "60", "45", "30" },
               tip = "Uncapped, or with follow-cap off: yellow from this many fps up to the green threshold; red below it." },
-            { key = "overlayFpsColorBlue", label = "Colour for \"at the cap\"",
+            { key = "overlayFpsColorBlue", label = "Tier colour 1: \"at the cap\"",
               choices = FPS_COLOURS,
               tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
-            { key = "overlayFpsColorGreen", label = "Colour for \"near the cap\"",
+            { key = "overlayFpsColorGreen", label = "Tier colour 2: \"near the cap\"",
               choices = FPS_COLOURS,
               tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
-            { key = "overlayFpsColorYellow", label = "Colour for \"well below\"",
+            { key = "overlayFpsColorYellow", label = "Tier colour 3: \"well below\"",
               choices = FPS_COLOURS,
               tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
-            { key = "overlayFpsColorRed", label = "Colour for \"far below\"",
+            { key = "overlayFpsColorRed", label = "Tier colour 4: \"far below\"",
               choices = FPS_COLOURS,
               tip = "Named colour, or a RRGGBB hex value typed into Zomboid/pzopt/options.ini." },
         },
@@ -398,7 +398,7 @@ local SECTIONS = {
     {
         title = "Chunk streaming", clip = "drive",
         entries = {
-            { key = "parallel", label = "Parallel chunk loading",
+            { key = "parallel", label = "Chunk loading in parallel",
               tip = "Chunk recalculation runs on a worker pool. Off = the stock single-threaded pass." },
             { key = "workers", label = "Chunk worker threads",
               choices = { "1", "2", "3", "4", "6", "8" },
@@ -506,6 +506,14 @@ local SECTIONS = {
         },
     },
 }
+
+-- The "Sort by" combo shows SECTIONS in this source order ("natural"), alphabetically (sections by title, settings
+-- by label) or by their effect on one resource. Settings that only make sense next to another one (a setting and its
+-- sub-settings, the fps colour tiers) carry labels that sort into the same order both ways, and a tip names another
+-- setting by its label rather than saying "above" / "below".
+local function alphaLess(a, b)
+    return string.lower(a) < string.lower(b)
+end
 
 local function perf()
     return getPerformance()
@@ -831,6 +839,13 @@ function PzoptPreview:new(x, y, w, h, panel, rows)
     o.fontM = UIFont.Medium
     o.hS = getTextManager():getFontHeight(UIFont.Small)
     o.hM = getTextManager():getFontHeight(UIFont.Medium)
+    -- every controller-focusable element of a row (the curve sliders are several lines) -> the row
+    o.byControl = {}
+    for _, row in ipairs(rows) do
+        for _, line in ipairs(row.option.pzoptJoyLines or { { row.option.control } }) do
+            for _, el in ipairs(line) do o.byControl[el] = row end
+        end
+    end
     o:layoutSlots()
     return o
 end
@@ -885,8 +900,21 @@ function PzoptPreview:select(row)
 end
 
 -- The row under the mouse: the list's mouse position is in its content space (scroll included), like row.y.
+-- With a controller (the page holds the joypad focus) the row of the focused line instead, wherever the mouse
+-- is; a section heading or the search row keeps the last setting shown.
 function PzoptPreview:pick()
     local panel = self.panel
+    if panel.joyfocus then
+        local line = panel.joypadButtonsY and panel.joypadButtonsY[panel.joypadIndexY or 0]
+        for _, el in ipairs(line or {}) do
+            local row = self.byControl[el]
+            if row then
+                self:select(row)
+                return
+            end
+        end
+        return
+    end
     if not panel:isMouseOver() or self:isMouseOver() then return end
     local mx, my = panel:getMouseX(), panel:getMouseY()
     if mx >= self.x then return end
@@ -1227,6 +1255,52 @@ end
 -- the controller navigation in the same order. Which sections are folded is kept for the session.
 
 local COLLAPSED = {}
+-- The "Sort by" choice, kept for the session like the folds: "natural", "alpha" or an AXES id.
+local SORT = "alpha"
+-- What the three headings of a resource sort say, per axis id (default: load).
+local LESS_WORDS = { load = "shorter", chunks = "sooner" }
+local MORE_WORDS = { load = "longer", chunks = "later", cores = "more work for idle cores" }
+
+-- The groups the list shows for the current sort, in display order: { sec = <heading>, rows = { ... } }.
+-- A resource sort regroups every setting under three headings of its own (S.virtual): the ones that lower that
+-- resource's load (biggest change first), the ones that raise it, and the rest alphabetically.
+local function sortedGroups(S)
+    if SORT == "natural" then
+        local out = {}
+        for _, sec in ipairs(S.sections) do table.insert(out, { sec = sec, rows = sec.rows }) end
+        return out
+    end
+    local axis
+    for _, a in ipairs(AXES) do
+        if a.id == SORT then axis = a end
+    end
+    if not axis then return S.alphaGroups end
+    local less, more, none = {}, {}, {}
+    local value = {}
+    for _, row in ipairs(S.managed) do
+        local v = (EFFECTS[row.entry.key] or {})[axis.id] or 0
+        value[row] = v
+        table.insert(v < 0 and less or (v > 0 and more or none), row)
+    end
+    local function byLabel(a, b) return alphaLess(a.entry.label, b.entry.label) end
+    table.sort(less, function(a, b)
+        if value[a] ~= value[b] then return value[a] < value[b] end
+        return byLabel(a, b)
+    end)
+    table.sort(more, function(a, b)
+        if value[a] ~= value[b] then return value[a] > value[b] end
+        return byLabel(a, b)
+    end)
+    table.sort(none, byLabel)
+    local V = S.virtual
+    V[1].title, V[1].rows = axis.label .. ": " .. (LESS_WORDS[axis.id] or "less load") .. ", biggest change first", less
+    V[2].title, V[2].rows = axis.label .. ": " .. (MORE_WORDS[axis.id] or "more load") .. ", biggest change first", more
+    V[3].title, V[3].rows = axis.label .. ": no measured change", none
+    if axis.moreIsWork then
+        return { { sec = V[2], rows = more }, { sec = V[1], rows = less }, { sec = V[3], rows = none } }
+    end
+    return { { sec = V[1], rows = less }, { sec = V[2], rows = more }, { sec = V[3], rows = none } }
+end
 
 local function placeRow(row, y)
     for _, e in ipairs(row.elems) do
@@ -1246,25 +1320,30 @@ local function relayout(S)
     local panel = S.panel
     local y = S.top
     local joy = {}
-    local order = S.sections
+    local groups
     if S.hits then
-        order = {}
+        -- a search ranks: the sections by their best match, the matches inside by score, whatever the sort
+        local order = {}
         for _, sec in ipairs(S.sections) do table.insert(order, sec) end
         table.sort(order, function(a, b)
             if a.best ~= b.best then return a.best > b.best end
             return a.index < b.index
         end)
+        groups = {}
+        for _, sec in ipairs(order) do table.insert(groups, { sec = sec, rows = sec.hitRows }) end
+    else
+        groups = sortedGroups(S)
     end
-    for _, sec in ipairs(order) do
-        local shown = {}
-        if S.hits and #sec.hitRows == 0 then
-            hideRow(sec.header)
-        else
+    local shown, placed = {}, {}
+    for _, g in ipairs(groups) do
+        local sec = g.sec
+        if #g.rows > 0 then
             placeRow(sec.header, y)
+            placed[sec] = true
             y = y + sec.header.step
             table.insert(joy, { sec.header.button })
             if S.hits or not COLLAPSED[sec.title] then
-                for _, row in ipairs(S.hits and sec.hitRows or sec.rows) do
+                for _, row in ipairs(g.rows) do
                     placeRow(row, y)
                     y = y + row.step
                     shown[row] = true
@@ -1274,9 +1353,12 @@ local function relayout(S)
                 end
             end
         end
-        for _, row in ipairs(sec.rows) do
-            if not shown[row] then hideRow(row) end
-        end
+    end
+    for _, sec in ipairs(S.allSections) do
+        if not placed[sec] then hideRow(sec.header) end
+    end
+    for _, row in ipairs(S.managed) do
+        if not shown[row] then hideRow(row) end
     end
     placeRow(S.footer, y)
     y = y + S.footer.step
@@ -1397,14 +1479,14 @@ local function addSearchRows(self, S, splitpoint, y, width)
     self.addY = self.addY + BUTTON_HGT + spacing
     local x = splitpoint + 20
     local fold = ISButton:new(x, y + self.addY, 100, BUTTON_HGT, "Collapse all", S, function(target)
-        for _, sec in ipairs(target.sections) do COLLAPSED[sec.title] = true end
+        for _, sec in ipairs(target.allSections) do COLLAPSED[sec.title] = true end
         relayout(target)
     end)
     fold:initialise()
     fold:setWidthToTitle()
     self.mainPanel:addChild(fold)
     local unfold = ISButton:new(x + fold:getWidth() + spacing, y + self.addY, 100, BUTTON_HGT, "Expand all", S, function(target)
-        for _, sec in ipairs(target.sections) do COLLAPSED[sec.title] = nil end
+        for _, sec in ipairs(target.allSections) do COLLAPSED[sec.title] = nil end
         relayout(target)
     end)
     unfold:initialise()
@@ -1415,7 +1497,33 @@ local function addSearchRows(self, S, splitpoint, y, width)
     self.mainPanel:addChild(status)
     self.mainPanel:insertNewLineOfButtons(fold, unfold)
     self.addY = self.addY + BUTTON_HGT + spacing
-    S.entry, S.status = entry, status
+    -- "Sort by": the topic order, alphabetical, or one resource (the settings that lower its load first)
+    local keys, names = { "natural", "alpha" }, { "Natural (grouped by topic)", "Alphabetical" }
+    for _, axis in ipairs(AXES) do
+        table.insert(keys, axis.id)
+        table.insert(names, "Effect on " .. axis.label)
+    end
+    local sortLabel = ISLabel:new(splitpoint, y + self.addY, BUTTON_HGT, "Sort by", 1, 1, 1, 1, UIFont.Small)
+    sortLabel:initialise()
+    self.mainPanel:addChild(sortLabel)
+    local sort = ISComboBox:new(splitpoint + 20, y + self.addY, width, BUTTON_HGT, S, function(target, box)
+        SORT = keys[box.selected] or "alpha"
+        target.panel:setYScroll(0)
+        relayout(target)
+    end)
+    sort:initialise()
+    for i, name in ipairs(names) do
+        sort:addOption(name)
+        if keys[i] == SORT then sort.selected = i end
+    end
+    sort.tooltip = "Natural: the settings grouped by topic, in the order they were added. Alphabetical: the topics and "
+        .. "the settings in each by name. Effect on a resource: every setting that lowers that part's load first, "
+        .. "biggest change first (the bars in the preview), then the ones that raise it, then the rest. A search "
+        .. "always lists the best matches first."
+    self.mainPanel:addChild(sort)
+    self.mainPanel:insertNewLineOfButtons(sort)
+    self.addY = self.addY + BUTTON_HGT + spacing
+    S.entry, S.status, S.sort = entry, status, sort
 end
 
 local function comboLabels(entry, default, saved)
@@ -1999,11 +2107,33 @@ function MainOptions:pzoptBuildOptimizationsPanel()
         end
         if #sec.rows > 0 then table.insert(S.sections, sec) else hideRow(header) end
     end
+    -- the three headings of a resource sort (titles and rows set by sortedGroups)
+    S.virtual = {}
+    for i = 1, 3 do
+        local vsec = { title = "", index = #SECTIONS + i, rows = {}, hitRows = {}, best = 0 }
+        local header, button = capture(function() return addSectionHeader(self, S, vsec, y, L.x0, L.lineW) end)
+        header.button = button
+        vsec.header = header
+        hideRow(header)
+        table.insert(S.virtual, vsec)
+    end
+    S.allSections = {}
+    for _, sec in ipairs(S.sections) do table.insert(S.allSections, sec) end
+    for _, sec in ipairs(S.virtual) do table.insert(S.allSections, sec) end
+    -- alphabetical: the sections by title, the settings in each by label
+    S.alphaGroups = {}
+    for _, sec in ipairs(S.sections) do
+        local sorted = {}
+        for _, row in ipairs(sec.rows) do table.insert(sorted, row) end
+        table.sort(sorted, function(a, b) return alphaLess(a.entry.label, b.entry.label) end)
+        table.insert(S.alphaGroups, { sec = sec, rows = sorted })
+    end
+    table.sort(S.alphaGroups, function(a, b) return alphaLess(a.sec.title, b.sec.title) end)
     S.footer = capture(function()
         addSectionLine(self, y, "Changes take effect on the next launch. File: Zomboid/pzopt/options.ini", L.x0, L.lineW)
     end)
     panel.addChild = nil -- back to the class method
-    S.total = #managed
+    S.total, S.managed = #managed, managed
     S.index = buildIndex(managed, sectionOf)
     S.lastText, S.typed, S.typedAt = "", "", 0
     runSearch(S, "")

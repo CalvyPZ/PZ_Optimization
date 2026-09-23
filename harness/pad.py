@@ -13,7 +13,8 @@ import time
 
 from evdev import AbsInfo, UInput, ecodes as e
 
-BUTTONS = {"a": e.BTN_A, "b": e.BTN_B, "x": e.BTN_X, "y": e.BTN_Y, "start": e.BTN_START, "back": e.BTN_SELECT}
+BUTTONS = {"a": e.BTN_A, "b": e.BTN_B, "x": e.BTN_X, "y": e.BTN_Y, "start": e.BTN_START, "back": e.BTN_SELECT,
+           "lb": e.BTN_TL, "rb": e.BTN_TR}
 HATS = {"up": (e.ABS_HAT0Y, -1), "down": (e.ABS_HAT0Y, 1), "left": (e.ABS_HAT0X, -1), "right": (e.ABS_HAT0X, 1)}
 
 

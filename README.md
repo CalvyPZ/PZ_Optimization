@@ -641,7 +641,7 @@ You build both yourself, on top of any install method (Workshop, installer, zip)
    the same when the SDK checkout is at that path — `PZOPT_DLSS_SDK=<dir>` names another one,
    `PZOPT_DLSS=0` skips it — and `scripts/pzopt.sh install` copies both files in with the classes.
 4. Options > Optimizations > Upscaling: **Upscaler** = `dlss`, a quality (`performance` = 50 %, or
-   `native` for DLAA anti-aliasing at full size), optionally a **DLSS model preset** (`f` is the
+   `native` for DLAA anti-aliasing at full size), optionally a **DLSS model preset** ("Upscaler, NVIDIA DLSS: model preset") (`f` is the
    cheap one at 4K), restart the game. `console.txt` then has `[pzopt] upscaler: dlss at 50 % (performance)`
    followed a few frames later by `[pzopt] dlss: ready, 2560x1080 -> 5120x2160 (performance, preset default,
    ...)`. If it says `upscaler: dlss unavailable (...)` instead, the reason is in the parentheses: the
@@ -1103,7 +1103,7 @@ Safety rails:
   hosting with the overrides installed has not been exercised. Do not install on a dedicated server.
 - **Fog pass (experimental).** With `fogPass` on (the default) power lines can flicker
   slightly in heavy fog while the camera moves; frame captures do not show it, the maintainer
-  does at 240 Hz. Untick "Fog in one pass (experimental)" in the tab for stock fog.
+  does at 240 Hz. Untick "Fog drawn in one pass (experimental)" in the tab for stock fog.
 - **Carport roofs.** The per-frame roof toggle of a detached carport with zombies around is
   debounced, not understood; `--prop devCutawayLog=true` logs every decision.
 - **Four-core machines.** On the 2015 Dell above the recalc pool and ZGC compete with the

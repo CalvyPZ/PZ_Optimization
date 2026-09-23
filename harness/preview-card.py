@@ -4,7 +4,7 @@
 harness/profiler-card.py (docs/media-style.md): near-black surface, Noto Sans, the date in Noto Sans Mono,
 green for what is new. The picture is the Optimizations tab with its preview panel, cropped from a live
 capture (docs/media/options-preview-full.png: the 5120x2160 desktop, Options > Optimizations, the mouse on
-"Bake trees into chunk textures").
+"Trees: bake into chunk textures").
 
     python3 harness/preview-card.py
     ffmpeg -y -i docs/media/preview-card.png -vf scale=1920:-1 -q:v 3 docs/workshop/images/14-options-preview.jpg

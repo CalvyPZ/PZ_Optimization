@@ -76,7 +76,7 @@ for route, s, p in ROWS:
 text(X0, H - PAD - 108, "Zoom motion: stock 0.03 per frame and a snap (8 frames per notch: 16 ms at 500 fps, 130 ms at 60), now a cubic Bezier over "
      "300 ms of real time (CSS \"ease\"; the curve and the time are settings).", 12.5, INK2)
 text(X0, H - PAD - 84, "Options > Optimizations: Keep chunk textures across zoom changes, Chunk textures a zoom change bakes per frame, "
-     "Zoom motion time, Zoom motion curve. Video: bench-zoom-spin-stock-vs-new on the repository.", 12.5, INK2)
+     "Zoom: motion time, Zoom: motion timing curve. Video: bench-zoom-spin-stock-vs-new on the repository.", 12.5, INK2)
 text(X0, H - PAD - 60, "Kept textures use no more video memory than stock holds at the widest zoom; a chunk that unloads still frees everything.", 12.5, INK2)
 text(X0, H - PAD - 30, "Every number and the runs behind them: github.com/xD3I/PZ_Optimization, docs/results.md, " + DATE + " Camera zoom changes.", 11.5, MUTED)
 fig.savefig(OUT, dpi=100, facecolor=BG)
