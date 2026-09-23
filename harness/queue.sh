@@ -752,6 +752,10 @@ remote_wrapper() { # <job> <machine> <install> <argv...> -> $job/remote-job.sh (
       # sessions uninstalled by hand over ssh before an --install opt job and removed the files under a running one
       # (jobs 1117 / 1118, 2026-09-23: ClassNotFoundException mid-boot, then a run with nothing installed)
       [[ "$install" == opt ]] && echo 'harness/run-mac.sh uninstall >/dev/null || exit 1; harness/run-mac.sh install build/classes || exit 1'
+      # --install keep on a Mac left stock (a manual uninstall) launched a game with no pzopt.Harness, which sits at
+      # click-to-start until the 900 s timeout (job 1133, 2026-09-23): reinstall the classes last synced to the Mac, or
+      # fail at once when there are none.
+      [[ "$install" == keep ]] && echo 'if ! harness/run-mac.sh status 2>/dev/null | grep "^installed: *yes" >/dev/null; then echo "queue: --install keep, but the Mac game is stock; reinstalling build/classes"; [[ -d build/classes ]] || { echo "queue: no build/classes on the Mac; submit with --install opt"; exit 1; }; harness/run-mac.sh install build/classes || exit 1; fi'
       echo "$(mcfg "$m" runner harness/run-mac.sh) $q$(mcfg "$m" run_args)"
     fi
   } > "$d/remote-job.sh"
