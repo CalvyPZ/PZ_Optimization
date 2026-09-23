@@ -105,7 +105,7 @@ done
 {
   echo "version=1"
   echo "id=$id"
-  echo "title=PZ_Optimization - frame time and chunk streaming class overrides (manual install)"
+  echo "title=PZ_Optimization - FPS Boost & Performance Fix: Less Stutter, Less Lag, Faster Chunk Loading [B42] (manual install)"
   # the page body; the game joins description= lines with newlines
   sed "s/@REV@/$rev/g; s/@VERSION@/${version:-42.20.x}/g; s/@COMMIT@/${commit:-?}/g; s/@NFILES@/$nfiles/g; s/@NOVERRIDES@/$noverrides/g; s/@SHA@/$sha/g; s/@ID@/${id:-<item id>}/g; s/^/description=/" docs/workshop/description.txt
   echo "tags=Build 42;"

@@ -1,6 +1,6 @@
 version=1
 id=3805285544
-title=PZ_Optimization - frame time and chunk streaming class overrides (manual install)
+title=PZ_Optimization - FPS Boost & Performance Fix: Less Stutter, Less Lag, Faster Chunk Loading [B42] (manual install)
 description=[b]This is not a Lua mod. Subscribing downloads the files; you still install them by hand (or with the included script).[/b] Enabling it in the Mods list does nothing.
 description=
 description=Class overrides for Project Zomboid Build 42.20.4 (game revision b0bbce05d5) that shorten chunk-streaming stalls and tighten the frame time, plus an options tab (Options > Optimizations) and an in-game frame-time overlay (F9). Single player and multiplayer, client side only. Steam version on Windows, Linux and macOS.
