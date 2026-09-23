@@ -1764,7 +1764,10 @@ end
 -- updates 10/s and the UI redrawn 30/s. The stock Display-page combos go by GameOption name -> combo index
 -- (MainOptions.lua lists): lightingFPS {5, 10, 15, 20, 25, 30, 45, 60}, UIRenderFPS {120, 60, 30, 25, 20, 15, 10}.
 local LOW_END_VALUES = { workers = "1", loadWorkers = "2", treeBakeMaxChunksPerSec = "24" }
-local LOW_END_STOCK = { lightingFPS = 2, UIRenderFPS = 3 }
+-- Plus texture compression (2026-09-23, same laptop: with uncompressed textures the 4 GB card was full, 4034 MiB, the
+-- driver spilled into system RAM and the machine swapped 34k pages in a 40 s walk; compressed, 2372 MiB and 1.2k swap-ins,
+-- 51 -> 54 fps, frames over 50 ms 34 -> 22 a minute, worst frame 292 -> 120 ms). Tick boxes go by name -> true / false.
+local LOW_END_STOCK = { lightingFPS = 2, UIRenderFPS = 3, texcompress = true }
 local function withValues(base, extra)
     local t = {}
     for k, v in pairs(base) do t[k] = v end
@@ -1780,7 +1783,9 @@ local PROFILES = {
            .. "more than drawing them per frame), and on the Display page lighting updates 10/s and the UI redrawn 30 "
            .. "times a second (the lighting thread and the Lua UI were the next biggest users of the four cores). "
            .. "Everything else goes back to the build's default. 120 km/h drive 44 -> 68 fps, walking 49 -> 81 "
-           .. "(p99 80 -> 40 ms / 69 -> 30 ms); the launcher's G1 collector JSON is needed on top. See docs/results.md.",
+           .. "(p99 80 -> 40 ms / 69 -> 30 ms). It also turns on texture compression (Display page), which kept a 4 GB "
+           .. "graphics card from filling up and the machine from swapping (worst frame 292 -> 120 ms, 2026-09-23). The "
+           .. "launcher's G1 collector JSON is needed on top. See docs/results.md.",
         values = LOW_END_VALUES,
         stock = LOW_END_STOCK,
     },
@@ -1810,7 +1815,12 @@ local function applyProfile(self, profile)
     for name, index in pairs(profile.stock or {}) do
         local option = self.gameOptions:get(name)
         local box = option and option.control
-        if box and box.options and box.options[index] then
+        if box and type(index) == "boolean" and box.setSelected then
+            box:setSelected(1, index)
+            option:invokeOnChangeEvent()
+        elseif name == "texcompress" and not option then
+            -- the game hides the tick box where the GPU cannot compress textures: nothing to set
+        elseif box and box.options and box.options[index] then
             box.selected = index
             option:invokeOnChangeEvent()
         else
