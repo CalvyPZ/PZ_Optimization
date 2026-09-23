@@ -2618,6 +2618,15 @@ default) adds a compiler directive excluding every method from C2 through the Di
 compiles newly hot methods with C1 at tier 1; code C2 made during loading stays. Loading keeps C2 (load time
 unchanged, unlike `-XX:TieredStopAtLevel=1`, which cost the Dell 16 s of world load).
 
+Long-session check (2026-09-23, Dell, 10-minute walk through new ground, two runs each): tiered 69.2 / 69.4 fps,
+frames over 100 ms 1.9 / 1.8 per minute; `jitMode=auto` 64.3 / 63.8 fps, 0.8 / 0.6 per minute. The mean-fps cost stays
+because HotSpot marks a method it declined for C2 under an exclude directive as not C2-compilable for good, so hot code
+reached during play keeps C1 code after warm-up; the gain in the worst hitches stays too. Running the C2 threads at
+SCHED_IDLE instead (tiered code, compile only on idle CPU) behaved like tiered (68.3 fps, 1.5 per minute): the Dell is
+~85 % busy, not saturated, so the idle thread still finds time. On a 12-core laptop pinned to 6 / 8 cores excluding C2
+also removed the frames over 100 ms (6.0 -> 0, 3.0 -> 0 per minute) but cost 39 % of mean fps at 6 cores in one run,
+so the threshold stays at 4 cores (`jitC1Cores`).
+
 ### zombie.iso.WorldStreamer (`threadNice`)
 
 The static block that logs the settings also starts `pzopt.ThreadNice` (off unless `threadNice` has rules): nice

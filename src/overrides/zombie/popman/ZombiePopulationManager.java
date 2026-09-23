@@ -406,24 +406,7 @@ public final class ZombiePopulationManager {
                               saveLock.lock();
 
                               try {
-                                 if (z != 0
-                                    || sq.getRoom() != null
-                                    || realZombie.getCurrentState() != WalkTowardState.instance() && realZombie.getCurrentState() != PathFindState.instance()) {
-                                    DebugType.Zombie.debugln("Virtualizing stationary Zombie: %s", new Object[]{realZombie});
-                                    n_addZombie(
-                                       realZombie.getX(),
-                                       realZombie.getY(),
-                                       realZombie.getZ(),
-                                       (byte)realZombie.getForwardIsoDirection().ordinal(),
-                                       realZombie.getPersistentOutfitID(),
-                                       state,
-                                       Integer.MIN_VALUE,
-                                       Integer.MIN_VALUE
-                                    );
-                                    realZombie.removeFromWorld();
-                                    realZombie.removeFromSquare();
-                                    i--;
-                                 } else {
+                                 if (z == 0 && sq.getRoom() == null && (realZombie.getCurrentState() == WalkTowardState.instance() || realZombie.getCurrentState() == PathFindState.instance())) { // pzopt: decompiler fix, the jar's branch order with a continue inside the try (one finally copy per exit, as javac emits it)
                                     DebugType.Zombie.debugln("Virtualizing moving Zombie: %s", new Object[]{realZombie});
                                     n_addZombie(
                                        realZombie.getX(),
@@ -438,7 +421,23 @@ public final class ZombiePopulationManager {
                                     realZombie.removeFromWorld();
                                     realZombie.removeFromSquare();
                                     i--;
+                                    continue; // pzopt: decompiler fix
                                  }
+                                 DebugType.Zombie.debugln("Virtualizing stationary Zombie: %s", new Object[]{realZombie});
+                                 n_addZombie(
+                                    realZombie.getX(),
+                                    realZombie.getY(),
+                                    realZombie.getZ(),
+                                    (byte)realZombie.getForwardIsoDirection().ordinal(),
+                                    realZombie.getPersistentOutfitID(),
+                                    state,
+                                    Integer.MIN_VALUE,
+                                    Integer.MIN_VALUE
+                                 );
+                                 realZombie.removeFromWorld();
+                                 realZombie.removeFromSquare();
+                                 i--;
+                                 continue; // pzopt: decompiler fix
                               } finally {
                                  saveLock.unlock();
                               }

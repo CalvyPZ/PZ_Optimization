@@ -32,7 +32,8 @@ for line in (run / "schedmon.txt").read_text().splitlines():
     f = line.split()
     t = int(f[0])
     if f[1] == "-":
-        psi.append((t, *map(int, f[3:])))
+        if f[2] == "PSI":
+            psi.append((t, *map(int, f[3:])))
         continue
     samples.setdefault(t, {})[f[1]] = (f[2], int(f[3]), int(f[4]), int(f[6]), f[7])
 ts = [t for t in samples if A - 1000 <= t <= B + 1000]

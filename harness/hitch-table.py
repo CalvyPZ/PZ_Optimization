@@ -66,6 +66,8 @@ def row(run):
             t = int(f[0])
             if t < A or t > B:
                 continue
+            if f[1] == "-" and (len(f) < 3 or f[2] != "PSI"):
+                continue
             if f[1] == "-":
                 psi0 = psi0 or f
                 psi1 = f
