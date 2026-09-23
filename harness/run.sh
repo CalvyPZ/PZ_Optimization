@@ -156,7 +156,11 @@ if [[ ! -e "$GAME_WRAPPER" ]]; then
   exit 1
 fi
 echo "layout=$LAYOUT install=$PZ_DIR user-dir=$ZOMBOID"
-if pgrep -f '[P]rojectZomboid64' >/dev/null; then echo "the game is already running" >&2; exit 1; fi
+# The game is the process whose argv[0] is ProjectZomboid64 (./ProjectZomboid64 on the native depot, the .exe under
+# Proton). A bare pgrep -f '[P]rojectZomboid64' also matched any shell whose command line mentions the name, e.g. a
+# peer's `queue.sh wait ...; grep ... ProjectZomboid64.json`: job 1484 (2026-09-23) waited 8.5 min after the game quit.
+GAME_PATTERN='^([^ ]*[/\\])?ProjectZomboid64(\.exe)?( |$)'
+if pgrep -f "$GAME_PATTERN" >/dev/null; then echo "the game is already running" >&2; exit 1; fi
 steam_logged_in() {
   pgrep -x steam >/dev/null || return 1
   local log="$HOME/.local/share/Steam/logs/connection_log.txt"
@@ -436,7 +440,7 @@ while :; do
   echo "launching app $APPID (mode=$mode quit_after=${quit_after:-none}, attempt $attempt); output -> $out"
   start=$(date +%s)
   # machine-level CPU/GPU utilization for the whole run (harness/sysmon.sh), windowed by the analyzer
-  "$REPO/harness/sysmon.sh" "$out/sysmon.csv" 0.5 &
+  "$REPO/harness/sysmon.sh" "$out/sysmon.csv" 0.5 "$GAME_PATTERN" &
   sysmon_pid=$!
   schedmon_pid=""
   if [[ -n "$schedmon" ]]; then python3 "$REPO/harness/schedmon.py" "$out/schedmon.txt" "$schedmon" & schedmon_pid=$!; fi
@@ -479,7 +483,7 @@ while :; do
   fi
   game_pid=""
   for _ in $(seq 1 120); do
-    game_pid=$(pgrep -f '[P]rojectZomboid64' | head -1 || true)
+    game_pid=$(pgrep -f "$GAME_PATTERN" | head -1 || true)
     [[ -n "$game_pid" ]] && break
     sleep 1
   done
@@ -592,7 +596,7 @@ PYC
   # the game as gone after several consecutive checks find nothing
   gone=0
   while (( gone < 5 )); do
-    if pgrep -f '[P]rojectZomboid64' >/dev/null; then gone=0; else gone=$((gone+1)); fi
+    if pgrep -f "$GAME_PATTERN" >/dev/null; then gone=0; else gone=$((gone+1)); fi
     sleep 2
   done
   end=$(date +%s)

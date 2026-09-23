@@ -66,7 +66,7 @@ grep -q "^controller=$GUID" "$ZOMBOID/options.ini" || echo "controller=$GUID" >>
 
 # --- main menu ---
 ( cd "$PZ_DIR/.." && JAVA_TOOL_OPTIONS="-Dzomboid.steam=0 -Dpzopt.overlaySampling=true -Dpzopt.updateCheck=false" exec setsid ./projectzomboid.sh </dev/null >"$OUT/game.log" 2>&1 ) &
-sleep 3; GAME_PID=$(pgrep -f '[P]rojectZomboid64' | head -1)
+sleep 3; GAME_PID=$(pgrep -f '^([^ ]*/)?ProjectZomboid64( |$)' | head -1)
 for i in $(seq 1 45); do sleep 2; ocr | grep -qi "PERFORMANCE OVERLAY" && break; done
 sleep 3; shot menu 0
 ocr > "$OUT/menu-ocr.txt"
@@ -89,7 +89,7 @@ harness/run.sh --label ovitem-pause --mode bench --flag route=S:1 --flag speed=1
 RUN_PID=$!
 sleep 10   # console.txt is rewritten at launch
 for i in $(seq 1 90); do sleep 2; grep -aq "harness: route start" "$ZOMBOID/console.txt" 2>/dev/null && break; done
-sleep 8; GAME_PID=$(pgrep -f '[P]rojectZomboid64' | head -1)
+sleep 8; GAME_PID=$(pgrep -f '^([^ ]*/)?ProjectZomboid64( |$)' | head -1)
 xdotool search --name "Project Zomboid" windowactivate --sync 2>/dev/null; sleep 0.5
 # the pad's Start first (a pad that opens the pause menu owns its joypad focus), Escape as the fallback
 PAUSE_BY=none

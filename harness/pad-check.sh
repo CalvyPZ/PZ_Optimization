@@ -28,7 +28,7 @@ finish() {
   local code=$1
   if [[ -n "$GAME_PID" ]]; then
     for i in $(seq 1 20); do kill -0 "$GAME_PID" 2>/dev/null || break; sleep 1; done
-    if kill -0 "$GAME_PID" 2>/dev/null; then echo "game still up after 20 s, killing"; pkill -f '[P]rojectZomboid64'; sleep 3; fi
+    if kill -0 "$GAME_PID" 2>/dev/null; then echo "game still up after 20 s, killing"; pkill -f '^([^ ]*/)?ProjectZomboid64( |$)'; sleep 3; fi
   fi
   echo quit > "$FIFO" 2>/dev/null; sleep 0.5; rm -f "$FIFO"
   cp "$OUT/options.ini.orig" "$ZOMBOID/options.ini"; rm -f "$ZOMBOID/joypads/$GUID.config"
@@ -48,7 +48,7 @@ cp "$ZOMBOID/options.ini" "$OUT/options.ini.orig"
 grep -q "^controller=$GUID" "$ZOMBOID/options.ini" || echo "controller=$GUID" >> "$ZOMBOID/options.ini"
 
 ( cd "$PZ_DIR/.." && JAVA_TOOL_OPTIONS="-Dzomboid.steam=0 -Dpzopt.devUpdateOffer=$OFFER" exec setsid ./projectzomboid.sh </dev/null >"$OUT/game.log" 2>&1 ) &
-sleep 3; GAME_PID=$(pgrep -f '[P]rojectZomboid64' | head -1)
+sleep 3; GAME_PID=$(pgrep -f '^([^ ]*/)?ProjectZomboid64( |$)' | head -1)
 for i in $(seq 1 45); do sleep 2; ocr | grep -qi "options" && break; done
 sleep 4; shot menu 0
 

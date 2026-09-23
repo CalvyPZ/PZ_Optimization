@@ -13,7 +13,7 @@
 # Independent of MangoHud.
 #   harness/sysmon.sh <out.csv> [interval-seconds] [pid-pattern]
 set -u
-out="$1"; interval="${2:-0.5}"; pat="${3:-[P]rojectZomboid64}"
+out="$1"; interval="${2:-0.5}"; pat="${3:-^([^ ]*[/\\])?ProjectZomboid64(\.exe)?( |$)}"   # argv[0] only: a shell mentioning the name is not the game
 ncpu=$(nproc)
 echo "epoch_ms,cpu_pct,cpu_busiest_core_pct,gpu_pct,gpu_sm_mhz,gpu_mem_mhz,gpu_w,gpu_c,vram_mib,game_cpu_pct,bat_w" > "$out"
 have_smi=0; command -v nvidia-smi >/dev/null && have_smi=1

@@ -8,7 +8,7 @@
 set -u
 out="$1"; start_after="${2:-60}"; window="${3:-40}"
 pid=""
-for _ in $(seq 1 120); do pid=$(pgrep -f '[P]rojectZomboid64' | head -1); [[ -n "$pid" ]] && break; sleep 1; done
+for _ in $(seq 1 120); do pid=$(pgrep -f '^([^ ]*/)?ProjectZomboid64( |$)' | head -1); [[ -n "$pid" ]] && break; sleep 1; done
 [[ -z "$pid" ]] && { echo "no game process" > "$out"; exit 1; }
 sleep "$start_after"
 [[ -d /proc/$pid ]] || { echo "game exited before the window" > "$out"; exit 1; }
