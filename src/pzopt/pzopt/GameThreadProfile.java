@@ -266,7 +266,8 @@ public final class GameThreadProfile {
          } else if (wait < -periodNs * 8) {
             next = System.nanoTime(); // fell far behind (a pause, a debugger): do not burst to catch up
          }
-         boolean wanted = Overlay.isVisible() || Overlay.logging();
+         // devProfileLogOff: a harness run samples only while the overlay is shown (the baseline of the overlay's own cost)
+         boolean wanted = Overlay.isVisible() || Overlay.logging() && !Config.DEV_PROFILE_LOG_OFF;
          if (wanted) {
             try {
                Thread g = gameThread;
@@ -305,6 +306,9 @@ public final class GameThreadProfile {
                ringHead = h + 1;
                if (Overlay.logging()) {
                   writeSecond(s);
+               }
+               if (Overlay.isVisible()) {
+                  publishView(h + 1);
                }
                counts = new HashMap<>();
                stacks = new HashMap<>();
@@ -688,6 +692,47 @@ public final class GameThreadProfile {
          }
       }
       return root.count > 0 ? root : null;
+   }
+
+   // ------------------------------------------------------------------ the overlay's view
+
+   /**
+    * What the overlay shows of the profile, built on the sampler thread once per published second (the window only
+    * changes then): merging the five seconds and sorting the buckets for every tree row took ~0.3 % of the game
+    * thread at the overlay's 4 Hz refresh. The overlay reads the latest one.
+    */
+   static final class View {
+      final String header;
+      final List<Row> rows;
+      final String detail;
+      final Node flame;
+      final List<Overlay.FlameBox> flameBoxes;
+
+      View(String header, List<Row> rows, String detail, Node flame, List<Overlay.FlameBox> flameBoxes) {
+         this.header = header;
+         this.rows = rows;
+         this.detail = detail;
+         this.flame = flame;
+         this.flameBoxes = flameBoxes;
+      }
+   }
+
+   private static volatile View view;
+
+   /** The latest view, or null before the first second sampled while the overlay was shown. */
+   static View view() {
+      return view;
+   }
+
+   private static void publishView(int second) {
+      try {
+         int subs = Overlay.treeSubsConfigured();
+         Node root = Overlay.flameConfigured() ? flame() : null;
+         view = new View(subs < 0 ? "" : header(), subs < 0 ? List.of() : tree(subs, Overlay.treeHotConfigured()), verdictDetail(),
+               root, root == null ? List.of() : Overlay.flameBoxes(root));
+      } catch (Throwable t) {
+         Log.warn("game-thread profile: overlay view failed: " + t);
+      }
    }
 
    // ------------------------------------------------------------------ log

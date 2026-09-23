@@ -38,17 +38,22 @@ public final class Overrides {
       }
    }
 
+   /** The marker's state word: a build mismatch and the master switch (enabled=false) both run stock, for different reasons. */
+   private static String state() {
+      return ENABLED ? "active" : BUILD_OK ? "DISABLED: enabled=false (" + describeSource("enabled") + ")" : "DISABLED: build mismatch";
+   }
+
    /** Called from the static initializer of each overridden class. */
    public static void onClassLoaded(String className) {
       synchronized (deferredMarkers) {
          for (String deferred : deferredMarkers) {
             Log.info("loaded override " + deferred + " (target revision " + BuildInfo.targetRevision() + ", "
-                  + (ENABLED ? "active" : "DISABLED: build mismatch") + ", logged late)");
+                  + state() + ", logged late)");
          }
          deferredMarkers.clear();
       }
       Log.info("loaded override " + className + " (target revision " + BuildInfo.targetRevision() + ", "
-            + (ENABLED ? "active" : "DISABLED: build mismatch") + ")");
+            + state() + ")");
       // FileSystemImpl loads inside GameWindow's static initializer, before the game's log and file system exist;
       // the harness hooks wait for a later override (they are armed again on every class load until they take)
       if (!Log.gameLogReady()) {

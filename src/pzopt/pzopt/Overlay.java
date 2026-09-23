@@ -8,12 +8,20 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
 import java.util.Arrays;
 import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL33;
 import org.lwjgl.opengl.GLCapabilities;
 import zombie.ZomboidFileSystem;
 import zombie.core.Core;
 import zombie.core.SpriteRenderer;
+import zombie.core.Styles.TransparentStyle;
+import zombie.core.Styles.UIFBOStyle;
+import zombie.core.opengl.RenderThread;
+import zombie.core.textures.Texture;
+import zombie.core.textures.TextureDraw;
+import zombie.core.textures.TextureFBO;
+import zombie.core.textures.IGLFramebufferObject;
 import zombie.input.GameKeyboard;
 import zombie.ui.TextManager;
 import zombie.ui.UIFont;
@@ -54,13 +62,16 @@ import zombie.ui.UIFont;
  * (fps, frametime in ms, cpu_load, gpu_load, plus game_load, render_load, gpu_ms, elapsed in ns,
  * epoch_ms), which harness/analyze.py reads like a MangoHud log. {@code overlayFont} picks the
  * UIFont ({@code auto} by default: by screen height, see {@link #font}); {@code overlayCorner} one of tl, tr, bl, br.
- * The panel is fitted to the screen every frame (see {@link #render}): nothing is drawn past its edges.
+ * The panel is fitted to the screen at every stats refresh (see {@link #layout}): nothing is drawn past its edges.
  *
  * Cost: one nanoTime and a ring write per frame on the render thread, two GL query calls per
- * frame, a stats pass every {@link #REFRESH_NS} on the game thread (sorting at most a few
- * thousand floats), about 300 sprite quads per frame while visible, and a daemon thread that
- * samples the CPU / GPU utilization every {@link #UTIL_NS} (the JMX load calls are slow on
- * Windows and must never run on the game thread).
+ * frame, a stats pass and a layout every {@link #REFRESH_NS} on the game thread (sorting at most a few
+ * thousand floats; every string, width and cut of the panel is made there, not per frame), and a daemon
+ * thread that samples the CPU / GPU utilization every {@link #UTIL_NS} (the JMX load calls are slow on
+ * Windows and must never run on the game thread). While visible, the panel itself: with
+ * {@code overlayTexture} (default) it is drawn into a texture at each layout and costs one quad plus the
+ * frame-graph bars per frame; without it every glyph, bar and flame box is a sprite every frame (thousands
+ * with every element on), which cost 12 % of the frame rate on a game-thread-bound laptop (2026-09-23).
  */
 public final class Overlay {
    private static final boolean ACTIVE = Overrides.enabled();
@@ -80,7 +91,9 @@ public final class Overlay {
    };
    private static long noticeUntilNs;
    private static final long WINDOW_NS = 5_000_000_000L;
-   private static final long REFRESH_NS = 250_000_000L;
+   private static final long REFRESH_NS = Math.max(50, Math.min(2000, Config.OVERLAY_REFRESH_MS)) * 1_000_000L;
+   /** Frame-graph redraws into the panel texture, from {@code overlayGraphHz}; 0 = the bars are drawn live every frame. */
+   private static final long GRAPH_NS = Config.OVERLAY_GRAPH_HZ <= 0 ? 0L : 1_000_000_000L / Math.min(1000, Config.OVERLAY_GRAPH_HZ);
    private static final long UTIL_NS = 500_000_000L;
    private static final int RING = 8192;
    /** Frames in the frame-time graph (2 px each), from {@code overlayGraph}; 0 = no graph. */
@@ -408,16 +421,40 @@ public final class Overlay {
          gameThreadId = Thread.currentThread().threadId();
          startUtilSampler();
          GameThreadProfile.start(gameThreadId); // what the game thread does, for the verdict and the log
+         Log.info("overlay: panel " + (TEXTURE ? "texture" : "sprites") + ", refresh " + REFRESH_NS / 1_000_000L + " ms, graph "
+               + (GRAPH_NS == 0 ? "every frame" : 1_000_000_000L / GRAPH_NS + " Hz") + ", profile view on the sampler thread");
       }
       if (!visible || fontFailed) {
+         laidOut = false;
          return;
       }
+      boolean relayout = !laidOut;
       if (now - lastStatsNs >= REFRESH_NS) {
          lastStatsNs = now;
          refreshStats(now);
+         relayout = true;
       }
       try {
-         render();
+         Core core = Core.getInstance();
+         if (core.getScreenWidth() != laidOutW || core.getScreenHeight() != laidOutH) {
+            relayout = true;
+         }
+         if (relayout) {
+            laidOutW = core.getScreenWidth();
+            laidOutH = core.getScreenHeight();
+            layout();
+            laidOut = true;
+            textureValid = TEXTURE && !textureFailed && renderToTexture();
+            lastGraphNs = now;
+         } else if (textureValid && GRAPH_NS > 0 && now - lastGraphNs >= GRAPH_NS) {
+            lastGraphNs = now;
+            renderGraphToTexture();
+         }
+         if (textureValid) {
+            emitTexture();
+         } else {
+            emit();
+         }
       } catch (Throwable t) {
          fontFailed = true; // fonts not loaded yet or a UI class missing: try again next boot rather than every frame
          Log.warn("overlay: draw failed, overlay off: " + t);
@@ -587,14 +624,14 @@ public final class Overlay {
       // the game-thread tree and the flame graph only once a save is loading or playing: in the menus
       // the stacks are just menu UI, and the flame column would sit over the menu / Workshop screens
       boolean world = inGame();
-      profileHeader = PROFILE_SUBS < 0 || !world ? "" : GameThreadProfile.header();
-      profileRows = PROFILE_SUBS < 0 || !world ? java.util.List.of() : GameThreadProfile.tree(PROFILE_SUBS, PROFILE_HOT);
-      if (world) {
-         layoutFlame();
-      } else {
-         flameBoxes = java.util.List.of();
-         flameTitle = "";
-      }
+      // (built on the sampler thread once a second, see GameThreadProfile.View)
+      GameThreadProfile.View v = world ? GameThreadProfile.view() : null;
+      profileHeader = v == null ? "" : v.header;
+      profileRows = v == null ? java.util.List.of() : v.rows;
+      flameBoxes = v == null ? java.util.List.of() : v.flameBoxes;
+      flameDepth = Math.max(4, Config.OVERLAY_FLAME_DEPTH); // the configured rows, whatever the deepest stack of this window: a steady panel
+      flameTitle = v == null || v.flame == null ? "" : "flame graph, last " + GameThreadProfile.WINDOW_SECONDS + " s (" + v.flame.count
+            + " stacks): root at the bottom, width = share, biggest first";
       // verdict against the objective: at the cap, or what is saturated, or nothing is
       String verdictMode = Config.OVERLAY_VERDICT.trim().toLowerCase(java.util.Locale.ROOT);
       if (verdictMode.equals("off")) {
@@ -608,7 +645,7 @@ public final class Overlay {
             String who = top == gameLoad ? "game thread" : top == renderLoad ? "render thread" : "GPU";
             verdict = (cap > 0 ? "below cap: " : "") + who + " bound";
             if (top == gameLoad && verdictMode.equals("detailed") && world) {
-               String detail = GameThreadProfile.verdictDetail(); // the two biggest sub-phases, e.g. "chunk bakes 21 %, zombies 9 %"
+               String detail = v == null ? "" : v.detail; // the two biggest sub-phases, e.g. "chunk bakes 21 %, zombies 9 %"
                if (!detail.isEmpty()) {
                   verdict += ": " + detail;
                }
@@ -740,31 +777,31 @@ public final class Overlay {
       }
    }
 
+   /** Sub-phases per phase the tree shows (-1 = no tree), hot methods per sub-phase, whether the flame graph shows: for the sampler thread's view. */
+   static int treeSubsConfigured() {
+      return PROFILE_SUBS;
+   }
+
+   static int treeHotConfigured() {
+      return PROFILE_HOT;
+   }
+
+   static boolean flameConfigured() {
+      return !"off".equalsIgnoreCase(Config.OVERLAY_FLAME.trim());
+   }
+
    /**
-    * Lays the window's flame graph out as boxes in fractions of the width: root at the bottom (row 0),
-    * callees above their caller, biggest first from the left, coloured by the phase they belong to
-    * (update green, render blue, lighting amber, pzopt frames magenta, the rest grey) with a per-name
-    * shade. Nodes narrower than 1/1000 of the width are dropped; at most {@code overlayFlameDepth} rows.
+    * Lays a flame graph out as boxes in fractions of the width (on the sampler thread, once per second): root at
+    * the bottom (row 0), callees above their caller, biggest first from the left, coloured by the phase they belong
+    * to (update green, render blue, lighting amber, pzopt frames magenta, the rest grey) with a per-name shade.
+    * Nodes narrower than 1/1000 of the width are dropped; at most {@code overlayFlameDepth} rows.
     */
-   private static void layoutFlame() {
-      if ("off".equalsIgnoreCase(Config.OVERLAY_FLAME.trim())) {
-         flameBoxes = java.util.List.of();
-         flameTitle = "";
-         return;
-      }
-      GameThreadProfile.Node root = GameThreadProfile.flame();
-      if (root == null) {
-         flameBoxes = java.util.List.of();
-         flameTitle = "";
-         return;
-      }
+   static java.util.List<FlameBox> flameBoxes(GameThreadProfile.Node root) {
       java.util.ArrayList<FlameBox> boxes = new java.util.ArrayList<>(1024);
       int maxDepth = Math.max(4, Config.OVERLAY_FLAME_DEPTH);
       int[] deepest = {0};
       placeFlame(root, 0f, 1f, 0, root.count, GameThreadProfile.C_OTHER_PUBLIC, boxes, maxDepth, deepest);
-      flameBoxes = boxes;
-      flameDepth = maxDepth; // the configured rows, whatever the deepest stack of this window: a steady panel
-      flameTitle = "flame graph, last " + GameThreadProfile.WINDOW_SECONDS + " s (" + root.count + " stacks): root at the bottom, width = share, biggest first";
+      return boxes;
    }
 
    private static void placeFlame(GameThreadProfile.Node n, float x0, float x1, int depth, int total, float[] color, java.util.List<FlameBox> out, int maxDepth, int[] deepest) {
@@ -849,9 +886,250 @@ public final class Overlay {
    }
 
    /** A section divider across the panel: a gap, a faint 1 px line, a gap; returns the y below it. */
-   private static int divider(SpriteRenderer sr, int x, int ty, int w, int pad) {
-      sr.renderi(null, x + pad, ty + pad, w - pad * 2, 1, 1f, 1f, 1f, 0.3f, null);
+   private static int divider(int x, int ty, int w, int pad) {
+      quad(x + pad, ty + pad, w - pad * 2, 1, 1f, 1f, 1f, 0.3f);
       return ty + pad * 2 + 1;
+   }
+
+   // --- the panel as a draw list: laid out at each stats refresh (or a screen / font change), replayed every frame ---
+   // Stock text is one quad per glyph and every switch between an untextured quad and the font texture starts a new
+   // sprite batch, so emit() draws all plain quads, then the live frame-graph bars, then all text: three batches
+   // instead of one per bar / label pair. The strings, their widths and their cuts (fit) only change with the stats.
+   private static float[] quads = new float[8 * 256];
+   private static int quadCount;
+   private static String[] texts = new String[256];
+   private static float[] textPos = new float[5 * 256]; // x, y, r, g, b
+   private static int textCount;
+   private static UIFont textFont;
+   private static int barsX, barsBottom, barsH, barsMax; // barsMax 0 = no frame graph
+   private static float barsScale;
+   private static int laidOutW, laidOutH;
+   private static boolean laidOut;
+
+   private static void clearList() {
+      quadCount = 0;
+      textCount = 0;
+      barsMax = 0;
+   }
+
+   private static void quad(int x, int y, int w, int h, float r, float g, float b, float a) {
+      if ((quadCount + 1) * 8 > quads.length) {
+         quads = Arrays.copyOf(quads, quads.length * 2);
+      }
+      int o = quadCount++ * 8;
+      quads[o] = x;
+      quads[o + 1] = y;
+      quads[o + 2] = w;
+      quads[o + 3] = h;
+      quads[o + 4] = r;
+      quads[o + 5] = g;
+      quads[o + 6] = b;
+      quads[o + 7] = a;
+   }
+
+   private static void text(double x, double y, String s, double r, double g, double b) {
+      if (s == null || s.isEmpty()) {
+         return;
+      }
+      if (textCount == texts.length) {
+         texts = Arrays.copyOf(texts, textCount * 2);
+         textPos = Arrays.copyOf(textPos, textCount * 2 * 5);
+      }
+      int o = textCount * 5;
+      texts[textCount++] = s;
+      textPos[o] = (float)x;
+      textPos[o + 1] = (float)y;
+      textPos[o + 2] = (float)r;
+      textPos[o + 3] = (float)g;
+      textPos[o + 4] = (float)b;
+   }
+
+   /** Every frame without the panel texture: the laid-out quads, the frame-graph bars from the ring, then the text. */
+   private static void emit() {
+      SpriteRenderer sr = SpriteRenderer.instance;
+      emitQuads(sr, 0, 0);
+      emitBars(sr, 0, 0);
+      emitTexts(0, 0);
+   }
+
+   private static void emitQuads(SpriteRenderer sr, int ox, int oy) {
+      float[] q = quads;
+      for (int i = 0, n = quadCount * 8; i < n; i += 8) {
+         sr.renderi(null, (int)q[i] - ox, (int)q[i + 1] - oy, (int)q[i + 2], (int)q[i + 3], q[i + 4], q[i + 5], q[i + 6], q[i + 7], null);
+      }
+   }
+
+   private static void emitTexts(int ox, int oy) {
+      TextManager tm = TextManager.instance;
+      float[] p = textPos;
+      for (int i = 0; i < textCount; i++) {
+         int o = i * 5;
+         tm.DrawString(textFont, p[o] - ox, p[o + 1] - oy, texts[i], p[o + 2], p[o + 3], p[o + 4], 1.0);
+      }
+   }
+
+   // --- the panel texture (overlayTexture): the draw list rendered once per layout, one quad per frame ---
+   // Everything but the frame-graph bars changes only at the 4 Hz stats refresh, yet as sprites it is a few thousand
+   // quads (one per glyph) through the game thread, the render thread and the GPU every frame. With the texture the
+   // panel is drawn into an offscreen buffer at each layout, like the stock offscreen UI (UIManager.uiFbo: the same
+   // UIFBOStyle premultiplied blend into a transparent target, the same flipped additive composite), and each frame
+   // costs one textured quad plus the live bars on top of it.
+   private static final boolean TEXTURE = Config.OVERLAY_TEXTURE;
+   private static boolean textureFailed;
+   private static boolean textureValid;
+   private static TextureFBO panelFbo;
+   private static int panelX, panelY, panelW, panelH;
+
+   /** Renders the laid-out list into the panel texture (re-created when the panel size changes); false = draw sprites. */
+   private static boolean renderToTexture() {
+      int w = panelW, h = panelH;
+      if (w <= 0 || h <= 0 || quadCount == 0) {
+         return false;
+      }
+      try {
+         TextureFBO fbo = panelFbo;
+         if (fbo == null || fbo.getTexture().getWidth() != w || fbo.getTexture().getHeight() != h) {
+            if (fbo != null) {
+               TextureFBO old = fbo;
+               RenderThread.invokeOnRenderContext(old::destroy);
+            }
+            fbo = new TextureFBO(new Texture(w, h, 16), false); // blocks until the render thread made it: only when the size changes
+            panelFbo = fbo;
+         }
+         SpriteRenderer sr = SpriteRenderer.instance;
+         sr.drawGeneric(new PanelTarget(fbo, PanelTarget.CLEAR_ALL, 0, 0, 0, 0));
+         sr.glDoStartFrameFx(w, h, -1); // viewport 0,0,w,h and a w x h ortho projection; the end pops both
+         sr.setDefaultStyle(UIFBOStyle.instance);
+         emitQuads(sr, panelX, panelY);
+         if (GRAPH_NS > 0) {
+            emitBars(sr, panelX, panelY);
+         }
+         emitTexts(panelX, panelY);
+         sr.setDefaultStyle(TransparentStyle.instance);
+         sr.glDoEndFrameFx(-1);
+         sr.drawGeneric(new PanelTarget(fbo, PanelTarget.UNBIND, 0, 0, 0, 0));
+         return true;
+      } catch (Throwable t) {
+         textureFailed = true;
+         Log.warn("overlay: panel texture disabled, drawing sprites: " + t);
+         return false;
+      }
+   }
+
+   /** Every frame with the panel texture: the texture (premultiplied, flipped like the stock UI buffer), then the bars. */
+   private static void emitTexture() {
+      SpriteRenderer sr = SpriteRenderer.instance;
+      sr.setDoAdditive(true);
+      sr.renderi((Texture)panelFbo.getTexture(), panelX, panelY + panelH, panelW, -panelH, 1f, 1f, 1f, 1f, null);
+      sr.setDoAdditive(false);
+      if (GRAPH_NS == 0) {
+         emitBars(sr, 0, 0);
+      }
+   }
+
+   private static long lastGraphNs;
+   private static final int[] graphLineY = new int[3]; // the 1x / 2x / 3x budget lines across the graph (screen y)
+
+   /**
+    * Between layouts, {@code overlayGraphHz} times a second: only the graph's rectangle of the panel texture is
+    * cleared to the panel background and redrawn (budget lines, then the bars), so a frame never draws the bars itself.
+    */
+   private static void renderGraphToTexture() {
+      TextureFBO fbo = panelFbo;
+      if (barsMax <= 0 || fbo == null) {
+         return;
+      }
+      try {
+         int rx = barsX - panelX, ry = barsBottom - barsH - panelY, rw = barsMax * 2, rh = barsH;
+         SpriteRenderer sr = SpriteRenderer.instance;
+         sr.drawGeneric(new PanelTarget(fbo, PanelTarget.CLEAR_RECT, rx, panelH - ry - rh, rw, rh)); // GL rows count from the bottom
+         sr.glDoStartFrameFx(panelW, panelH, -1);
+         sr.setDefaultStyle(UIFBOStyle.instance);
+         for (int i = 0; i < 3; i++) {
+            sr.renderi(null, rx, graphLineY[i] - panelY, rw, 1, 1f, 1f, 1f, i == 0 ? 0.7f : 0.2f, null);
+         }
+         emitBars(sr, panelX, panelY);
+         sr.setDefaultStyle(TransparentStyle.instance);
+         sr.glDoEndFrameFx(-1);
+         sr.drawGeneric(new PanelTarget(fbo, PanelTarget.UNBIND, 0, 0, 0, 0));
+      } catch (Throwable t) {
+         textureFailed = true;
+         textureValid = false;
+         Log.warn("overlay: panel texture disabled, drawing sprites: " + t);
+      }
+   }
+
+   /**
+    * Render thread: binds the panel buffer and clears it to transparent (or only a rectangle of it to the panel's
+    * premultiplied background), or puts back the buffer that was bound. Through {@link TextureFBO#getFuncs()}, which
+    * picks the core / ARB / EXT entry points: macOS only has GL 2.1.
+    */
+   private static final class PanelTarget extends TextureDraw.GenericDrawer {
+      static final int CLEAR_ALL = 0, CLEAR_RECT = 1, UNBIND = 2;
+      private static int previous;
+      private final TextureFBO fbo;
+      private final int mode, x, y, w, h;
+
+      PanelTarget(TextureFBO fbo, int mode, int x, int y, int w, int h) {
+         this.fbo = fbo;
+         this.mode = mode;
+         this.x = x;
+         this.y = y;
+         this.w = w;
+         this.h = h;
+      }
+
+      @Override
+      public void render() {
+         IGLFramebufferObject funcs = TextureFBO.getFuncs();
+         if (mode == UNBIND) {
+            funcs.glBindFramebuffer(funcs.GL_FRAMEBUFFER(), previous);
+            return;
+         }
+         previous = GL11.glGetInteger(0x8CA6); // GL_FRAMEBUFFER_BINDING (= _EXT)
+         funcs.glBindFramebuffer(funcs.GL_FRAMEBUFFER(), fbo.getBufferId());
+         boolean scissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+         if (mode == CLEAR_RECT) {
+            GL11.glEnable(GL11.GL_SCISSOR_TEST);
+            GL11.glScissor(x, y, w, h);
+            GL11.glClearColor(0f, 0f, 0f, 0.65f); // the panel background as the texture holds it (premultiplied)
+         } else {
+            GL11.glDisable(GL11.GL_SCISSOR_TEST);
+            GL11.glClearColor(0f, 0f, 0f, 0f);
+         }
+         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+         GL11.glClearColor(0f, 0f, 0f, 1f);
+         if (scissor) {
+            GL11.glEnable(GL11.GL_SCISSOR_TEST);
+         } else {
+            GL11.glDisable(GL11.GL_SCISSOR_TEST);
+         }
+      }
+   }
+
+   /** Frame-time bars (2 px each, newest on the right) with the GPU ms as a thin blue bar inside. */
+   private static void emitBars(SpriteRenderer sr, int ox, int oy) {
+      if (barsMax <= 0) {
+         return;
+      }
+      int hd = head;
+      int bars = Math.min(barsMax, Math.min(hd, RING - 64));
+      int gx = barsX - ox;
+      int bottom = barsBottom - oy;
+      for (int i = 0; i < bars; i++) {
+         int slot = (hd - bars + i) & (RING - 1);
+         float ms = frameMs[slot];
+         int bh = Math.max(1, Math.min(barsH, (int)(ms * barsScale)));
+         float over = ms / budgetMs;
+         float r = over > 2f ? 1f : over > 1.1f ? 1f : 0.4f;
+         float g = over > 2f ? 0.3f : over > 1.1f ? 0.8f : 1f;
+         sr.renderi(null, gx + i * 2, bottom - bh, 2, bh, r, g, 0.4f, 0.9f, null);
+         float gms = gpuMs[slot];
+         if (gms > 0f) {
+            int gh = Math.max(1, Math.min(barsH, (int)(gms * barsScale)));
+            sr.renderi(null, gx + i * 2, bottom - gh, 1, gh, 0.4f, 0.6f, 1f, 0.9f, null);
+         }
+      }
    }
 
    private static int labelWidth(TextManager tm, UIFont font, String text) {
@@ -866,9 +1144,12 @@ public final class Overlay {
       return w;
    }
 
-   private static void render() {
+   /** Lays the panel out into the draw list (see {@link #emit}); nothing is drawn here. */
+   private static void layout() {
+      clearList();
       TextManager tm = TextManager.instance;
       UIFont font = font();
+      textFont = font;
       int lineH = tm.getFontHeight(font);
       int pad = 8;
       // responsive: the panel keeps inside the screen (10 px margin); a new screen size forgets the steady width
@@ -1039,21 +1320,24 @@ public final class Overlay {
       String corner = Config.OVERLAY_CORNER;
       int x = corner.endsWith("r") ? screenW - w - 10 : 10;
       int y = corner.startsWith("b") ? screenH - h - 10 : 10;
-      SpriteRenderer sr = SpriteRenderer.instance;
-      sr.renderi(null, x, y, w, h, 0f, 0f, 0f, 0.65f, null);
+      panelX = x;
+      panelY = y;
+      panelW = w;
+      panelH = h;
+      quad(x, y, w, h, 0f, 0f, 0f, 0.65f);
       int ty = y + pad;
       for (int i = 0; i < lines.length; i++) {
          int tx = x + pad;
          if (i == 0 && fpsW > 0) {
-            tm.DrawString(font, tx, ty, fpsText, fpsColor[0], fpsColor[1], fpsColor[2], 1.0);
+            text(tx, ty, fpsText, fpsColor[0], fpsColor[1], fpsColor[2]);
             tx += fpsW;
          }
-         tm.DrawString(font, tx, ty, fit(tm, font, lines[i], leftW - pad * 2 - (tx - x - pad)), 1.0, 1.0, 1.0, 1.0);
+         text(tx, ty, fit(tm, font, lines[i], leftW - pad * 2 - (tx - x - pad)), 1.0, 1.0, 1.0);
          ty += lineH;
       }
       if (!header.isEmpty()) {
-         ty = divider(sr, x, ty, leftW, pad);
-         tm.DrawString(font, x + pad, ty, fit(tm, font, header, leftW - pad * 2), 1.0, 1.0, 1.0, 1.0);
+         ty = divider(x, ty, leftW, pad);
+         text(x + pad, ty, fit(tm, font, header, leftW - pad * 2), 1.0, 1.0, 1.0);
          ty += lineH;
       }
       for (int i = 0; i < Math.min(tree.size(), treeRows - 1); i++) {
@@ -1062,67 +1346,60 @@ public final class Overlay {
          int bx = x + pad + indent * (r.depth + 1);
          // the bar: the row's share of the window on a 100 % = barW scale, its wait share in red at the left end
          int bw = Math.max(1, Math.round(barW * r.pct / 100f));
-         sr.renderi(null, bx, ty + 2, bw, lineH - 4, c[0], c[1], c[2], r.depth == 0 ? 0.55f : 0.4f, null);
+         quad(bx, ty + 2, bw, lineH - 4, c[0], c[1], c[2], r.depth == 0 ? 0.55f : 0.4f);
          if (r.waitPct >= 0.5f) {
             int ww = Math.max(1, Math.round(barW * r.waitPct / 100f));
-            sr.renderi(null, bx, ty + 2, ww, lineH - 4, GameThreadProfile.C_WAIT[0], GameThreadProfile.C_WAIT[1], GameThreadProfile.C_WAIT[2], 0.6f, null);
+            quad(bx, ty + 2, ww, lineH - 4, GameThreadProfile.C_WAIT[0], GameThreadProfile.C_WAIT[1], GameThreadProfile.C_WAIT[2], 0.6f);
          }
          int tx = x + pad + treeX[i];
-         tm.DrawString(font, tx, ty, treeName[i], c[0], c[1], c[2], 1.0);
+         text(tx, ty, treeName[i], c[0], c[1], c[2]);
          tx += tm.MeasureStringX(font, treeName[i]) + indent;
-         tm.DrawString(font, tx, ty, treePct[i], 1.0, 1.0, 1.0, 1.0);
+         text(tx, ty, treePct[i], 1.0, 1.0, 1.0);
          tx += pctW;
          if (!treeWait[i].isEmpty()) {
-            tm.DrawString(font, tx, ty, treeWait[i], GameThreadProfile.C_WAIT[0], GameThreadProfile.C_WAIT[1], GameThreadProfile.C_WAIT[2], 1.0);
+            text(tx, ty, treeWait[i], GameThreadProfile.C_WAIT[0], GameThreadProfile.C_WAIT[1], GameThreadProfile.C_WAIT[2]);
             tx += tm.MeasureStringX(font, treeWait[i]) + indent;
          }
          if (!treeHint[i].isEmpty()) {
-            tm.DrawString(font, tx, ty, treeHint[i], 0.7, 0.7, 0.7, 1.0);
+            text(tx, ty, treeHint[i], 0.7, 0.7, 0.7);
          }
          ty += lineH;
       }
       if (!verdict.isEmpty()) {
-         ty = divider(sr, x, ty, leftW, pad);
-         tm.DrawString(font, x + pad, ty, fit(tm, font, verdict, leftW - pad * 2), verdictColor[0], verdictColor[1], verdictColor[2], 1.0);
+         ty = divider(x, ty, leftW, pad);
+         text(x + pad, ty, fit(tm, font, verdict, leftW - pad * 2), verdictColor[0], verdictColor[1], verdictColor[2]);
          ty += lineH;
       }
       // frame-time bars: newest on the right, budget line at one third, 3x budget at the top;
       // y axis = ms (ticks at 0, 1x, 2x, 3x the cap budget), x axis = the last frames in order
       if (graphOn) {
-      ty = divider(sr, x, ty, leftW, pad);
+      ty = divider(x, ty, leftW, pad);
       int gx = x + pad + axisW;
       int gy = ty + lineH / 2; // room for the top tick label, which sits half a line above the graph
       float scale = graphH / (3f * budgetMs);
       for (int i = 0; i < 4; i++) {
          int tickY = gy + graphH - (int)(budgetMs * i * scale);
-         sr.renderi(null, gx - 4, tickY, 4, 1, 1f, 1f, 1f, 0.7f, null);
+         quad(gx - 4, tickY, 4, 1, 1f, 1f, 1f, 0.7f);
          if (i > 0) {
-            sr.renderi(null, gx, tickY, graphW, 1, 1f, 1f, 1f, i == 1 ? 0.7f : 0.2f, null);
+            quad(gx, tickY, graphW, 1, 1f, 1f, 1f, i == 1 ? 0.7f : 0.2f);
+            graphLineY[i - 1] = tickY;
          }
          int labelY = Math.max(gy - lineH / 2, Math.min(gy + graphH - lineH / 2, tickY - lineH / 2));
-         tm.DrawString(font, gx - 6 - tm.MeasureStringX(font, yTicks[i]), labelY, yTicks[i], 0.8, 0.8, 0.8, 1.0);
+         text(gx - 6 - tm.MeasureStringX(font, yTicks[i]), labelY, yTicks[i], 0.8, 0.8, 0.8);
       }
-      for (int i = 0; i < bars; i++) {
-         int slot = (hd - bars + i) & (RING - 1);
-         float ms = frameMs[slot];
-         int bh = Math.max(1, Math.min(graphH, (int)(ms * scale)));
-         float over = ms / budgetMs;
-         float r = over > 2f ? 1f : over > 1.1f ? 1f : 0.4f;
-         float g = over > 2f ? 0.3f : over > 1.1f ? 0.8f : 1f;
-         sr.renderi(null, gx + i * 2, gy + graphH - bh, 2, bh, r, g, 0.4f, 0.9f, null);
-         float gms = gpuMs[slot];
-         if (gms > 0f) {
-            int gh = Math.max(1, Math.min(graphH, (int)(gms * scale)));
-            sr.renderi(null, gx + i * 2, gy + graphH - gh, 1, gh, 0.4f, 0.6f, 1f, 0.9f, null);
-         }
-      }
-      sr.renderi(null, gx, gy + graphH, graphW, 1, 1f, 1f, 1f, 0.5f, null); // x axis
-      tm.DrawString(font, gx, gy + graphH + 2, fit(tm, font, xLabel, leftW - pad * 2 - axisW), 0.8, 0.8, 0.8, 1.0);
+      // the bars themselves move every frame: emit() draws them from the ring (see emitBars)
+      barsX = gx;
+      barsBottom = gy + graphH;
+      barsH = graphH;
+      barsMax = graphBars;
+      barsScale = scale;
+      quad(gx, gy + graphH, graphW, 1, 1f, 1f, 1f, 0.5f); // x axis
+      text(gx, gy + graphH + 2, fit(tm, font, xLabel, leftW - pad * 2 - axisW), 0.8, 0.8, 0.8);
       ty = gy + graphH + 2 + lineH;
-      tm.DrawString(font, x + pad, ty, fit(tm, font, legend1, leftW - pad * 2), 0.7, 0.7, 0.7, 1.0);
+      text(x + pad, ty, fit(tm, font, legend1, leftW - pad * 2), 0.7, 0.7, 0.7);
       ty += lineH;
       if (!legend2.isEmpty()) {
-         tm.DrawString(font, x + pad, ty, fit(tm, font, legend2, leftW - pad * 2), 0.7, 0.7, 0.7, 1.0);
+         text(x + pad, ty, fit(tm, font, legend2, leftW - pad * 2), 0.7, 0.7, 0.7);
          ty += lineH;
       }
       }
@@ -1132,30 +1409,30 @@ public final class Overlay {
          int fx, fw;
          if (flameRight) {
             int vx = x + leftW + pad; // the vertical divider
-            sr.renderi(null, vx, y + pad, 1, h - pad * 2, 1f, 1f, 1f, 0.3f, null);
+            quad(vx, y + pad, 1, h - pad * 2, 1f, 1f, 1f, 0.3f);
             fx = vx + 1 + pad;
             fw = flameColW;
             ty = y + pad;
          } else {
-            ty = divider(sr, x, ty, leftW, pad);
+            ty = divider(x, ty, leftW, pad);
             fx = x + pad;
             fw = leftW - pad * 2;
          }
-         tm.DrawString(font, fx, ty, fit(tm, font, fTitle, fw), 1.0, 1.0, 1.0, 1.0);
+         text(fx, ty, fit(tm, font, fTitle, fw), 1.0, 1.0, 1.0);
          ty += lineH;
          int bottom = ty + flameRows * flameRowH;
-         sr.renderi(null, fx, ty, fw, flameRows * flameRowH, 0f, 0f, 0f, 0.6f, null); // darker backing: the boxes read against the world
+         quad(fx, ty, fw, flameRows * flameRowH, 0f, 0f, 0f, 0.6f); // darker backing: the boxes read against the world
          for (FlameBox b : flame) {
             int bx = fx + Math.round(b.x0 * fw);
             int bw = Math.round(b.x1 * fw) - Math.round(b.x0 * fw);
             if (bw < 3 || b.depth >= flameRows) {
-               continue; // one quad per box every frame: the overlay's own cost shows up as "overlay" in the tree
+               continue; // one quad per box per frame: the overlay's own cost shows up as "overlay" in the tree
             }
             int by = bottom - (b.depth + 1) * flameRowH;
             float[] c = b.color;
-            sr.renderi(null, bx, by + 1, bw - 1, flameRowH - 2, c[0] * b.shade, c[1] * b.shade, c[2] * b.shade, 0.9f, null);
+            quad(bx, by + 1, bw - 1, flameRowH - 2, c[0] * b.shade, c[1] * b.shade, c[2] * b.shade, 0.9f);
             if (bw > 12 && bw >= labelWidth(tm, font, b.name) + 6) {
-               tm.DrawString(font, bx + 3, by, b.name, 0.05, 0.05, 0.05, 1.0);
+               text(bx + 3, by, b.name, 0.05, 0.05, 0.05);
             }
          }
       }

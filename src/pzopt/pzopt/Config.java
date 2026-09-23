@@ -366,6 +366,7 @@ public final class Config {
    public static final int LIGHT_SWITCH_CHECK_FRAMES = integer("lightSwitchCheckFrames", 15);
    public static final int DEV_REDRAW_FRAME = integer("devRedrawFrame", 0);
    public static final boolean DEV_WORLD_SOUND_TIMING = bool("devWorldSoundTiming", false); // dev: per-section nanoTime totals of WorldSoundManager.addSound (pzoptTiming())
+   public static final boolean DEV_PROFILE_LOG_OFF = bool("devProfileLogOff", false); // dev: harness runs sample the game-thread stack only while the overlay is shown (baseline for the overlay cost)
    public static final boolean DEV_CUTAWAY_LOG = bool("devCutawayLog", false); // dev: roof hide/show decisions per frame in the log
    public static final boolean GPU_SECTIONS = bool("gpuSections", false); // measurement only: GPU time per frame section in the log
    public static final boolean DEV_WEATHER_FX_OFF = bool("devWeatherFxOff", false); // measurement only: skip the weather FX pass
@@ -509,11 +510,14 @@ public final class Config {
    public static final boolean OVERLAY = bool("overlay", false);
    public static final boolean OVERLAY_LOG = bool("overlayLog", false);
    // The overlay's elements, each a dropdown on the Optimizations tab: "off" or the element's own options.
-   public static final String OVERLAY_STATS = string("overlayStats", "full"); // off | fps (the fps line) | tails (+ p99 / jitter lines) | full (+ utilization)
+   public static final String OVERLAY_STATS = string("overlayStats", "tails"); // off | fps (the fps line) | tails (+ p99 / jitter lines) | full (+ utilization); tails by default since 2026-09-23 (overlay cost pass)
    public static final String OVERLAY_TREE = string("overlayTree", "5"); // the game-thread tree: off | 0 (phases only) | 3 | 5 | 8 sub-phases per phase
    public static final String OVERLAY_VERDICT = string("overlayVerdict", "detailed"); // off | short ("GPU bound") | detailed (+ the two biggest game-thread sub-phases)
    public static final String OVERLAY_GRAPH = string("overlayGraph", "240"); // the frame-time graph: off | 240 | 480 | 960 frames (2 px each)
-   public static final String OVERLAY_FLAME = string("overlayFlame", "right"); // the game-thread flame graph: off | right (900 px column) | right-wide (1400) | below (under the frame graph)
+   public static final String OVERLAY_FLAME = string("overlayFlame", "off"); // the game-thread flame graph: off | right (900 px column) | right-wide (1400) | below (under the frame graph); off by default since 2026-09-23 (the heaviest element)
+   public static final boolean OVERLAY_TEXTURE = bool("overlayTexture", true); // draw the panel into a texture at each 4 Hz refresh, one quad per frame (Overlay.renderToTexture); false = every glyph as a sprite every frame
+   public static final int OVERLAY_REFRESH_MS = integer("overlayRefreshMs", 250); // how often the overlay's numbers, tree and texture are refreshed
+   public static final int OVERLAY_GRAPH_HZ = integer("overlayGraphHz", 0); // frame-graph redraws per second into the overlay texture; 0 = drawn live every frame (default: 30 Hz measured no cheaper on the Mac)
    public static final int OVERLAY_FLAME_DEPTH = integer("overlayFlameDepth", 24); // rows of the flame graph (frames from GameWindow.frameStep up)
    public static final int GAME_THREAD_PROFILE_HZ = integer("gameThreadProfileHz", 100); // game-thread stack samples per second (10..1000); sampling runs when the tree, the flame graph, the detailed verdict or the frame log wants it
    public static final int OVERLAY_KEY = integer("overlayKey", 67); // LWJGL 2 code, 67 = F9; used when the Lua binding is absent
