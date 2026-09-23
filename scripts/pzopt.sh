@@ -102,6 +102,24 @@ PYEOF
   rm -rf "$PZ_DIR/pzopt/aot"
 }
 
+reset_gc() {  # undo pzopt.GcChoice's launcher switch (-Dpzopt.gc=g1 marker: G1 back to ZGC, our pause target removed)
+  [[ -f "$1" ]] && command -v python3 >/dev/null || return 0
+  python3 - "$1" <<'PYEOF'
+import json,sys
+p=sys.argv[1]; j=json.load(open(p)); ch=[False]
+M,MP="-Dpzopt.gc=g1","-Dpzopt.gc=g1,pause"
+def fix(a):
+    if M not in a and MP not in a: return a
+    if MP in a: a=[x for x in a if not x.startswith("-XX:MaxGCPauseMillis=")]
+    a=[x for x in a if x not in (M,MP)]
+    ch[0]=True; return ["-XX:+UseZGC" if x=="-XX:+UseG1GC" else x for x in a]
+if "vmArgs" in j: j["vmArgs"]=fix(j["vmArgs"])
+for v in j.values():
+    if isinstance(v,dict) and "vmArgs" in v: v["vmArgs"]=fix(v["vmArgs"])
+if ch[0]: json.dump(j,open(p,"w"),indent="\t"); print("launcher: pzopt's G1 switch undone (back to the launcher's ZGC)")
+PYEOF
+}
+
 install_overrides() {
   reset_aot
   check
@@ -132,6 +150,7 @@ install_overrides() {
 
 uninstall_overrides() {
   reset_aot
+  reset_gc "$PZ_DIR/ProjectZomboid64.json"
   [[ -f "$MANIFEST" ]] || { echo "not installed (no $MANIFEST)"; return 0; }
   local n=0
   while read -r rel sha; do

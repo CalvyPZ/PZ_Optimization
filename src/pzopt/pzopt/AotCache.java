@@ -91,6 +91,7 @@ public final class AotCache {
          } catch (Throwable e) {
             Log.warn("aot: " + e);
          }
+         GcChoice.step(); // the launcher's collector (gcMode), on this thread so the two JSON writers never overlap
       }, "pzopt-aot");
       t.setDaemon(true);
       t.start();

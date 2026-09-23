@@ -1784,8 +1784,8 @@ local PROFILES = {
            .. "times a second (the lighting thread and the Lua UI were the next biggest users of the four cores). "
            .. "Everything else goes back to the build's default. 120 km/h drive 44 -> 68 fps, walking 49 -> 81 "
            .. "(p99 80 -> 40 ms / 69 -> 30 ms). It also turns on texture compression (Display page), which kept a 4 GB "
-           .. "graphics card from filling up and the machine from swapping (worst frame 292 -> 120 ms, 2026-09-23). The "
-           .. "launcher's G1 collector JSON is needed on top. See docs/results.md.",
+           .. "graphics card from filling up and the machine from swapping (worst frame 292 -> 120 ms, 2026-09-23). The G1 "
+           .. "collector these numbers need is now the default (gcMode). See docs/results.md.",
         values = LOW_END_VALUES,
         stock = LOW_END_STOCK,
     },
@@ -1795,8 +1795,8 @@ local PROFILES = {
            .. "pixels) and scaled back up with AMD FidelityFX Super Resolution 1.0, which runs on any GPU; the "
            .. "interface, text and cursor stay at full resolution. For a machine whose GPU is the wall as well as "
            .. "its CPU: measured on the same Core i5-6300HQ / GTX 960M at 1920x1080 (2026-09-22, docs/results.md) "
-           .. "the GPU-bound scenes gain the most. Everything else goes back to the build's default; the launcher's "
-           .. "G1 collector JSON is needed on top.",
+           .. "the GPU-bound scenes gain the most. Everything else goes back to the build's default; G1 "
+           .. "collector these numbers need is now the default (gcMode).",
         values = withValues(LOW_END_VALUES, { upscaler = "fsr1", upscalerQuality = "quality" }),
         stock = LOW_END_STOCK,
     },

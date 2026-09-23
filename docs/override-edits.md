@@ -2974,3 +2974,17 @@ overhead inflated them; without it the whole main menu builds in 378 ms eager vs
 share first-time UI costs, so deferring one moves them to the next. Not worth depending on six vanilla screens' call
 patterns. The `menu_check` harness rig from that test stays.
 
+
+### pzopt.GcChoice (`gcMode`, `gcPauseMs`; not a game class, launcher JSON)
+
+The game's launcher JSON starts the JVM with ZGC. Measured on the walk bench (2026-09-23, same build, two runs each):
+4-core Dell G1 ~+10 % fps and half the frames over 100 ms; 12-core flip 145-147 -> 162 fps, p99.9 45-56 -> 36-42 ms;
+M1 Pro Mac (at its 60 fps cap) p99.9 102-103 -> 87-91 ms; 16-core desktop at the 240 cap the same. G1 never lost, so
+by the maintainer's decision `gcMode=g1` is the default: on boot, on AotCache's thread (the other launcher-JSON writer,
+so the two never overlap), `-XX:+UseZGC` becomes `-XX:+UseG1GC` in the top-level and per-platform vmArgs for the next
+launch, with the marker `-Dpzopt.gc=g1` (`-Dpzopt.gc=g1,pause` when `gcPauseMs` added a `-XX:MaxGCPauseMillis`). The
+pause targets 25 / 50 ms measured inside the noise on all four machines, so the default adds none. `gcMode=stock`
+(or `auto` above `gcG1Cores`) and the uninstallers (`reset_gc` in install.sh / scripts/pzopt.sh, `Reset-Gc` in
+install.ps1) undo it by the marker. Harness runs keep choosing their own collector (`run.sh --gc`). The macOS app keeps
+its collector in the signed bundle's Info.plist and is not changed. Checks: tests/pzopt/GcChoiceTest.java,
+harness/gcchoice-check.sh (a real launch switches a ZGC JSON, reset_gc restores it).

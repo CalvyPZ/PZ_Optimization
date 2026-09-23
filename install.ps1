@@ -105,6 +105,30 @@ function Reset-Aot {
   $aotDir = Join-Path $Dir 'pzopt\aot'
   if (Test-Path -LiteralPath $aotDir) { Remove-Item -LiteralPath $aotDir -Recurse -Force }
 }
+# Undo pzopt.GcChoice's launcher switch (marker -Dpzopt.gc=g1[,pause]): G1 back to ZGC, the pause target it added removed.
+function Reset-Gc {
+  if (-not (Test-Path -LiteralPath $Json)) { return }
+  $j = Get-Content -LiteralPath $Json -Raw | ConvertFrom-Json
+  $m = '-Dpzopt.gc=g1'; $mp = '-Dpzopt.gc=g1,pause'; $changed = $false
+  $fix = {
+    param($a)
+    $a = @($a)
+    if (-not (($a -contains $m) -or ($a -contains $mp))) { return ,$a }
+    if ($a -contains $mp) { $a = @($a | Where-Object { $_ -notlike '-XX:MaxGCPauseMillis=*' }) }
+    $a = @($a | Where-Object { $_ -ne $m -and $_ -ne $mp } | ForEach-Object { if ($_ -eq '-XX:+UseG1GC') { '-XX:+UseZGC' } else { $_ } })
+    $script:gcChanged = $true
+    return ,$a
+  }
+  $script:gcChanged = $false
+  if ($j.vmArgs) { $j.vmArgs = & $fix $j.vmArgs }
+  foreach ($p in $j.PSObject.Properties) {
+    if ($p.Value -is [psobject] -and $p.Value.PSObject.Properties['vmArgs']) { $p.Value.vmArgs = & $fix $p.Value.vmArgs }
+  }
+  if ($script:gcChanged) {
+    [IO.File]::WriteAllText($Json, ($j | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
+    Write-Host "launcher: pzopt's G1 switch undone (back to the launcher's ZGC)"
+  }
+}
 $Rev = Get-JarRevision
 
 # --- status / uninstall ----------------------------------------------------------------
@@ -132,6 +156,7 @@ if ($Status) {
 
 if ($Uninstall) {
   Reset-Aot
+  Reset-Gc
   $filesTxt = Join-Path $Dir 'pzopt-files.txt'
   if (Test-Path $Manifest) { $list = Get-Content $Manifest | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split ' ')[0] } }
   elseif (Test-Path $filesTxt) { $list = Get-Content $filesTxt | Where-Object { $_ } }
